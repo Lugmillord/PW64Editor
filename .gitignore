@@ -426,3 +426,10 @@ FodyWeavers.xsd
 
 # Official VS Code C# Dev Kit Extension exclusion
 #*.lscache
+
+# N64 ROMs and patches - never commit copyrighted game data!
+*.z64
+*.v64
+*.n64
+*.bps
+roms/

@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="src/PW64Editor.Cli/PW64Editor.Cli.csproj" />
+  <Project Path="src/PW64Editor.Core/PW64Editor.Core.csproj" />
+  <Project Path="tests/PW64Editor.Core.Tests/PW64Editor.Core.Tests.csproj" />
+</Solution>
