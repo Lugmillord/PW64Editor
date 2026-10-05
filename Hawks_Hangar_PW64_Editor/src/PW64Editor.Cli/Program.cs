@@ -1,1 +1,49 @@
-﻿Console.WriteLine("Hello, World!");
+using PW64Editor.Cli.Commands;
+
+// Entry point of the Hawk's Hangar command line tool.
+// Usage: pw64cli <command> [arguments]
+//
+// This file uses "top-level statements": the code below is the body of Main().
+// The variable "args" is provided automatically and contains the command line arguments.
+
+if (args.Length == 0 || args[0] is "help" or "-h" or "--help")
+{
+    PrintUsage();
+    return ExitCodes.Success;
+}
+
+string command = args[0].ToLowerInvariant();
+string[] commandArgs = args[1..]; // everything after the command name
+
+try
+{
+    return command switch
+    {
+        "info" => InfoCommand.Run(commandArgs),
+        _ => UnknownCommand(command),
+    };
+}
+catch (Exception ex)
+{
+    // Last line of defense: never show a raw stack trace to the user.
+    Console.Error.WriteLine($"Unexpected error: {ex.Message}");
+    return ExitCodes.UnexpectedError;
+}
+
+static int UnknownCommand(string command)
+{
+    Console.Error.WriteLine($"Unknown command: {command}");
+    PrintUsage();
+    return ExitCodes.InvalidArguments;
+}
+
+static void PrintUsage()
+{
+    Console.WriteLine("Hawk's Hangar - Pilotwings 64 ROM hacking tool");
+    Console.WriteLine();
+    Console.WriteLine("Usage: pw64cli <command> [arguments]");
+    Console.WriteLine();
+    Console.WriteLine("Commands:");
+    Console.WriteLine("  info <rom>    Show header information and verify the ROM against known clean dumps");
+    Console.WriteLine("  help          Show this help text");
+}
