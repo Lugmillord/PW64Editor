@@ -23,6 +23,11 @@ try
         "fixcrc" => FixCrcCommand.Run(commandArgs),
         "mio0-scan" => Mio0Commands.Scan(commandArgs),
         "mio0-extract" => Mio0Commands.Extract(commandArgs),
+        "fs-list" => FileSystemCommands.List(commandArgs),
+        "fs-extract" => FileSystemCommands.Extract(commandArgs),
+        "fs-chunks" => FileSystemCommands.Chunks(commandArgs),
+        "fs-replace" => BuildCommands.Replace(commandArgs),
+        "rebuild" => BuildCommands.Rebuild(commandArgs),
         _ => UnknownCommand(command),
     };
 }
@@ -52,5 +57,13 @@ static void PrintUsage()
     Console.WriteLine("  mio0-scan <rom>            List all MIO0-compressed blocks in the ROM");
     Console.WriteLine("  mio0-extract <rom> <offset> <output>");
     Console.WriteLine("                             Decompress the MIO0 block at <offset> to a file");
+    Console.WriteLine("  fs-list <rom>              List all game files from the file table");
+    Console.WriteLine("  fs-extract <rom> <folder>  Export all game files into a folder");
+    Console.WriteLine("  fs-chunks <rom> <index>    Show the chunks inside one game file");
+    Console.WriteLine("  fs-replace <rom> <index> <file> <output>");
+    Console.WriteLine("                             Replace one game file and build a new ROM");
+    Console.WriteLine("  rebuild <rom> <output> [--recompress]");
+    Console.WriteLine("                             Rebuild the ROM from its files (byte-identical without");
+    Console.WriteLine("                             the flag; --recompress repacks every file as a stress test)");
     Console.WriteLine("  help                       Show this help text");
 }

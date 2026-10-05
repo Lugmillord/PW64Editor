@@ -17,7 +17,7 @@ internal static class Mio0Commands
             return ExitCodes.InvalidArguments;
         }
 
-        if (!TryLoadRom(args[0], out N64Rom? rom))
+        if (!CommandHelpers.TryLoadRom(args[0], out N64Rom? rom))
         {
             return ExitCodes.InvalidRom;
         }
@@ -46,7 +46,7 @@ internal static class Mio0Commands
             return ExitCodes.InvalidArguments;
         }
 
-        if (!TryLoadRom(args[0], out N64Rom? rom))
+        if (!CommandHelpers.TryLoadRom(args[0], out N64Rom? rom))
         {
             return ExitCodes.InvalidRom;
         }
@@ -72,21 +72,5 @@ internal static class Mio0Commands
         File.WriteAllBytes(args[2], data);
         Console.WriteLine($"Decompressed {compressedLength:N0} -> {data.Length:N0} bytes, saved to {args[2]}");
         return ExitCodes.Success;
-    }
-
-    /// <summary>Loads a ROM and prints a friendly error on failure.</summary>
-    private static bool TryLoadRom(string path, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out N64Rom? rom)
-    {
-        try
-        {
-            rom = N64Rom.Load(path);
-            return true;
-        }
-        catch (Exception ex) when (ex is InvalidRomException or IOException or UnauthorizedAccessException)
-        {
-            Console.Error.WriteLine($"Cannot load ROM: {ex.Message}");
-            rom = null;
-            return false;
-        }
     }
 }

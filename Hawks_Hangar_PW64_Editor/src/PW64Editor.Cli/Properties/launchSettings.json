@@ -2,7 +2,7 @@
   "profiles": {
     "PW64Editor.Cli": {
       "commandName": "Project",
-      "commandLineArgs": "info \"C:\\Users\\dahli\\source\\repos\\PW64Editor\\roms\\Pilotwings 64 (USA).z64\""
+      "commandLineArgs": "fs-chunks \"C:\\Users\\dahli\\source\\repos\\PW64Editor\\roms\\Pilotwings 64 (USA).z64\" 1063"
     }
   }
 }

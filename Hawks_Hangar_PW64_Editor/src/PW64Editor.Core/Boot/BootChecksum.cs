@@ -21,9 +21,10 @@ public readonly record struct BootChecksumValues(uint Crc1, uint Crc2)
 /// to boot (black screen). Emulators often ignore this, real hardware never does.
 /// </para>
 /// <para>
-/// So whenever we change anything inside that 1 MiB (typically code patches), we must
-/// recompute and store the checksum. Changes beyond 0x101000 (e.g. most game assets)
-/// do not affect it.
+/// So whenever we change anything inside that 1 MiB, we must recompute and store the
+/// checksum. In Pilotwings 64 this range contains the game code, but also the file table
+/// (0xDE720) and the first game files (0xDF5B0 onwards), so file system changes can affect
+/// it too. Changes beyond 0x101000 do not.
 /// </para>
 /// <para>
 /// This is a port of the well-known algorithm from n64crc.c (based on uCON64), which
