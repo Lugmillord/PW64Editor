@@ -1,3 +1,4 @@
+using PW64Editor.Core.Boot;
 using PW64Editor.Core.Rom;
 using PW64Editor.Core.Verification;
 
@@ -30,6 +31,7 @@ internal static class InfoCommand
         }
 
         PrintRomInfo(rom);
+        PrintBootInfo(rom);
 
         RomVerificationResult result = RomVerifier.Verify(rom);
         PrintVerification(result);
@@ -53,6 +55,33 @@ internal static class InfoCommand
         Console.WriteLine($"  CRC1 / CRC2   : 0x{h.Crc1:X8} / 0x{h.Crc2:X8}");
         Console.WriteLine($"  Clock rate    : 0x{h.ClockRate:X8}");
         Console.WriteLine($"  libultra      : 0x{h.LibultraRelease:X8}");
+        Console.WriteLine();
+    }
+
+    private static void PrintBootInfo(N64Rom rom)
+    {
+        CicType cic = rom.DetectCic();
+
+        Console.WriteLine("Boot");
+        Console.WriteLine($"  CIC           : {CicDetector.GetDisplayName(cic)}");
+
+        if (cic == CicType.Unknown)
+        {
+            Console.WriteLine("  Checksum      : cannot be verified (unknown CIC)");
+        }
+        else
+        {
+            BootChecksumValues computed = rom.ComputeBootChecksum();
+            bool valid = computed == BootChecksum.ReadFromHeader(rom.Data);
+
+            ConsoleColor previous = Console.ForegroundColor;
+            Console.ForegroundColor = valid ? ConsoleColor.Green : ConsoleColor.Red;
+            Console.WriteLine(valid
+                ? "  Checksum      : OK"
+                : $"  Checksum      : INVALID (expected {computed}) - will not boot on real hardware!");
+            Console.ForegroundColor = previous;
+        }
+
         Console.WriteLine();
     }
 

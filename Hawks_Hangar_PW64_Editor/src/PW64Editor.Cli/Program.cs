@@ -20,6 +20,7 @@ try
     return command switch
     {
         "info" => InfoCommand.Run(commandArgs),
+        "fixcrc" => FixCrcCommand.Run(commandArgs),
         _ => UnknownCommand(command),
     };
 }
@@ -44,6 +45,7 @@ static void PrintUsage()
     Console.WriteLine("Usage: pw64cli <command> [arguments]");
     Console.WriteLine();
     Console.WriteLine("Commands:");
-    Console.WriteLine("  info <rom>    Show header information and verify the ROM against known clean dumps");
-    Console.WriteLine("  help          Show this help text");
+    Console.WriteLine("  info <rom>                 Show header information and verify the ROM");
+    Console.WriteLine("  fixcrc <input> <output>    Recalculate the boot checksum and save to a new file");
+    Console.WriteLine("  help                       Show this help text");
 }

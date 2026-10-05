@@ -5,6 +5,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <AssemblyName>pw64cli</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>

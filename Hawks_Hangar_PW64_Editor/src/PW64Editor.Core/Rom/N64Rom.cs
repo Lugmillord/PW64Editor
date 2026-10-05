@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using PW64Editor.Core.Boot;
 
 namespace PW64Editor.Core.Rom;
 
@@ -29,7 +30,6 @@ public sealed class N64Rom
         Data = data;
         OriginalByteOrder = originalByteOrder;
         FilePath = filePath;
-        Header = RomHeader.Parse(data);
     }
 
     /// <summary>The complete ROM contents in big-endian order.</summary>
@@ -41,8 +41,15 @@ public sealed class N64Rom
     /// <summary>The path the ROM was loaded from, or <c>null</c> if created from memory.</summary>
     public string? FilePath { get; }
 
-    /// <summary>The parsed ROM header.</summary>
-    public RomHeader Header { get; }
+    /// <summary>
+    /// The parsed ROM header.
+    /// </summary>
+    /// <remarks>
+    /// The header is parsed from <see cref="Data"/> on every access, so it always reflects the
+    /// current contents (e.g. after <see cref="UpdateBootChecksum"/>). Parsing 64 bytes is cheap.
+    /// If you need several fields at once, store the result in a local variable.
+    /// </remarks>
+    public RomHeader Header => RomHeader.Parse(Data);
 
     /// <summary>Size of the ROM in bytes.</summary>
     public int Size => Data.Length;
@@ -87,6 +94,51 @@ public sealed class N64Rom
     public string ComputeSha1()
     {
         return Convert.ToHexStringLower(SHA1.HashData(Data));
+    }
+
+    /// <summary>
+    /// Identifies the CIC lockout chip this ROM was built for, based on its IPL3 boot code.
+    /// </summary>
+    public CicType DetectCic()
+    {
+        return CicDetector.Detect(Data);
+    }
+
+    /// <summary>
+    /// Computes the boot checksum the console expects for the current data.
+    /// </summary>
+    /// <exception cref="NotSupportedException">The CIC type could not be identified.</exception>
+    public BootChecksumValues ComputeBootChecksum()
+    {
+        return BootChecksum.Compute(Data, DetectCic());
+    }
+
+    /// <summary>
+    /// Returns true if the CRC1/CRC2 values in the header match the current data.
+    /// A ROM with a wrong checksum will not boot on real hardware.
+    /// </summary>
+    /// <exception cref="NotSupportedException">The CIC type could not be identified.</exception>
+    public bool IsBootChecksumValid()
+    {
+        return ComputeBootChecksum() == BootChecksum.ReadFromHeader(Data);
+    }
+
+    /// <summary>
+    /// Recomputes the boot checksum and writes it into the header.
+    /// Call this after every change to ROM data, before saving.
+    /// </summary>
+    /// <returns>True if the header values changed, false if they were already correct.</returns>
+    /// <exception cref="NotSupportedException">The CIC type could not be identified.</exception>
+    public bool UpdateBootChecksum()
+    {
+        BootChecksumValues computed = ComputeBootChecksum();
+        if (computed == BootChecksum.ReadFromHeader(Data))
+        {
+            return false;
+        }
+
+        BootChecksum.WriteToHeader(Data, computed);
+        return true;
     }
 
     /// <summary>
