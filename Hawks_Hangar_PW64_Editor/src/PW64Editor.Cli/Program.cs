@@ -21,6 +21,8 @@ try
     {
         "info" => InfoCommand.Run(commandArgs),
         "fixcrc" => FixCrcCommand.Run(commandArgs),
+        "mio0-scan" => Mio0Commands.Scan(commandArgs),
+        "mio0-extract" => Mio0Commands.Extract(commandArgs),
         _ => UnknownCommand(command),
     };
 }
@@ -47,5 +49,8 @@ static void PrintUsage()
     Console.WriteLine("Commands:");
     Console.WriteLine("  info <rom>                 Show header information and verify the ROM");
     Console.WriteLine("  fixcrc <input> <output>    Recalculate the boot checksum and save to a new file");
+    Console.WriteLine("  mio0-scan <rom>            List all MIO0-compressed blocks in the ROM");
+    Console.WriteLine("  mio0-extract <rom> <offset> <output>");
+    Console.WriteLine("                             Decompress the MIO0 block at <offset> to a file");
     Console.WriteLine("  help                       Show this help text");
 }
