@@ -1,0 +1,64 @@
+<Window x:Class="PW64Editor.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Hawk's Hangar"
+        Width="1000" Height="680"
+        WindowStartupLocation="CenterScreen"
+        PreviewKeyDown="OnPreviewKeyDown">
+    <DockPanel>
+        <Menu DockPanel.Dock="Top" Padding="2">
+            <MenuItem Header="_File">
+                <MenuItem Header="_New project…" InputGestureText="Ctrl+N" Click="OnNewProject" />
+                <MenuItem Header="_Open project…" InputGestureText="Ctrl+O" Click="OnOpenProject" />
+                <MenuItem x:Name="RecentMenu" Header="Recent projects" SubmenuOpened="OnRecentMenuOpened">
+                    <!-- Placeholder, so the submenu arrow is shown. Filled when opened. -->
+                    <MenuItem Header="(none)" IsEnabled="False" />
+                </MenuItem>
+                <MenuItem Header="Open project _folder" Click="OnOpenProjectFolder" />
+                <MenuItem Header="_Close project" Click="OnCloseProject" />
+                <Separator />
+                <MenuItem Header="Project _settings…" Click="OnProjectSettings" />
+                <MenuItem Header="_Game files…" InputGestureText="Ctrl+G" Click="OnGameFiles" />
+                <Separator />
+                <MenuItem Header="_Build hack ROM…" InputGestureText="Ctrl+S" Click="OnBuild" />
+                <MenuItem Header="_Export BPS patch…" Click="OnExportPatch" />
+                <MenuItem Header="_Restore points…" Click="OnRestorePoints" />
+                <Separator />
+                <MenuItem Header="ROM _info…" Click="OnRomInfo" />
+                <MenuItem Header="_Apply BPS patch…" Click="OnApplyPatch" />
+                <MenuItem Header="Change clean ROM…" Click="OnChangeCleanRom" />
+                <Separator />
+                <MenuItem Header="_Developer tools">
+                    <MenuItem Header="Scan MIO0 blocks" Click="OnScanMio0" />
+                    <MenuItem Header="Extract MIO0 block…" Click="OnExtractMio0" />
+                    <MenuItem Header="Show file chunks…" Click="OnShowChunks" />
+                    <MenuItem Header="Create BPS patch from two ROMs…" Click="OnCreatePatchFromRoms" />
+                    <MenuItem Header="Build stress test ROM…" Click="OnStressTest" />
+                </MenuItem>
+                <Separator />
+                <MenuItem Header="E_xit" Click="OnExit" />
+            </MenuItem>
+        </Menu>
+
+        <StatusBar DockPanel.Dock="Bottom" Padding="6,2">
+            <StatusBarItem>
+                <TextBlock x:Name="StatusText" Text="Ready" />
+            </StatusBarItem>
+            <Separator />
+            <StatusBarItem>
+                <TextBlock x:Name="HackRomText" Foreground="{StaticResource MutedTextBrush}" />
+            </StatusBarItem>
+        </StatusBar>
+
+        <!-- The editing area. Content editors will live here; for now it explains the next step. -->
+        <Grid Background="#F3F6F9">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="460">
+                <TextBlock x:Name="ProjectNameText" FontSize="24" FontWeight="SemiBold" TextAlignment="Center" />
+                <TextBlock x:Name="ProjectFolderText" Margin="0,4,0,18" TextAlignment="Center"
+                           Foreground="{StaticResource MutedTextBrush}" TextTrimming="CharacterEllipsis" />
+                <TextBlock TextWrapping="Wrap" TextAlignment="Center" Foreground="{StaticResource MutedTextBrush}"
+                           Text="Add game files to the project with File › Game files, edit them, then build the hack ROM with Ctrl+S." />
+            </StackPanel>
+        </Grid>
+    </DockPanel>
+</Window>

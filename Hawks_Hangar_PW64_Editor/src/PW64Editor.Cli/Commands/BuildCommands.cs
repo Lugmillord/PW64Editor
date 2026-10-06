@@ -3,6 +3,7 @@ using PW64Editor.Core.FileSystem;
 using PW64Editor.Core.Iff;
 using PW64Editor.Core.Rom;
 using PW64Editor.Core.Verification;
+using PW64Editor.Core.Workspace;
 
 namespace PW64Editor.Cli.Commands;
 
@@ -57,7 +58,7 @@ internal static class BuildCommands
 
         if (dummySize is { } size)
         {
-            files.Add(CreateDummyFile(size));
+            files.Add(DeveloperTools.CreateDummyFile(size));
         }
 
         if (!TryBuild(rom, files, options, out RomBuildResult? result))
@@ -188,18 +189,6 @@ internal static class BuildCommands
             fs = null;
             return false;
         }
-    }
-
-    /// <summary>
-    /// Creates a file the game never loads: an unknown type ("DUMY") counts as a user file and
-    /// is appended last, so it gets the highest user file index, which no game code requests.
-    /// Every existing file keeps its index.
-    /// </summary>
-    private static GameFile CreateDummyFile(int approximateSize)
-    {
-        int payloadSize = Math.Max(4, approximateSize / 4 * 4); // keep the file size a multiple of 4
-        byte[] data = IffWriter.BuildForm("DUMY", [IffWriter.BuildChunk("PAD ", new byte[payloadSize])]);
-        return new GameFile(0, "DUMY", FileTypeLimits.UserFileGroup, 0, 0, data);
     }
 
     private static RomBuildOptions ParseBuildOptions(ref string[] args)

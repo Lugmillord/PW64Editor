@@ -1,0 +1,34 @@
+<Window x:Class="PW64Editor.App.Views.RestorePointsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Restore points"
+        Width="620" Height="440"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner">
+    <DockPanel Margin="12">
+        <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,10"
+                   Text="A restore point saves the project files and the hack ROM. Restoring brings both back to that state." />
+
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button Content="Create restore point" Click="OnCreate" Style="{StaticResource DialogButton}" />
+            <Button x:Name="RestoreButton" Content="Restore" Click="OnRestore" Style="{StaticResource DialogButton}" />
+            <Button x:Name="DeleteButton" Content="Delete" Click="OnDelete" Style="{StaticResource DialogButton}" />
+            <Button Content="Close" IsCancel="True" Click="OnClose" Style="{StaticResource DialogButton}" />
+        </StackPanel>
+
+        <Grid>
+            <DataGrid x:Name="PointGrid" AutoGenerateColumns="False" IsReadOnly="True" SelectionMode="Single"
+                      HeadersVisibility="Column" GridLinesVisibility="Horizontal" CanUserAddRows="False"
+                      SelectionChanged="OnSelectionChanged">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Created" Binding="{Binding Created}" Width="*" />
+                    <DataGridTextColumn Header="Files" Binding="{Binding FileCount}" Width="70" />
+                    <DataGridTextColumn Header="Hack ROM" Binding="{Binding HasRom}" Width="90" />
+                </DataGrid.Columns>
+            </DataGrid>
+            <TextBlock x:Name="EmptyText" HorizontalAlignment="Center" VerticalAlignment="Center"
+                       Foreground="{StaticResource MutedTextBrush}"
+                       Text="No restore points yet. Create one before trying something risky." />
+        </Grid>
+    </DockPanel>
+</Window>

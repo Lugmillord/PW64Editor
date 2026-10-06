@@ -1,0 +1,23 @@
+<Window x:Class="PW64Editor.App.Dialogs.BuildDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Build hack ROM"
+        Width="520" SizeToContent="Height"
+        ResizeMode="NoResize" ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner">
+    <StackPanel Margin="20">
+        <TextBlock Text="The hack ROM will be built from the clean ROM and your project, and written to:"
+                   TextWrapping="Wrap" />
+        <TextBlock x:Name="PathText" Margin="0,6,0,0" FontWeight="SemiBold" TextWrapping="Wrap" />
+        <TextBlock Text="An existing file there is replaced." Margin="0,6,0,0"
+                   Foreground="{StaticResource MutedTextBrush}" />
+
+        <CheckBox x:Name="RestorePointBox" Margin="0,16,0,0"
+                  Content="Create a restore point (project files and hack ROM)" />
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
+            <Button Content="Build" Click="OnBuild" IsDefault="True" Style="{StaticResource DialogButton}" />
+            <Button Content="Cancel" IsCancel="True" Style="{StaticResource DialogButton}" />
+        </StackPanel>
+    </StackPanel>
+</Window>

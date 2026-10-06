@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>PW64Editor.App</RootNamespace>
+    <AssemblyName>HawksHangar</AssemblyName>
+    <Product>Hawk's Hangar</Product>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\PW64Editor.Core\PW64Editor.Core.csproj" />
+  </ItemGroup>
+
+</Project>
