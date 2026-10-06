@@ -104,7 +104,7 @@ internal static class FileSystemCommands
     {
         Console.WriteLine($"{fs.Files.Count} files, {fs.TotalSize:N0} bytes");
         Console.WriteLine($"File system: 0x{fs.Layout.FileSystemOffset:X} - 0x{fs.EndOffset:X}, " +
-                          $"{fs.FreeSpace:N0} bytes free before audio data at 0x{fs.Layout.FileSystemLimit:X}");
+                          $"{fs.FreeSpace:N0} bytes free before audio data at 0x{fs.AudioOffset:X}");
         if (fs.SkippedEntries > 0)
         {
             Console.WriteLine($"{fs.SkippedEntries} empty table entries skipped");

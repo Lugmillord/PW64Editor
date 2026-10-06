@@ -158,24 +158,6 @@ public class RomBuilderTests
                      result.Rom.Data[RomLayout.PilotwingsUsa.FileSystemLimit..]);
     }
 
-    [RealRomFact]
-    public void RealRom_GrowingAFile_FailsBecauseAudioFollowsDirectly()
-    {
-        N64Rom rom = N64Rom.Load(TestRomLocator.RomPath!);
-        GameFileSystem fs = GameFileSystem.Read(rom, RomLayout.PilotwingsUsa);
-        var files = fs.Files.ToList();
-        GameFile mission = files.First(f => f.FileType == "UPWT");
-        int position = files.IndexOf(mission);
-
-        // Append a 16-byte dummy chunk: only 4 bytes are free before the audio data.
-        IffForm form = IffForm.Parse(mission.Data);
-        var chunks = form.Chunks.Select(c => mission.Data[c.Offset..(c.Offset + c.TotalSize)]).ToList();
-        chunks.Add(IffWriter.BuildChunk("PAD ", new byte[8]));
-        files[position] = mission with { Data = IffWriter.BuildForm("UPWT", chunks) };
-
-        Assert.Throws<FileSystemFullException>(() => RomBuilder.Build(rom, files, RomLayout.PilotwingsUsa));
-    }
-
     /// <summary>Returns (tag, decompressed data) of every chunk, for content comparisons.</summary>
     private static List<(string Tag, byte[] Data)> ReadAllChunks(byte[] formData)
     {

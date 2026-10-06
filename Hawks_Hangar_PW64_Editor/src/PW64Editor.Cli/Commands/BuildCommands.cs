@@ -15,15 +15,32 @@ internal static class BuildCommands
 {
     public static int Rebuild(string[] args)
     {
-        // Optional flag: recompress every file with our own MIO0 compressor.
-        // This is a stress test: it moves nearly every file, so the output can be tested in an
-        // emulator or on hardware to prove the game accepts our compressed data.
-        bool recompress = args.Contains("--recompress");
-        args = args.Where(a => a != "--recompress").ToArray();
+        // Optional flags:
+        // --recompress      recompress every file with our own MIO0 compressor. A stress test:
+        //                   nearly every file moves, so the output proves in an emulator or on
+        //                   hardware that the game accepts our compressed data.
+        // --relocate-audio  always move the audio data directly behind the file system.
+        //                   Combined with --recompress this really moves it, which tests the
+        //                   code patches for the audio addresses.
+        // --add-dummy <n> append an extra file of about n bytes that the game never loads.
+        //                   Forces the audio to move (and with --expand the ROM to grow),
+        //                   without changing anything the game actually uses.
+        bool recompress = CommandHelpers.ExtractFlag(ref args, "--recompress");
+        RomBuildOptions options = ParseBuildOptions(ref args);
+        int? dummySize;
+        try
+        {
+            dummySize = CommandHelpers.ExtractNumberOption(ref args, "--add-dummy");
+        }
+        catch (ArgumentException ex)
+        {
+            Console.Error.WriteLine(ex.Message);
+            return ExitCodes.InvalidArguments;
+        }
 
         if (args.Length != 2)
         {
-            Console.Error.WriteLine("Usage: pw64cli rebuild <rom> <output> [--recompress]");
+            Console.Error.WriteLine("Usage: pw64cli rebuild <rom> <output> [--recompress] [--relocate-audio] [--expand] [--add-dummy <bytes>]");
             return ExitCodes.InvalidArguments;
         }
 
@@ -34,22 +51,28 @@ internal static class BuildCommands
             return ExitCodes.InvalidArguments;
         }
 
-        IReadOnlyList<GameFile> files = recompress
+        List<GameFile> files = recompress
             ? fs.Files.Select(f => f with { Data = IffWriter.RecompressForm(f.Data) }).ToList()
-            : fs.Files;
+            : fs.Files.ToList();
 
-        if (!TryBuild(rom, files, out RomBuildResult? result))
+        if (dummySize is { } size)
         {
-            return ExitCodes.UnexpectedError;
+            files.Add(CreateDummyFile(size));
+        }
+
+        if (!TryBuild(rom, files, options, out RomBuildResult? result))
+        {
+            return ExitCodes.BuildFailed;
         }
 
         result.Rom.Save(args[1]);
 
-        if (recompress)
+        if (recompress || dummySize is not null || options != RomBuildOptions.Default)
         {
-            Console.WriteLine($"Recompressed and rebuilt {files.Count} files, saved to {args[1]}");
-            Console.WriteLine($"File system size: {fs.TotalSize:N0} -> {files.Sum(f => f.Size):N0} bytes, " +
-                              $"{result.FreeSpace:N0} bytes free before audio data");
+            Console.WriteLine($"Rebuilt {files.Count} files{(recompress ? " (recompressed)" : string.Empty)}" +
+                              $"{(dummySize is not null ? " including a dummy file" : string.Empty)}, saved to {args[1]}");
+            Console.WriteLine($"File system size: {fs.TotalSize:N0} -> {files.Sum(f => f.Size):N0} bytes");
+            PrintLayout(result);
             Console.WriteLine("Test this ROM in an emulator: it should play exactly like the original.");
             return ExitCodes.Success;
         }
@@ -71,9 +94,11 @@ internal static class BuildCommands
 
     public static int Replace(string[] args)
     {
+        RomBuildOptions options = ParseBuildOptions(ref args);
+
         if (args.Length != 4 || !int.TryParse(args[1], out int index))
         {
-            Console.Error.WriteLine("Usage: pw64cli fs-replace <rom> <table index> <new file> <output>");
+            Console.Error.WriteLine("Usage: pw64cli fs-replace <rom> <table index> <new file> <output> [--relocate-audio] [--expand]");
             return ExitCodes.InvalidArguments;
         }
 
@@ -121,9 +146,9 @@ internal static class BuildCommands
         var files = fs.Files.ToList();
         files[position] = original with { Data = newData };
 
-        if (!TryBuild(rom, files, out RomBuildResult? result))
+        if (!TryBuild(rom, files, options, out RomBuildResult? result))
         {
-            return ExitCodes.UnexpectedError;
+            return ExitCodes.BuildFailed;
         }
 
         result.Rom.Save(outputPath);
@@ -134,7 +159,7 @@ internal static class BuildCommands
         Console.WriteLine(result.TableRewritten
             ? "File table was rewritten (sizes changed)."
             : "File table unchanged (same size).");
-        Console.WriteLine($"Free space before audio data: {result.FreeSpace:N0} bytes");
+        PrintLayout(result);
         Console.WriteLine($"Saved to {outputPath}");
         return ExitCodes.Success;
     }
@@ -165,11 +190,38 @@ internal static class BuildCommands
         }
     }
 
-    private static bool TryBuild(N64Rom rom, IReadOnlyList<GameFile> files, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out RomBuildResult? result)
+    /// <summary>
+    /// Creates a file the game never loads: an unknown type ("DUMY") counts as a user file and
+    /// is appended last, so it gets the highest user file index, which no game code requests.
+    /// Every existing file keeps its index.
+    /// </summary>
+    private static GameFile CreateDummyFile(int approximateSize)
+    {
+        int payloadSize = Math.Max(4, approximateSize / 4 * 4); // keep the file size a multiple of 4
+        byte[] data = IffWriter.BuildForm("DUMY", [IffWriter.BuildChunk("PAD ", new byte[payloadSize])]);
+        return new GameFile(0, "DUMY", FileTypeLimits.UserFileGroup, 0, 0, data);
+    }
+
+    private static RomBuildOptions ParseBuildOptions(ref string[] args)
+    {
+        bool relocateAudio = CommandHelpers.ExtractFlag(ref args, "--relocate-audio");
+        bool expand = CommandHelpers.ExtractFlag(ref args, "--expand");
+        return new RomBuildOptions(AlwaysRelocateAudio: relocateAudio, AllowExpansion: expand);
+    }
+
+    private static void PrintLayout(RomBuildResult result)
+    {
+        Console.WriteLine($"File system ends at 0x{result.FileSystemEnd:X}, audio data at 0x{result.AudioOffset:X}" +
+                          (result.AudioRelocated ? " (relocated)" : " (original position)"));
+        Console.WriteLine($"ROM size: {result.Rom.Size / (1024 * 1024)} MiB{(result.Expanded ? " (expanded)" : string.Empty)}, " +
+                          $"room for {result.FreeSpace:N0} more bytes of game files");
+    }
+
+    private static bool TryBuild(N64Rom rom, IReadOnlyList<GameFile> files, RomBuildOptions options, [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out RomBuildResult? result)
     {
         try
         {
-            result = RomBuilder.Build(rom, files, RomLayout.PilotwingsUsa);
+            result = RomBuilder.Build(rom, files, RomLayout.PilotwingsUsa, options);
             return true;
         }
         catch (Exception ex) when (ex is FileSystemFullException or InvalidDataException)

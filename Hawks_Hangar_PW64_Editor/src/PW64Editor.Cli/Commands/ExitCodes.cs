@@ -10,5 +10,6 @@ internal static class ExitCodes
     public const int InvalidArguments = 1;
     public const int InvalidRom = 2;
     public const int VerificationFailed = 3;
+    public const int BuildFailed = 4;
     public const int UnexpectedError = 99;
 }

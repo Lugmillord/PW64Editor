@@ -14,11 +14,12 @@ namespace PW64Editor.Core.FileSystem;
 /// </remarks>
 public sealed class GameFileSystem
 {
-    private GameFileSystem(RomLayout layout, IReadOnlyList<GameFile> files, int skippedEntries)
+    private GameFileSystem(RomLayout layout, IReadOnlyList<GameFile> files, int skippedEntries, int audioOffset)
     {
         Layout = layout;
         Files = files;
         SkippedEntries = skippedEntries;
+        AudioOffset = audioOffset;
     }
 
     /// <summary>The fixed addresses this file system was read with.</summary>
@@ -36,8 +37,15 @@ public sealed class GameFileSystem
     /// <summary>ROM offset right after the last file.</summary>
     public int EndOffset => Layout.FileSystemOffset + TotalSize;
 
+    /// <summary>
+    /// Where the audio data starts in this ROM. Read from the game code, so it reflects a
+    /// relocation done by an earlier build. Equals <see cref="RomLayout.FileSystemLimit"/>
+    /// for an unmodified ROM.
+    /// </summary>
+    public int AudioOffset { get; }
+
     /// <summary>Bytes still free before the file system would run into the audio data.</summary>
-    public int FreeSpace => Layout.FileSystemLimit - EndOffset;
+    public int FreeSpace => AudioOffset - EndOffset;
 
     /// <summary>
     /// Reads the file system of a ROM.
@@ -86,7 +94,8 @@ public sealed class GameFileSystem
             offset += entry.Size;
         }
 
-        return new GameFileSystem(layout, files, skipped);
+        int audioOffset = layout.Audio?.ReadCurrentOffset(data) ?? layout.FileSystemLimit;
+        return new GameFileSystem(layout, files, skipped, audioOffset);
     }
 
     /// <summary>
