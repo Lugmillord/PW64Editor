@@ -28,6 +28,9 @@ try
         "fs-chunks" => FileSystemCommands.Chunks(commandArgs),
         "fs-replace" => BuildCommands.Replace(commandArgs),
         "rebuild" => BuildCommands.Rebuild(commandArgs),
+        "bps-create" => PatchCommands.Create(commandArgs),
+        "bps-apply" => PatchCommands.Apply(commandArgs),
+        "bps-info" => PatchCommands.Info(commandArgs),
         _ => UnknownCommand(command),
     };
 }
@@ -65,5 +68,10 @@ static void PrintUsage()
     Console.WriteLine("  rebuild <rom> <output> [--recompress]");
     Console.WriteLine("                             Rebuild the ROM from its files (byte-identical without");
     Console.WriteLine("                             the flag; --recompress repacks every file as a stress test)");
+    Console.WriteLine("  bps-create <clean rom> <modified rom> <patch>");
+    Console.WriteLine("                             Create a BPS patch (verified after creation)");
+    Console.WriteLine("  bps-apply <clean rom> <patch> <output>");
+    Console.WriteLine("                             Apply a BPS patch, checking all checksums");
+    Console.WriteLine("  bps-info <patch>           Show sizes and checksums stored in a BPS patch");
     Console.WriteLine("  help                       Show this help text");
 }
