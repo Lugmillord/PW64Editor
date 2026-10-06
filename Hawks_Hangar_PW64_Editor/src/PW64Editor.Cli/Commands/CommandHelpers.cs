@@ -38,6 +38,29 @@ internal static class CommandHelpers
     }
 
     /// <summary>
+    /// Removes an option with a text value such as "--rom C:\rom.z64" from the argument list.
+    /// </summary>
+    /// <returns>The value, or null if the option is absent.</returns>
+    /// <exception cref="ArgumentException">The option is present but has no value.</exception>
+    public static string? ExtractStringOption(ref string[] args, string option)
+    {
+        int index = Array.FindIndex(args, a => string.Equals(a, option, StringComparison.OrdinalIgnoreCase));
+        if (index < 0)
+        {
+            return null;
+        }
+
+        if (index + 1 >= args.Length)
+        {
+            throw new ArgumentException($"{option} needs a value.");
+        }
+
+        string value = args[index + 1];
+        args = args.Where((_, i) => i != index && i != index + 1).ToArray();
+        return value;
+    }
+
+    /// <summary>
     /// Removes an option with a numeric value such as "--add-dummy 1000" from the argument list.
     /// </summary>
     /// <returns>The value, or null if the option is absent.</returns>

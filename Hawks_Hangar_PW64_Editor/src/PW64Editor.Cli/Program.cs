@@ -31,6 +31,16 @@ try
         "bps-create" => PatchCommands.Create(commandArgs),
         "bps-apply" => PatchCommands.Apply(commandArgs),
         "bps-info" => PatchCommands.Info(commandArgs),
+        "project-new" => ProjectCommands.New(commandArgs),
+        "project-extract" => ProjectCommands.Extract(commandArgs),
+        "project-revert" => ProjectCommands.Revert(commandArgs),
+        "project-status" => ProjectCommands.Status(commandArgs),
+        "project-build" => ProjectCommands.Build(commandArgs),
+        "project-patch" => ProjectCommands.Patch(commandArgs),
+        "project-backup" => ProjectCommands.Backup(commandArgs),
+        "project-backups" => ProjectCommands.Backups(commandArgs),
+        "project-restore" => ProjectCommands.Restore(commandArgs),
+        "project-backup-delete" => ProjectCommands.DeleteBackup(commandArgs),
         _ => UnknownCommand(command),
     };
 }
@@ -78,5 +88,26 @@ static void PrintUsage()
     Console.WriteLine("  bps-apply <clean rom> <patch> <output>");
     Console.WriteLine("                             Apply a BPS patch, checking all checksums");
     Console.WriteLine("  bps-info <patch>           Show sizes and checksums stored in a BPS patch");
+    Console.WriteLine();
+    Console.WriteLine("Project commands:");
+    Console.WriteLine("  project-new <folder> <clean rom> <name> [--git]");
+    Console.WriteLine("                             Create a new hack project (--git adds a .gitignore)");
+    Console.WriteLine("  project-extract <folder> <index> [--rom <path>]");
+    Console.WriteLine("                             Copy a game file into the project for editing");
+    Console.WriteLine("  project-revert <folder> <index>");
+    Console.WriteLine("                             Remove a replacement file (use the original again)");
+    Console.WriteLine("  project-status <folder> [--rom <path>]");
+    Console.WriteLine("                             Show which files the project changes");
+    Console.WriteLine("  project-build <folder> [--rom <path>] [--output <path>] [--backup]");
+    Console.WriteLine("                             Build and overwrite the hack ROM (--backup: restore point)");
+    Console.WriteLine("  project-patch <folder> <patch.bps> [--rom <path>]");
+    Console.WriteLine("                             Create a BPS patch of the project");
+    Console.WriteLine("  project-backup <folder>    Create a restore point (project files + hack ROM)");
+    Console.WriteLine("  project-backups <folder>   List restore points");
+    Console.WriteLine("  project-restore <folder> <name>");
+    Console.WriteLine("                             Return to a restore point (current state is replaced)");
+    Console.WriteLine("  project-backup-delete <folder> <name>");
+    Console.WriteLine("                             Delete a restore point");
+    Console.WriteLine();
     Console.WriteLine("  help                       Show this help text");
 }
