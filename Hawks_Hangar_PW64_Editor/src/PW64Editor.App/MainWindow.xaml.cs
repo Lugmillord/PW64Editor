@@ -368,12 +368,16 @@ public partial class MainWindow : Window
         SetStatus($"Opened project {session.Project.Settings.Name}.");
     }
 
+    /// <summary>
+    /// Updates title and status bar and reloads the tabs, because the project's files may have
+    /// changed (other project, files added or removed, restore point).
+    /// </summary>
     private void RefreshProjectInfo()
     {
+        TextEditor.Load(_session);
         ProjectSettings settings = _session.Project.Settings;
         Title = $"{settings.Name} {settings.Version} - {Ui.AppName}";
-        ProjectNameText.Text = $"{settings.Name} {settings.Version}";
-        ProjectFolderText.Text = _session.Project.Folder;
+        ProjectText.Text = $"Project: {_session.Project.Folder}";
         HackRomText.Text = $"Hack ROM: {_session.Project.OutputRomPath}";
     }
 

@@ -1,0 +1,127 @@
+<UserControl x:Class="PW64Editor.App.Views.TextTab"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:converters="clr-namespace:PW64Editor.App.Converters">
+    <UserControl.Resources>
+        <converters:GroupItemCountConverter x:Key="GroupItemCount" />
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+
+        <!-- Groups are collapsible expanders. Only the headers are indented, so the rows stay
+             aligned with the column headers. Level 1 = area, level 2 = section. -->
+        <Style x:Key="AreaGroup" TargetType="GroupItem">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="GroupItem">
+                        <Expander IsExpanded="False" Margin="0,2,0,0">
+                            <Expander.Header>
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="14" />
+                                    <TextBlock Text="{Binding Converter={StaticResource GroupItemCount}}" Margin="10,0,0,0"
+                                               Foreground="{StaticResource MutedTextBrush}" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Expander.Header>
+                            <ItemsPresenter />
+                        </Expander>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SectionGroup" TargetType="GroupItem">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="GroupItem">
+                        <StackPanel>
+                            <Expander x:Name="SectionExpander" IsExpanded="False" Margin="20,1,0,0">
+                                <Expander.Header>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                        <TextBlock Text="{Binding Converter={StaticResource GroupItemCount}}" Margin="10,0,0,0"
+                                                   Foreground="{StaticResource MutedTextBrush}" />
+                                    </StackPanel>
+                                </Expander.Header>
+                            </Expander>
+                            <!-- The rows sit outside the indented expander, so they line up with the columns. -->
+                            <ItemsPresenter Visibility="{Binding IsExpanded, ElementName=SectionExpander, Converter={StaticResource BoolToVisibility}}" />
+                        </StackPanel>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
+    <DockPanel Margin="10">
+        <!-- Search and group controls. -->
+        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <Button Content="Codes…" Click="OnShowCodes" Style="{StaticResource DialogButton}"
+                        ToolTip="What the codes in square brackets mean, and which characters the font has" />
+                <Button Content="Expand all" Click="OnExpandAll" Style="{StaticResource DialogButton}" />
+                <Button Content="Collapse all" Click="OnCollapseAll" Style="{StaticResource DialogButton}" />
+            </StackPanel>
+            <TextBlock Text="Search" VerticalAlignment="Center" Margin="0,0,8,0" />
+            <TextBox x:Name="SearchBox" TextChanged="OnSearchChanged" VerticalContentAlignment="Center"
+                     ToolTip="Search in names, texts and categories" />
+        </DockPanel>
+
+        <TextBlock x:Name="SourceText" DockPanel.Dock="Bottom" Margin="0,8,0,0" Foreground="{StaticResource MutedTextBrush}" />
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="3*" MinWidth="300" />
+                <ColumnDefinition Width="6" />
+                <ColumnDefinition Width="2*" MinWidth="260" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Left: all texts, grouped by area and section. -->
+            <!-- ListView with fixed (draggable) column widths: robust together with grouping. -->
+            <ListView x:Name="TextGrid" Grid.Column="0" SelectionMode="Single"
+                      SelectionChanged="OnSelectionChanged">
+                <ListView.GroupStyle>
+                    <GroupStyle ContainerStyle="{StaticResource AreaGroup}" />
+                    <GroupStyle ContainerStyle="{StaticResource SectionGroup}" />
+                </ListView.GroupStyle>
+                <ListView.View>
+                    <GridView>
+                        <GridViewColumn Header="#" Width="50" DisplayMemberBinding="{Binding Index}" />
+                        <GridViewColumn Header="Name" Width="140" DisplayMemberBinding="{Binding Name}" />
+                        <GridViewColumn Header="Text" Width="560" DisplayMemberBinding="{Binding Preview}" />
+                    </GridView>
+                </ListView.View>
+            </ListView>
+
+            <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch" Background="Transparent" />
+
+            <!-- Right: details of the selected text. -->
+            <Border Grid.Column="2" BorderBrush="#D5DCE3" BorderThickness="1" Padding="14">
+                <Grid>
+                    <DockPanel x:Name="DetailPanel" Visibility="Collapsed">
+                        <StackPanel DockPanel.Dock="Top">
+                            <TextBlock x:Name="DetailName" FontSize="18" FontWeight="SemiBold" />
+                            <TextBlock x:Name="DetailCategory" Margin="0,4,0,0" TextWrapping="Wrap" />
+                            <TextBlock x:Name="DetailUsage" Margin="0,4,0,0" TextWrapping="Wrap"
+                                       Foreground="{StaticResource MutedTextBrush}" />
+                            <TextBlock Text="Text" FontWeight="SemiBold" Margin="0,14,0,4" />
+                        </StackPanel>
+
+                        <TextBlock DockPanel.Dock="Bottom" Margin="0,10,0,0" TextWrapping="Wrap"
+                                   Foreground="{StaticResource MutedTextBrush}">
+                            <Run Text="[b]bold[/b]" FontFamily="Consolas" /> bold text<LineBreak />
+                            <Run Text="[x=212]" FontFamily="Consolas" /> continue at horizontal position 212<LineBreak />
+                            <Run Text="[#5C]" FontFamily="Consolas" /> code without a character of its own<LineBreak />
+                            Full list: the "Codes…" button above.
+                        </TextBlock>
+
+                        <TextBox x:Name="DetailText" IsReadOnly="True" FontFamily="Consolas" FontSize="13"
+                                 TextWrapping="NoWrap" AcceptsReturn="True"
+                                 HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" />
+                    </DockPanel>
+
+                    <TextBlock x:Name="NoSelectionText" Text="Select a text to see it in full."
+                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                               Foreground="{StaticResource MutedTextBrush}" />
+                </Grid>
+            </Border>
+        </Grid>
+    </DockPanel>
+</UserControl>

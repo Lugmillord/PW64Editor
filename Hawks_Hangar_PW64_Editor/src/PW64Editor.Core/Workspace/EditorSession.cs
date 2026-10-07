@@ -1,6 +1,7 @@
 using PW64Editor.Core.FileSystem;
 using PW64Editor.Core.Project;
 using PW64Editor.Core.Rom;
+using PW64Editor.Core.Text;
 
 namespace PW64Editor.Core.Workspace;
 
@@ -118,6 +119,40 @@ public sealed class EditorSession
 
     /// <summary>Removes a file from the project, so the original is used again.</summary>
     public bool RemoveFileFromProject(int tableIndex) => Project.RemoveOverride(tableIndex);
+
+    /// <summary>
+    /// Returns the current version of a game file: the project's replacement if there is one,
+    /// otherwise the original from the clean ROM.
+    /// </summary>
+    /// <param name="fromProject">True if the project's replacement was used.</param>
+    /// <exception cref="ProjectException">Unknown index.</exception>
+    public byte[] GetCurrentFileData(int tableIndex, out bool fromProject)
+    {
+        FileOverride? replacement = Project.GetOverrides().FirstOrDefault(o => o.TableIndex == tableIndex);
+        if (replacement is not null)
+        {
+            fromProject = true;
+            return File.ReadAllBytes(replacement.Path);
+        }
+
+        fromProject = false;
+        GameFile original = CleanFileSystem.Files.FirstOrDefault(f => f.TableIndex == tableIndex)
+            ?? throw new ProjectException($"The game has no file with table index {tableIndex}.");
+        return original.Data;
+    }
+
+    /// <summary>
+    /// Loads all game texts in their current version (project copy of the text file if the
+    /// project has one, otherwise the original).
+    /// </summary>
+    /// <exception cref="InvalidDataException">The text file or the font is damaged.</exception>
+    public GameTextLibrary LoadTexts()
+    {
+        TextFont font = TextFont.Load(CleanFileSystem);
+        GameFile textFile = GameTextFile.FindFile(CleanFileSystem);
+        byte[] data = GetCurrentFileData(textFile.TableIndex, out bool fromProject);
+        return GameTextLibrary.Create(font, data, fromProject);
+    }
 
     /// <summary>Lists the restore points, newest first.</summary>
     public IReadOnlyList<BackupInfo> GetRestorePoints() => ProjectBackups.List(Project);

@@ -1,0 +1,9 @@
+<UserControl x:Class="PW64Editor.App.Views.SaveFileTab"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid Background="#F3F6F9">
+        <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" MaxWidth="420"
+                   TextWrapping="Wrap" TextAlignment="Center" Foreground="{StaticResource MutedTextBrush}"
+                   Text="Editing save files (the cartridge's EEPROM) will be added here in a later version." />
+    </Grid>
+</UserControl>
