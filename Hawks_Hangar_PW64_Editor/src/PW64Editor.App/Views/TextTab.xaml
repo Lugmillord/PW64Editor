@@ -77,6 +77,12 @@
             <!-- ListView with fixed (draggable) column widths: robust together with grouping. -->
             <ListView x:Name="TextGrid" Grid.Column="0" SelectionMode="Single"
                       SelectionChanged="OnSelectionChanged">
+                <!-- Scroll only up/down to a selected row, never sideways (see OnRowRequestBringIntoView). -->
+                <ListView.ItemContainerStyle>
+                    <Style TargetType="ListViewItem">
+                        <EventSetter Event="RequestBringIntoView" Handler="OnRowRequestBringIntoView" />
+                    </Style>
+                </ListView.ItemContainerStyle>
                 <ListView.GroupStyle>
                     <GroupStyle ContainerStyle="{StaticResource AreaGroup}" />
                     <GroupStyle ContainerStyle="{StaticResource SectionGroup}" />

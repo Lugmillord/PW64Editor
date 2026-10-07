@@ -431,12 +431,28 @@ public class TextValidatorTests
     }
 
     [Fact]
-    public void Validate_PieceLongerThan44_IsError()
+    public void Validate_PieceLongerThan40_IsError()
     {
-        TextValidation result = TextValidator.Validate(Codec, new string('A', 45), "A");
+        TextValidation result = TextValidator.Validate(Codec, new string('A', 41), "A");
 
         Assert.True(result.HasErrors);
-        Assert.Contains("45 characters", result.Issues.First(i => i.IsError).Message);
+        Assert.Contains("41 characters", result.Issues.First(i => i.IsError).Message);
+    }
+
+    [Fact]
+    public void Validate_PieceOf40_IsNoError()
+    {
+        TextValidation result = TextValidator.Validate(Codec, new string('A', 40), "A");
+
+        Assert.False(result.HasErrors);
+    }
+
+    [Fact]
+    public void Wrap_DefaultLimit_BreaksAfter40Characters()
+    {
+        (string text, _) = TextWrapper.Wrap(new string('A', 41));
+
+        Assert.Equal(new string('A', 40) + "\n" + "A", text);
     }
 
     [Fact]

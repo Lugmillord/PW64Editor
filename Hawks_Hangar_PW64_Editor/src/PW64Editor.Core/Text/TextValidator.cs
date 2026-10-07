@@ -24,8 +24,10 @@ public sealed record TextValidation(IReadOnlyList<TextIssue> Issues, TextLayoutI
 /// <para>What the game does when drawing a text (uvFontPrintStr16 in src/kernel/font.c):</para>
 /// <list type="bullet">
 ///   <item>A text is drawn in pieces: each line, and each part after an [x=...] position, is one
-///         piece. A piece holds at most 44 characters (FONT_MAX_MSG_LEN); the rest is cut off or
-///         pushed into an extra line, depending on the screen.</item>
+///         piece. The buffer for a piece holds 44 characters (FONT_MAX_MSG_LEN). Tested in an
+///         emulator: a mission description with a full 44-character line keeps the game from
+///         starting (black screen). The editor therefore allows at most 40 characters per piece;
+///         the longest original piece has 39.</item>
 ///   <item>At most 30 pieces can be drawn per frame on the whole screen (FONT_MSG_COUNT). The game
 ///         does not check this; more pieces overwrite other memory and can crash the game.</item>
 ///   <item>There is no automatic line wrapping, and the boxes on screen are sized for the original
@@ -38,8 +40,15 @@ public sealed record TextValidation(IReadOnlyList<TextIssue> Issues, TextLayoutI
 /// </remarks>
 public static class TextValidator
 {
-    /// <summary>Characters per piece the game can draw (FONT_MAX_MSG_LEN, US version).</summary>
-    public const int MaxCharactersPerPiece = 44;
+    /// <summary>Size of the game's buffer for one piece (FONT_MAX_MSG_LEN, US version).</summary>
+    /// <remarks>Only for documentation: filling it completely crashed the game in tests.</remarks>
+    public const int GameBufferCharactersPerPiece = 44;
+
+    /// <summary>
+    /// Characters per piece the editor allows. Safely below <see cref="GameBufferCharactersPerPiece"/>,
+    /// because a full 44-character line kept the game from starting. Longer lines are wrapped.
+    /// </summary>
+    public const int MaxCharactersPerPiece = 40;
 
     /// <summary>Pieces the game can draw per frame on the whole screen (FONT_MSG_COUNT).</summary>
     public const int MaxPiecesPerFrame = 30;
@@ -68,8 +77,8 @@ public static class TextValidator
             if (pieces[i] > MaxCharactersPerPiece)
             {
                 issues.Add(new TextIssue(true,
-                    $"Piece {i + 1} has {pieces[i]} characters. The game draws at most {MaxCharactersPerPiece} per line " +
-                    "(or per part after an [x=...] position) and cuts off or moves the rest. Add a line break."));
+                    $"Piece {i + 1} has {pieces[i]} characters. At most {MaxCharactersPerPiece} are allowed per line " +
+                    "(or per part after an [x=...] position); longer lines can crash the game. Add a line break."));
             }
         }
 

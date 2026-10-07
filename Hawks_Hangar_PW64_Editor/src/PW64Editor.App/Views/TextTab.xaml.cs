@@ -345,6 +345,38 @@ public partial class TextTab : UserControl
 
     private void OnSelectionChanged(object sender, SelectionChangedEventArgs e) => ShowDetails(SelectedRow);
 
+    // True while a row asks to be scrolled into view with our own, narrowed request.
+    private bool _bringingRowIntoView;
+
+    /// <summary>
+    /// Keeps the list from scrolling sideways when a row is selected (arrow keys, mouse, search).
+    /// </summary>
+    /// <remarks>
+    /// By default WPF scrolls so that as much of the selected row as possible is visible. The rows
+    /// are wider than the list, so it scrolls to the right and the status column (unsaved/edited
+    /// marks) disappears. Here the request is replaced by one for a 1-pixel strip at the row's
+    /// left edge: the list still scrolls up or down to the row, but horizontally it only moves
+    /// (to the left) if the start of the row is out of view.
+    /// </remarks>
+    private void OnRowRequestBringIntoView(object sender, RequestBringIntoViewEventArgs e)
+    {
+        if (_bringingRowIntoView || sender is not ListViewItem item)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        _bringingRowIntoView = true;
+        try
+        {
+            item.BringIntoView(new Rect(0, 0, 1, item.ActualHeight));
+        }
+        finally
+        {
+            _bringingRowIntoView = false;
+        }
+    }
+
     private void ShowDetails(TextRow? row)
     {
         DetailPanel.Visibility = row is null ? Visibility.Collapsed : Visibility.Visible;
@@ -597,7 +629,7 @@ public partial class TextTab : UserControl
             LayoutText.Text =
                 $"{layout.Lines} of {maxLines} possible line(s), original {original.Lines}. " +
                 $"Longest line {layout.LongestPiece} characters, original {original.LongestPiece}, " +
-                $"game maximum {TextValidator.MaxCharactersPerPiece}.";
+                $"allowed maximum {TextValidator.MaxCharactersPerPiece}.";
         }
         else
         {
