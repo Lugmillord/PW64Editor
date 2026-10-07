@@ -219,6 +219,19 @@ public sealed partial class HackProject
     }
 
     /// <summary>
+    /// Writes new content for a game file into the project. An existing replacement file is
+    /// overwritten; otherwise a new one is created with the standard name.
+    /// </summary>
+    /// <returns>Path of the written file.</returns>
+    public string WriteOverride(GameFile original, byte[] data)
+    {
+        FileOverride? existing = GetOverrides().FirstOrDefault(o => o.TableIndex == original.TableIndex);
+        string path = existing?.Path ?? System.IO.Path.Combine(FilesFolder, original.ExportName);
+        File.WriteAllBytes(path, data);
+        return path;
+    }
+
+    /// <summary>
     /// Removes the replacement for a file, so the build uses the original again.
     /// </summary>
     /// <returns>False if the project had no replacement for that file.</returns>

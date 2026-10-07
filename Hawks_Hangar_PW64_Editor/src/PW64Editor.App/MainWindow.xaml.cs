@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -27,18 +28,33 @@ public partial class MainWindow : Window
     /// <summary>Remembers the last choice of the build dialog's restore point checkbox.</summary>
     private bool _lastRestorePointChoice;
 
+    /// <summary>Set once the user has dealt with unsaved changes, so closing goes through.</summary>
+    private bool _closeConfirmed;
+
     public MainWindow(EditorSession session)
     {
         InitializeComponent();
         _session = session;
-        RefreshProjectInfo();
+        ReloadProject();
     }
 
     // ----------------------------------------------------------------- project
 
-    private void OnNewProject(object sender, RoutedEventArgs e) => SwitchTo(ProjectOpener.CreateNew(this));
+    private async void OnNewProject(object sender, RoutedEventArgs e)
+    {
+        if (await ConfirmUnsavedChangesAsync("creating a new project"))
+        {
+            SwitchTo(ProjectOpener.CreateNew(this));
+        }
+    }
 
-    private void OnOpenProject(object sender, RoutedEventArgs e) => SwitchTo(ProjectOpener.OpenWithDialog(this));
+    private async void OnOpenProject(object sender, RoutedEventArgs e)
+    {
+        if (await ConfirmUnsavedChangesAsync("opening another project"))
+        {
+            SwitchTo(ProjectOpener.OpenWithDialog(this));
+        }
+    }
 
     private void OnRecentMenuOpened(object sender, RoutedEventArgs e)
     {
@@ -55,43 +71,87 @@ public partial class MainWindow : Window
         {
             // Underscores would be read as access keys, so they are doubled.
             var item = new MenuItem { Header = folder.Replace("_", "__"), Tag = folder };
-            item.Click += (_, _) => SwitchTo(ProjectOpener.Open(this, (string)item.Tag));
+            item.Click += async (_, _) =>
+            {
+                if (await ConfirmUnsavedChangesAsync("opening another project"))
+                {
+                    SwitchTo(ProjectOpener.Open(this, (string)item.Tag));
+                }
+            };
             RecentMenu.Items.Add(item);
         }
     }
 
     private void OnOpenProjectFolder(object sender, RoutedEventArgs e) => Ui.OpenFolder(_session.Project.Folder);
 
-    private void OnCloseProject(object sender, RoutedEventArgs e)
+    private async void OnCloseProject(object sender, RoutedEventArgs e)
     {
+        if (!await ConfirmUnsavedChangesAsync("closing the project"))
+        {
+            return;
+        }
+
+        _closeConfirmed = true;
         var start = new StartWindow();
         Application.Current.MainWindow = start;
         start.Show();
         Close();
     }
 
-    private void OnExit(object sender, RoutedEventArgs e) => Application.Current.Shutdown();
+    /// <summary>Closing the window ends the program; OnClosing asks about unsaved changes.</summary>
+    private void OnExit(object sender, RoutedEventArgs e) => Close();
+
+    /// <summary>
+    /// Asks about unsaved changes when the window is closed (menu, red X, Alt+F4).
+    /// </summary>
+    private async void OnClosing(object? sender, CancelEventArgs e)
+    {
+        if (_closeConfirmed || !TextEditor.HasUnsavedChanges)
+        {
+            return;
+        }
+
+        // Cancel for now; close again once the user has decided (and saving is done).
+        e.Cancel = true;
+        if (await ConfirmUnsavedChangesAsync("closing"))
+        {
+            _closeConfirmed = true;
+
+            // Close() must not be called while the Closing event is still running.
+            _ = Dispatcher.InvokeAsync(Close);
+        }
+    }
+
+    private void OnUnsavedChangesChanged(object? sender, EventArgs e) => UpdateTitle();
 
     private void OnProjectSettings(object sender, RoutedEventArgs e)
     {
         var dialog = new ProjectSettingsDialog(_session.Project) { Owner = this };
         if (dialog.ShowDialog() == true)
         {
-            RefreshProjectInfo();
+            UpdateProjectInfo();
             SetStatus("Project settings saved.");
         }
     }
 
-    private void OnGameFiles(object sender, RoutedEventArgs e)
+    private async void OnGameFiles(object sender, RoutedEventArgs e)
     {
-        new GameFilesWindow(_session) { Owner = this }.ShowDialog();
-        RefreshProjectInfo();
+        // The window can add or remove the text file, which reloads the texts.
+        if (await ConfirmUnsavedChangesAsync("opening the game files"))
+        {
+            new GameFilesWindow(_session) { Owner = this }.ShowDialog();
+            ReloadProject();
+        }
     }
 
-    private void OnRestorePoints(object sender, RoutedEventArgs e)
+    private async void OnRestorePoints(object sender, RoutedEventArgs e)
     {
-        new RestorePointsWindow(_session) { Owner = this }.ShowDialog();
-        RefreshProjectInfo();
+        // Restore points save and restore the project files, so edits must be saved first.
+        if (await ConfirmUnsavedChangesAsync("opening the restore points"))
+        {
+            new RestorePointsWindow(_session) { Owner = this }.ShowDialog();
+            ReloadProject();
+        }
     }
 
     // ----------------------------------------------------------------- build and patch
@@ -106,18 +166,84 @@ public partial class MainWindow : Window
 
         bool restorePoint = dialog.CreateRestorePoint;
         _lastRestorePointChoice = restorePoint;
+        await SaveAndBuildAsync(restorePoint);
+    }
 
-        await RunAsync("Building hack ROM…", () => _session.Build(restorePoint), outcome =>
+    /// <summary>
+    /// Saves all edits into the project and builds the hack ROM ("saving" in the editor).
+    /// </summary>
+    /// <returns>True if everything was saved and built.</returns>
+    private async Task<bool> SaveAndBuildAsync(bool restorePoint)
+    {
+        string? textWithErrors = TextEditor.FindTextWithErrors();
+        if (textWithErrors is not null)
+        {
+            Ui.ShowError(this, $"The text {textWithErrors} has errors and cannot be saved. It is selected now; " +
+                               "the problems are listed below the text.");
+            return false;
+        }
+
+        int savedTexts;
+        try
+        {
+            savedTexts = TextEditor.SaveChanges(_session);
+        }
+        catch (Exception ex) when (Ui.IsExpectedError(ex))
+        {
+            Ui.ShowError(this, $"The texts could not be saved.\n\n{ex.Message}");
+            return false;
+        }
+
+        string texts = savedTexts > 0 ? $"{savedTexts} text(s) saved. " : string.Empty;
+        return await RunAsync("Building hack ROM…", () => _session.Build(restorePoint), outcome =>
         {
             RomBuildResult rom = outcome.Result.RomBuild;
             string backup = outcome.RestorePoint is { } point ? $" Restore point {point.Name} created." : string.Empty;
-            SetStatus($"Hack ROM built ({outcome.Result.AppliedOverrides} changed file(s), " +
+            SetStatus($"{texts}Hack ROM built ({outcome.Result.AppliedOverrides} changed file(s), " +
                       $"room for {rom.FreeSpace:N0} more bytes).{backup}");
         });
     }
 
+    /// <summary>
+    /// If there are unsaved changes, asks whether to save them first.
+    /// </summary>
+    /// <param name="action">What the user is about to do, e.g. "closing".</param>
+    /// <returns>True if the action may continue (saved or discarded), false if cancelled or saving failed.</returns>
+    private async Task<bool> ConfirmUnsavedChangesAsync(string action)
+    {
+        if (!TextEditor.HasUnsavedChanges)
+        {
+            return true;
+        }
+
+        MessageBoxResult answer = MessageBox.Show(
+            this,
+            $"You have unsaved text changes. Save them before {action}?\n\n" +
+            "Yes: save the changes and build the hack ROM.\nNo: discard the changes.\nCancel: go back to editing.",
+            Ui.AppName,
+            MessageBoxButton.YesNoCancel,
+            MessageBoxImage.Warning);
+
+        switch (answer)
+        {
+            case MessageBoxResult.Yes:
+                return await SaveAndBuildAsync(restorePoint: false);
+            case MessageBoxResult.No:
+                TextEditor.DiscardChanges();
+                return true;
+            default:
+                return false;
+        }
+    }
+
     private async void OnExportPatch(object sender, RoutedEventArgs e)
     {
+        // The patch is built from the project files, so unsaved edits would be missing.
+        if (!await ConfirmUnsavedChangesAsync("exporting the patch"))
+        {
+            return;
+        }
+
         var dialog = new SaveFileDialog
         {
             Title = "Export BPS patch",
@@ -364,21 +490,34 @@ public partial class MainWindow : Window
         }
 
         _session = session;
-        RefreshProjectInfo();
+        ReloadProject();
         SetStatus($"Opened project {session.Project.Settings.Name}.");
     }
 
     /// <summary>
-    /// Updates title and status bar and reloads the tabs, because the project's files may have
-    /// changed (other project, files added or removed, restore point).
+    /// Reloads the tabs, because the project's files may have changed (other project, files added
+    /// or removed, restore point). Unsaved edits are dropped, so callers ask the user first.
     /// </summary>
-    private void RefreshProjectInfo()
+    private void ReloadProject()
     {
         TextEditor.Load(_session);
-        ProjectSettings settings = _session.Project.Settings;
-        Title = $"{settings.Name} {settings.Version} - {Ui.AppName}";
+        UpdateProjectInfo();
+    }
+
+    /// <summary>Updates title and status bar.</summary>
+    private void UpdateProjectInfo()
+    {
+        UpdateTitle();
         ProjectText.Text = $"Project: {_session.Project.Folder}";
         HackRomText.Text = $"Hack ROM: {_session.Project.OutputRomPath}";
+    }
+
+    /// <summary>Window title with an asterisk while there are unsaved changes, as in most editors.</summary>
+    private void UpdateTitle()
+    {
+        ProjectSettings settings = _session.Project.Settings;
+        string unsaved = TextEditor.HasUnsavedChanges ? "*" : string.Empty;
+        Title = $"{unsaved}{settings.Name} {settings.Version} - {Ui.AppName}";
     }
 
     private void SetStatus(string text) => StatusText.Text = text;
@@ -387,13 +526,15 @@ public partial class MainWindow : Window
     /// Runs work in the background with a busy indicator, then shows the result or a
     /// friendly error message.
     /// </summary>
-    private async Task RunAsync<T>(string busyText, Func<T> work, Action<T> onSuccess)
+    /// <returns>True if the work succeeded.</returns>
+    private async Task<bool> RunAsync<T>(string busyText, Func<T> work, Action<T> onSuccess)
     {
         SetStatus(busyText);
         try
         {
             T result = await Ui.RunBusyAsync(this, work);
             onSuccess(result);
+            return true;
         }
         catch (Exception ex) when (Ui.IsExpectedError(ex))
         {
@@ -404,6 +545,7 @@ public partial class MainWindow : Window
                     ? "\n\nThe patch was made for a different ROM than the clean Pilotwings 64 (USA) ROM."
                     : string.Empty;
             Ui.ShowError(this, ex.Message + hint);
+            return false;
         }
     }
 }

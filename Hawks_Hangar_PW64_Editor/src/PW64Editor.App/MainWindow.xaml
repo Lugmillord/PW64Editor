@@ -5,7 +5,8 @@
         Title="Hawk's Hangar"
         Width="1000" Height="680"
         WindowStartupLocation="CenterScreen"
-        PreviewKeyDown="OnPreviewKeyDown">
+        PreviewKeyDown="OnPreviewKeyDown"
+        Closing="OnClosing">
     <DockPanel>
         <Menu DockPanel.Dock="Top" Padding="2">
             <MenuItem Header="_File">
@@ -21,7 +22,7 @@
                 <MenuItem Header="Project _settings…" Click="OnProjectSettings" />
                 <MenuItem Header="_Game files…" InputGestureText="Ctrl+G" Click="OnGameFiles" />
                 <Separator />
-                <MenuItem Header="_Build hack ROM…" InputGestureText="Ctrl+S" Click="OnBuild" />
+                <MenuItem Header="_Save and build hack ROM…" InputGestureText="Ctrl+S" Click="OnBuild" />
                 <MenuItem Header="_Export BPS patch…" Click="OnExportPatch" />
                 <MenuItem Header="_Restore points…" Click="OnRestorePoints" />
                 <Separator />
@@ -58,7 +59,7 @@
         <!-- One tab per editing feature. -->
         <TabControl x:Name="FeatureTabs" Margin="6,6,6,0" Padding="0">
             <TabItem Header="Text">
-                <views:TextTab x:Name="TextEditor" />
+                <views:TextTab x:Name="TextEditor" UnsavedChangesChanged="OnUnsavedChangesChanged" />
             </TabItem>
             <TabItem Header="Save File">
                 <views:SaveFileTab />

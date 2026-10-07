@@ -154,6 +154,38 @@ public sealed class EditorSession
         return GameTextLibrary.Create(font, data, fromProject);
     }
 
+    /// <summary>Loads the texts of the original game (ignoring the project), for comparison.</summary>
+    public GameTextLibrary LoadOriginalTexts()
+    {
+        TextFont font = TextFont.Load(CleanFileSystem);
+        return GameTextLibrary.Create(font, GameTextFile.FindFile(CleanFileSystem).Data, fromProject: false);
+    }
+
+    /// <summary>
+    /// Saves edited texts into the project's copy of the text file.
+    /// </summary>
+    /// <param name="library">The texts the edits are based on (from <see cref="LoadTexts"/>).</param>
+    /// <param name="changedMarkup">New markup by text index.</param>
+    /// <returns>Path of the written text file.</returns>
+    /// <exception cref="ProjectException">A text has errors and cannot be encoded.</exception>
+    public string SaveTexts(GameTextLibrary library, IReadOnlyDictionary<int, string> changedMarkup)
+    {
+        var newData = new Dictionary<int, byte[]>();
+        foreach ((int index, string markup) in changedMarkup)
+        {
+            TextEncodeResult result = library.Codec.Encode(markup);
+            if (!result.Success)
+            {
+                throw new ProjectException($"Text {index} ({library.Texts[index].Name}) has errors: {result.Errors[0].Message}");
+            }
+
+            newData[index] = TextCodec.ToChunkData(result.Codes, library.Texts[index].Entry.Data.Length);
+        }
+
+        GameFile original = GameTextFile.FindFile(CleanFileSystem);
+        return Project.WriteOverride(original, library.File.Build(newData));
+    }
+
     /// <summary>Lists the restore points, newest first.</summary>
     public IReadOnlyList<BackupInfo> GetRestorePoints() => ProjectBackups.List(Project);
 

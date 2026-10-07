@@ -407,3 +407,243 @@ public class TextMarkupTests
         Assert.True(TextCatalog.Categorize("A_S3_GOLD").SectionOrder < TextCatalog.Categorize("B_S3_GOLD").SectionOrder);
     }
 }
+
+public class TextValidatorTests
+{
+    private static readonly TextCodec Codec = new(TextFontTests.SmallFont);
+
+    [Fact]
+    public void Measure_CountsLinesPiecesAndLongestPiece()
+    {
+        TextLayoutInfo layout = TextValidator.Measure(Codec.Encode("[x=5]AB\nA[x=99]BBB").Codes);
+
+        Assert.Equal(2, layout.Lines);
+        Assert.Equal(3, layout.Pieces); // leading position does not start a new piece
+        Assert.Equal(3, layout.LongestPiece);
+    }
+
+    [Fact]
+    public void Validate_SameShape_HasNoIssues()
+    {
+        TextValidation result = TextValidator.Validate(Codec, "BA\nAB", "AB\nBA");
+
+        Assert.Empty(result.Issues);
+    }
+
+    [Fact]
+    public void Validate_PieceLongerThan44_IsError()
+    {
+        TextValidation result = TextValidator.Validate(Codec, new string('A', 45), "A");
+
+        Assert.True(result.HasErrors);
+        Assert.Contains("45 characters", result.Issues.First(i => i.IsError).Message);
+    }
+
+    [Fact]
+    public void Validate_MoreLinesAndLongerLines_AreWarnings()
+    {
+        TextValidation result = TextValidator.Validate(Codec, "AAAA\nB\nB", "AA\nB");
+
+        Assert.False(result.HasErrors);
+        Assert.Contains(result.Issues, i => i.Message.Contains("3 lines instead of 2"));
+        Assert.Contains(result.Issues, i => i.Message.Contains("4 characters, the original 2"));
+    }
+
+    [Fact]
+    public void Validate_TooManyPieces_IsError()
+    {
+        string markup = string.Join("\n", Enumerable.Repeat("A", 31));
+
+        Assert.True(TextValidator.Validate(Codec, markup, markup).HasErrors);
+    }
+
+    [Fact]
+    public void Validate_EncodingErrors_ReportLine()
+    {
+        TextValidation result = TextValidator.Validate(Codec, "A\nÄ", "A");
+
+        Assert.True(result.HasErrors);
+        Assert.StartsWith("Line 2:", result.Issues[0].Message);
+    }
+
+    [RealRomFact]
+    public void RealRom_NoOriginalTextHasIssues()
+    {
+        GameFileSystem fs = GameFileSystem.Read(N64Rom.Load(TestRomLocator.RomPath!), RomLayout.PilotwingsUsa);
+        GameTextLibrary library = GameTextLibrary.Create(TextFont.Load(fs), GameTextFile.FindFile(fs).Data, false);
+
+        foreach (GameText text in library.Texts)
+        {
+            Assert.Empty(TextValidator.Validate(library.Codec, text.Markup, text.Markup).Issues);
+        }
+    }
+}
+
+public class SaveTextsTests
+{
+    [RealRomFact]
+    public void SaveTexts_WritesProjectFile_AndBuildContainsNewText()
+    {
+        using var temp = new TempDirectory();
+        N64Rom rom = N64Rom.Load(TestRomLocator.RomPath!);
+        var session = PW64Editor.Core.Workspace.EditorSession.Create(temp.Combine("hack"), "Texts", false, rom, TestRomLocator.RomPath!);
+        GameTextLibrary library = session.LoadTexts();
+        int index = library.Texts.Single(t => t.Name == "MINI_USA").Index;
+
+        session.SaveTexts(library, new Dictionary<int, string> { [index] = "[b]Tiny States[/b]" });
+        GameTextLibrary reloaded = session.LoadTexts();
+
+        Assert.True(reloaded.FromProject);
+        Assert.Equal("[b]Tiny States[/b]", reloaded.Texts[index].Markup);
+        Assert.Equal(library.Texts[index].Entry.Data.Length, reloaded.Texts[index].Entry.Data.Length); // fits: same size
+        Assert.Equal(library.Texts[index + 1].Entry.Data, reloaded.Texts[index + 1].Entry.Data);
+
+        // Saving a second time overwrites the same project file.
+        session.SaveTexts(reloaded, new Dictionary<int, string> { [index] = "[b]A much longer name for the states[/b]" });
+        Assert.Single(session.Project.GetOverrides());
+        Assert.Equal("[b]A much longer name for the states[/b]", session.LoadTexts().Texts[index].Markup);
+
+        // The built ROM contains the text and is still valid.
+        var (result, _, _) = session.Build(createRestorePoint: false);
+        Assert.True(result.RomBuild.Rom.IsBootChecksumValid());
+    }
+
+    [RealRomFact]
+    public void SaveTexts_Throws_ForInvalidText()
+    {
+        using var temp = new TempDirectory();
+        N64Rom rom = N64Rom.Load(TestRomLocator.RomPath!);
+        var session = PW64Editor.Core.Workspace.EditorSession.Create(temp.Combine("hack"), "Texts", false, rom, TestRomLocator.RomPath!);
+        GameTextLibrary library = session.LoadTexts();
+
+        Assert.Throws<PW64Editor.Core.Project.ProjectException>(() =>
+            session.SaveTexts(library, new Dictionary<int, string> { [0] = "Ä" }));
+        Assert.Empty(session.Project.GetOverrides());
+    }
+}
+
+public class TextWrapperTests
+{
+    [Fact]
+    public void Wrap_ShortText_IsUnchanged()
+    {
+        (string text, IReadOnlyList<WrapOperation> ops) = TextWrapper.Wrap("Hello world", 44);
+
+        Assert.Equal("Hello world", text);
+        Assert.Empty(ops);
+    }
+
+    [Fact]
+    public void Wrap_BreaksAtLastSpace()
+    {
+        (string text, IReadOnlyList<WrapOperation> ops) = TextWrapper.Wrap("aaa bbb ccc", 8);
+
+        Assert.Equal("aaa bbb\nccc", text);
+        Assert.Equal(new WrapOperation(7, true), Assert.Single(ops));
+    }
+
+    [Fact]
+    public void Wrap_LongWordWithoutSpace_IsCut()
+    {
+        (string text, _) = TextWrapper.Wrap("abcdefghij", 4);
+
+        Assert.Equal("abcd\nefgh\nij", text);
+    }
+
+    [Fact]
+    public void Wrap_TagsTakeNoRoom_RawCodesCountOne()
+    {
+        Assert.Equal("[b]abcd[/b]", TextWrapper.Wrap("[b]abcd[/b]", 4).Text);
+        Assert.Equal("ab[#5C]c\nd", TextWrapper.Wrap("ab[#5C]cd", 4).Text);
+    }
+
+    [Fact]
+    public void Wrap_PositionStartsNewPiece()
+    {
+        Assert.Equal("abcd[x=100]efgh", TextWrapper.Wrap("abcd[x=100]efgh", 4).Text);
+    }
+
+    [Fact]
+    public void Wrap_OperationsReproduceResult()
+    {
+        string original = "one two three four five six seven";
+        (string expected, IReadOnlyList<WrapOperation> ops) = TextWrapper.Wrap(original, 10);
+
+        string applied = original;
+        foreach (WrapOperation op in ops)
+        {
+            applied = op.ReplacesSpace ? applied[..op.Index] + "\n" + applied[(op.Index + 1)..] : applied.Insert(op.Index, "\n");
+        }
+
+        Assert.Equal(expected, applied);
+        Assert.All(expected.Split('\n'), line => Assert.True(line.Length <= 10));
+    }
+
+    [Fact]
+    public void CountLines_CountsLineBreaks()
+    {
+        Assert.Equal(1, TextWrapper.CountLines("abc"));
+        Assert.Equal(3, TextWrapper.CountLines("a\nb\n"));
+    }
+}
+
+public class TextLimitsTests
+{
+    [Theory]
+    [InlineData("HG_6_A", 7)]
+    [InlineData("RP_15_A", 7)]
+    [InlineData("A_HG_2_M", 7)]
+    [InlineData("B_GC_1_H", 7)]
+    [InlineData("P_BD_4_H", 7)]
+    [InlineData("A_EX_1_M", 7)]
+    [InlineData("HG_B3_S1", 10)]
+    [InlineData("GC_E_S1", 10)]
+    [InlineData("SD_L123_S1", 10)]
+    [InlineData("HG_B3_S2", 7)]
+    [InlineData("CB_L123_S2", 7)]
+    [InlineData("BD_ALL_S1", 10)]
+    [InlineData("BD_ALL_S2", 7)]
+    [InlineData("BD_ALL_S3", 1)]
+    [InlineData("E_BD_1_M", 7)]
+    public void GetRoom_FollowsTextKind(string name, int lines)
+    {
+        Assert.Equal(lines, TextLimits.GetRoom(name));
+    }
+
+    [Theory]
+    [InlineData("MINI_USA")]
+    [InlineData("A_HG_2_N")] // mission names keep the original line count
+    [InlineData("HG_B3_S3")]  // only Birdman has a third sheet text
+    public void GetRoom_IsNull_ForOtherTexts(string name)
+    {
+        Assert.Null(TextLimits.GetRoom(name));
+    }
+
+    [Fact]
+    public void GetMaxLines_NeverBelowOriginal()
+    {
+        Assert.Equal(2, TextLimits.GetMaxLines("MINI_USA", "a\nb"));
+        Assert.Equal(7, TextLimits.GetMaxLines("HG_6_A", "a"));
+    }
+
+    [Fact]
+    public void Validate_MoreLinesThanRoom_IsError()
+    {
+        var codec = new TextCodec(TextFontTests.SmallFont);
+
+        Assert.True(TextValidator.Validate(codec, "A\nA\nA", "A", maxLines: 2).HasErrors);
+        Assert.False(TextValidator.Validate(codec, "A\nA", "A", maxLines: 2).HasErrors);
+    }
+
+    [RealRomFact]
+    public void RealRom_EveryOriginalTextFitsItsLimit()
+    {
+        GameFileSystem fs = GameFileSystem.Read(N64Rom.Load(TestRomLocator.RomPath!), RomLayout.PilotwingsUsa);
+        GameTextLibrary library = GameTextLibrary.Create(TextFont.Load(fs), GameTextFile.FindFile(fs).Data, false);
+
+        foreach (GameText text in library.Texts)
+        {
+            Assert.True(TextWrapper.CountLines(text.Markup) <= (TextLimits.GetRoom(text.Name) ?? int.MaxValue), text.Name);
+        }
+    }
+}
