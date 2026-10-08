@@ -432,4 +432,5 @@ FodyWeavers.xsd
 *.v64
 *.n64
 *.bps
+*.zip
 roms/
