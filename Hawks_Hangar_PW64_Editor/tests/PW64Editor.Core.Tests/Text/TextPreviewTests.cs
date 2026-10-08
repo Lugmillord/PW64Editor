@@ -120,16 +120,38 @@ public class FontPrinterTests
     }
 
     [Theory]
-    [InlineData(43, false)]
-    [InlineData(44, true)]
-    public void PrintStr16_FullBufferWithoutEnd_IsAnOverflow(int length, bool overflow)
+    [InlineData(42, false, false)]
+    [InlineData(43, false, true)]  // the original writes the end marker behind the buffer (checked in a MIPS emulator)
+    [InlineData(44, false, true)]
+    [InlineData(43, true, false)]  // with the code fix: no overflow, the line is cut instead
+    [InlineData(50, true, false)]
+    public void PrintStr16_LongPieces_OverflowOnlyWithoutTheFix(int length, bool fix, bool overflow)
     {
-        var printer = new FontPrinter(Font);
+        var printer = new FontPrinter(Font) { SafeTextFix = fix };
         GameTextMemory text = Memory([.. Enumerable.Repeat(0, length), 0xFE, 0xFF]);
 
-        printer.PrintStr16(28, 180, text, 0, 255);
+        int used = printer.PrintStr16(28, 180, text, 0, 255);
 
         Assert.Equal(overflow, printer.Messages[0].Overflow);
+        if (fix && length >= 43)
+        {
+            Assert.Equal(43, used);
+            Assert.True(printer.Messages[0].Truncated);
+        }
+    }
+
+    [Fact]
+    public void PrintStr16_LongPieceAfterPosition_HasNoEndMarkerInTheOriginal()
+    {
+        GameTextMemory text = Memory([SyntheticFont.A, 0xFD, 100, 0, .. Enumerable.Repeat(0, 44), 0xFE, 0xFF]);
+        var original = new FontPrinter(Font);
+        var fixedPrinter = new FontPrinter(Font) { SafeTextFix = true };
+
+        original.PrintStr16(28, 180, text, 0, 255);
+        fixedPrinter.PrintStr16(28, 180, text, 0, 255);
+
+        Assert.True(original.Messages[1].Overflow);
+        Assert.False(fixedPrinter.Messages[1].Overflow);
     }
 
     [Fact]

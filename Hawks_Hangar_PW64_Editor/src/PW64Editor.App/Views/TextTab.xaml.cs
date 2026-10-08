@@ -11,6 +11,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using PW64Editor.App.Dialogs;
 using PW64Editor.App.Services;
+using PW64Editor.Core.Code;
 using PW64Editor.Core.Text;
 using PW64Editor.Core.Text.Preview;
 using PW64Editor.Core.Workspace;
@@ -40,6 +41,9 @@ public partial class TextTab : UserControl
 
     /// <summary>Name of the text the preview picture currently shows.</summary>
     private string? _previewName;
+
+    /// <summary>The open project, to know which code fixes the preview has to take into account.</summary>
+    private EditorSession? _session;
 
     /// <summary>Set while the text box is filled by code, so that does not count as an edit.</summary>
     private bool _updatingTextBox;
@@ -158,6 +162,7 @@ public partial class TextTab : UserControl
     /// </summary>
     public void Load(EditorSession session)
     {
+        _session = session;
         GameTextLibrary library;
         GameTextLibrary original;
         try
@@ -678,6 +683,15 @@ public partial class TextTab : UserControl
         }
     }
 
+    /// <summary>Draws the preview again, e.g. after code fixes were applied to the project.</summary>
+    public void RefreshPreview()
+    {
+        if (SelectedRow is { } row && DetailPanel.Visibility == Visibility.Visible)
+        {
+            UpdatePreview(row);
+        }
+    }
+
     /// <summary>Draws the selected text the way the game shows it.</summary>
     private void UpdatePreview(TextRow row)
     {
@@ -705,7 +719,8 @@ public partial class TextTab : UserControl
             return;
         }
 
-        var options = new TextPreviewOptions(ShowTextArea: PreviewAreaCheck.IsChecked == true);
+        bool safeText = _session?.Project.Settings.AppliedCodeFixes.Contains(CodeFixes.SafeText.Id) == true;
+        var options = new TextPreviewOptions(ShowTextArea: PreviewAreaCheck.IsChecked == true, SafeTextFix: safeText);
         TextPreview preview;
         try
         {

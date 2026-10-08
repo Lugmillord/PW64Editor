@@ -17,6 +17,7 @@ public class ProjectBuilderTests
         using var temp = new TempDirectory();
         N64Rom rom = N64Rom.Load(TestRomLocator.RomPath!);
         HackProject project = HackProject.Create(temp.Combine("p"), "Empty", rom.ComputeSha1(), null);
+        project.Settings.AppliedCodeFixes.Clear(); // new projects get the code fixes, which change the code
 
         ProjectBuildResult result = ProjectBuilder.Build(project, rom, Layout);
 

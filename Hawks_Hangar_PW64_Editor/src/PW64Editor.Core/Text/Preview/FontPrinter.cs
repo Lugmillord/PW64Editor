@@ -172,6 +172,12 @@ public sealed class FontPrinter
 
     public float ScaleY { get; set; } = 1f;
 
+    /// <summary>
+    /// Draw like a ROM with the code fix "Safe text loading and drawing" (<see cref="Code.CodeFixes.SafeText"/>):
+    /// at most 43 characters per piece, and the end marker always lands inside the buffer.
+    /// </summary>
+    public bool SafeTextFix { get; set; }
+
     /// <summary>uvFontStrLen: values up to the end marker, at most 44.</summary>
     public static int StrLen(GameTextMemory text, int start)
     {
@@ -235,7 +241,7 @@ public sealed class FontPrinter
     public int PrintStr16(int x, int y, GameTextMemory text, int start, int strLen)
     {
         int top = TopOf(y);
-        strLen = Math.Min(strLen, MaxMessageLength);
+        strLen = Math.Min(strLen, SafeTextFix ? MaxMessageLength - 1 : MaxMessageLength);
 
         FontMessage message = NewMessage(x, top, text, start);
         int i16 = 0;
@@ -257,6 +263,7 @@ public sealed class FontPrinter
             {
                 terminated = true;
                 i16++;
+                i++;
                 break;
             }
 
@@ -282,20 +289,29 @@ public sealed class FontPrinter
             }
         }
 
-        if (!terminated)
+        // After the loop the game writes one more end marker at position i, if a counter reached
+        // the limit. The original compares the wrong counter (values read, i16); with the fix it
+        // compares the characters stored (i), and the limit is one lower.
+        bool writesMarker = SafeTextFix ? i == strLen : i16 == strLen;
+        if (writesMarker)
         {
-            if (i16 == strLen && i < MaxMessageLength)
+            if (i >= MaxMessageLength)
             {
-                // The caller allowed fewer values than the buffer holds: the piece is cut off
-                // cleanly, the rest of the line is not drawn by this call.
-                message.Truncated = true;
-            }
-            else
-            {
-                // The buffer is full without an end marker: the game writes the marker behind
-                // the buffer (into the font pointer) or leaves the piece without one.
+                // Behind the buffer, into the font pointer: crash. In the original this happens
+                // with 43 characters and a line break, and with 44 or more characters.
                 message.Overflow = true;
             }
+            else if (!terminated)
+            {
+                // The limit cut the piece off cleanly; the rest of the line is not drawn by this call.
+                message.Truncated = true;
+            }
+        }
+        else if (!terminated)
+        {
+            // The loop ended without an end marker (only possible after a position code in the
+            // original): the piece runs into whatever the buffer held before.
+            message.Overflow = true;
         }
 
         Messages.Add(message);

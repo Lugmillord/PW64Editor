@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using PW64Editor.Core.Build;
+using PW64Editor.Core.Code;
 using PW64Editor.Core.FileSystem;
 
 namespace PW64Editor.Core.Project;
@@ -12,7 +13,7 @@ namespace PW64Editor.Core.Project;
 /// <para>Folder layout:</para>
 /// <code>
 /// MyHack/
-///   project.json        shared settings (name, version, base ROM SHA-1, build options)
+///   project.json        shared settings (name, version, base ROM SHA-1, build options, code fixes)
 ///   project.user.json   local settings (paths of the clean ROM and the output ROM)
 ///   files/              game files that replace the originals, e.g. 1063_UPWT_005.bin
 ///   backups/            restore points, only created on request (see ProjectBackups)
@@ -68,7 +69,24 @@ public sealed partial class HackProject
         Local.OutputRomPath ?? Path.Combine(Folder, GetOutputBaseName() + ".z64");
 
     /// <summary>The build options stored in the project.</summary>
-    public RomBuildOptions BuildOptions => new(Settings.RelocateAudio, Settings.AllowExpansion);
+    public RomBuildOptions BuildOptions => new(Settings.RelocateAudio, Settings.AllowExpansion, AppliedCodeFixes);
+
+    /// <summary>The code fixes this project applies, in the editor's order.</summary>
+    public IReadOnlyList<CodeFix> AppliedCodeFixes =>
+        CodeFixes.All.Where(f => Settings.AppliedCodeFixes.Contains(f.Id)).ToList();
+
+    /// <summary>Known code fixes the project does not apply yet.</summary>
+    public IReadOnlyList<CodeFix> MissingCodeFixes =>
+        CodeFixes.All.Where(f => !Settings.AppliedCodeFixes.Contains(f.Id)).ToList();
+
+    /// <summary>Marks a code fix as applied (call <see cref="Save"/> afterwards). Applying it twice does nothing.</summary>
+    public void AddCodeFix(CodeFix fix)
+    {
+        if (!Settings.AppliedCodeFixes.Contains(fix.Id))
+        {
+            Settings.AppliedCodeFixes.Add(fix.Id);
+        }
+    }
 
     /// <summary>
     /// Changes where the hack ROM is written (stored in the local settings; call <see cref="Save"/>).
@@ -112,9 +130,10 @@ public sealed partial class HackProject
         Directory.CreateDirectory(fullPath);
         Directory.CreateDirectory(Path.Combine(fullPath, FilesFolderName));
 
+        // New projects start with every known code fix.
         var project = new HackProject(
             fullPath,
-            new ProjectSettings { Name = name, BaseRomSha1 = baseRomSha1 },
+            new ProjectSettings { Name = name, BaseRomSha1 = baseRomSha1, AppliedCodeFixes = [.. CodeFixes.AllIds] },
             new LocalProjectSettings { CleanRomPath = cleanRomPath is null ? null : Path.GetFullPath(cleanRomPath) });
 
         project.Save();
@@ -146,6 +165,13 @@ public sealed partial class HackProject
         {
             throw new ProjectException(
                 $"This project was created with a newer editor (format {settings.FormatVersion}). Please update Hawk's Hangar.");
+        }
+
+        settings.AppliedCodeFixes ??= [];
+        if (settings.AppliedCodeFixes.FirstOrDefault(id => CodeFixes.Find(id) is null) is { } unknown)
+        {
+            throw new ProjectException(
+                $"This project uses the code fix '{unknown}', which this version of the editor does not know. Please update Hawk's Hangar.");
         }
 
         string localFile = Path.Combine(fullPath, LocalFileName);

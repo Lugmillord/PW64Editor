@@ -8,6 +8,7 @@ using PW64Editor.App.Dialogs;
 using PW64Editor.App.Services;
 using PW64Editor.App.Views;
 using PW64Editor.Core.Build;
+using PW64Editor.Core.Code;
 using PW64Editor.Core.Compression;
 using PW64Editor.Core.FileSystem;
 using PW64Editor.Core.Patching;
@@ -36,6 +37,9 @@ public partial class MainWindow : Window
         InitializeComponent();
         _session = session;
         ReloadProject();
+
+        // Offer missing code fixes once the window is visible.
+        Loaded += async (_, _) => await OfferMissingCodeFixesAsync();
     }
 
     // ----------------------------------------------------------------- project
@@ -126,11 +130,22 @@ public partial class MainWindow : Window
 
     private void OnProjectSettings(object sender, RoutedEventArgs e)
     {
-        var dialog = new ProjectSettingsDialog(_session.Project) { Owner = this };
-        if (dialog.ShowDialog() == true)
+        var dialog = new ProjectSettingsDialog(_session) { Owner = this };
+        bool saved = dialog.ShowDialog() == true;
+
+        if (dialog.CodeFixesApplied)
+        {
+            TextEditor.RefreshPreview(); // the preview takes the fixes into account
+        }
+
+        if (saved)
         {
             UpdateProjectInfo();
-            SetStatus("Project settings saved.");
+            SetStatus(dialog.CodeFixesApplied ? "Project settings saved, code fix applied." : "Project settings saved.");
+        }
+        else if (dialog.CodeFixesApplied)
+        {
+            SetStatus("Code fix applied and hack ROM rebuilt.");
         }
     }
 
@@ -492,6 +507,42 @@ public partial class MainWindow : Window
         _session = session;
         ReloadProject();
         SetStatus($"Opened project {session.Project.Settings.Name}.");
+        _ = Dispatcher.InvokeAsync(OfferMissingCodeFixesAsync);
+    }
+
+    /// <summary>
+    /// If the project lacks some of the editor's code fixes (projects made before a fix existed),
+    /// explains them and offers to apply them. "Not now" asks again the next time.
+    /// </summary>
+    private async Task OfferMissingCodeFixesAsync()
+    {
+        IReadOnlyList<CodeFix> missing = _session.Project.MissingCodeFixes;
+        if (missing.Count == 0)
+        {
+            return;
+        }
+
+        var dialog = new CodeFixOfferDialog(missing) { Owner = this };
+        if (dialog.ShowDialog() != true)
+        {
+            SetStatus("Code fixes not applied. They are offered again next time, and in File › Project settings.");
+            return;
+        }
+
+        bool restorePoint = dialog.CreateRestorePoint;
+        EditorSession session = _session;
+        await RunAsync("Applying code fixes…", () =>
+        {
+            // The restore point keeps the state before the fixes.
+            BackupInfo? point = restorePoint ? session.CreateRestorePoint() : null;
+            session.ApplyCodeFixes(missing);
+            return point;
+        }, point =>
+        {
+            TextEditor.RefreshPreview();
+            string backup = point is not null ? $" Restore point {point.Name} created before." : string.Empty;
+            SetStatus($"{missing.Count} code fix(es) applied, hack ROM rebuilt.{backup}");
+        });
     }
 
     /// <summary>

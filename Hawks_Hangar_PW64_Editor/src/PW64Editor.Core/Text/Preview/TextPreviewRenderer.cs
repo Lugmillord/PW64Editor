@@ -40,7 +40,8 @@ public sealed record TextPreview(
 /// <summary>Options for <see cref="TextPreviewRenderer.Render"/>.</summary>
 /// <param name="ShowTextArea">Draws a dashed frame around the room the text has.</param>
 /// <param name="MarkOverflow">Draws the parts of the text that leave their room in red.</param>
-public sealed record TextPreviewOptions(bool ShowTextArea = true, bool MarkOverflow = true);
+/// <param name="SafeTextFix">Draw like a ROM with the code fix "Safe text loading and drawing".</param>
+public sealed record TextPreviewOptions(bool ShowTextArea = true, bool MarkOverflow = true, bool SafeTextFix = false);
 
 /// <summary>
 /// Draws a text the way the game shows it: with the game's own font images, on a rebuilt
@@ -104,7 +105,7 @@ public sealed class TextPreviewRenderer
         var context = new PreviewContext
         {
             Canvas = new ScreenCanvas(),
-            Printer = new FontPrinter(_textFont),
+            Printer = new FontPrinter(_textFont) { SafeTextFix = options.SafeTextFix },
             TextFont = _textFont,
             OtherFonts = _otherFonts,
             Text = text,
@@ -202,8 +203,8 @@ public sealed class TextPreviewRenderer
                 if (message.Overflow)
                 {
                     context.Issues.Add(new TextIssue(true,
-                        $"Line {message.Line}: the piece fills the game's whole buffer of {FontPrinter.MaxMessageLength} values " +
-                        "without an end. The game writes past the buffer and crashes (black screen)."));
+                        $"Line {message.Line}: the piece is too long for the game's buffer of {FontPrinter.MaxMessageLength} values. " +
+                        "The game writes past the buffer and crashes (black screen). The code fix \"Safe text loading and drawing\" prevents this."));
                 }
 
                 if (message.X >= ScreenCanvas.Width)

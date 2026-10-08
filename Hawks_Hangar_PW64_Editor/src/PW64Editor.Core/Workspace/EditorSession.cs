@@ -1,3 +1,4 @@
+using PW64Editor.Core.Code;
 using PW64Editor.Core.FileSystem;
 using PW64Editor.Core.Project;
 using PW64Editor.Core.Rom;
@@ -88,6 +89,33 @@ public sealed class EditorSession
         string romPath = ProjectBuilder.WriteRom(Project, result);
         BackupInfo? restorePoint = createRestorePoint ? ProjectBackups.Create(Project) : null;
         return (result, romPath, restorePoint);
+    }
+
+    /// <summary>
+    /// Applies code fixes to the project and builds the hack ROM right away. If the build fails,
+    /// the project stays unchanged.
+    /// </summary>
+    /// <param name="fixes">The fixes to apply (already applied ones are skipped).</param>
+    /// <returns>The build result and the path of the hack ROM.</returns>
+    public (ProjectBuildResult Result, string RomPath) ApplyCodeFixes(IEnumerable<CodeFix> fixes)
+    {
+        List<string> before = [.. Project.Settings.AppliedCodeFixes];
+        foreach (CodeFix fix in fixes)
+        {
+            Project.AddCodeFix(fix);
+        }
+
+        try
+        {
+            (ProjectBuildResult result, string romPath, _) = Build(createRestorePoint: false);
+            Project.Save();
+            return (result, romPath);
+        }
+        catch
+        {
+            Project.Settings.AppliedCodeFixes = before;
+            throw;
+        }
     }
 
     /// <summary>

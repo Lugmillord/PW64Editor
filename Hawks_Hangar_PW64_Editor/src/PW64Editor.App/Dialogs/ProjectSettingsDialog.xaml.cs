@@ -2,25 +2,34 @@ using System.IO;
 using System.Windows;
 using Microsoft.Win32;
 using PW64Editor.App.Services;
+using PW64Editor.Core.Code;
 using PW64Editor.Core.Project;
+using PW64Editor.Core.Workspace;
 
 namespace PW64Editor.App.Dialogs;
 
 /// <summary>
 /// Edits the project description, the build options and the location of the hack ROM.
-/// Changes are only applied when the user clicks "Save".
+/// Changes are only applied when the user clicks "Save". Code fixes are the exception: "Apply"
+/// adds a fix to the project and rebuilds the hack ROM at once.
 /// </summary>
 public partial class ProjectSettingsDialog : Window
 {
+    private readonly EditorSession _session;
     private readonly HackProject _project;
 
     /// <summary>The chosen output path; null means the default location.</summary>
     private string? _outputPath;
 
-    public ProjectSettingsDialog(HackProject project)
+    public ProjectSettingsDialog(EditorSession session)
     {
         InitializeComponent();
-        _project = project;
+        _session = session;
+        _project = session.Project;
+        HackProject project = _project;
+        FixList.ItemsSource = CodeFixes.All
+            .Select(f => new CodeFixRow(f, project.Settings.AppliedCodeFixes.Contains(f.Id)))
+            .ToList();
 
         ProjectSettings s = project.Settings;
         NameBox.Text = s.Name;
@@ -31,6 +40,29 @@ public partial class ProjectSettingsDialog : Window
         ExpandBox.IsChecked = s.AllowExpansion;
         _outputPath = project.Local.OutputRomPath;
         ShowOutputPath();
+    }
+
+    /// <summary>True if a code fix was applied (the hack ROM was rebuilt), even if the dialog is cancelled.</summary>
+    public bool CodeFixesApplied { get; private set; }
+
+    private async void OnApplyFix(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not CodeFixRow row || row.IsApplied)
+        {
+            return;
+        }
+
+        try
+        {
+            (_, string romPath) = await Ui.RunBusyAsync(this, () => _session.ApplyCodeFixes([row.Fix]));
+            row.IsApplied = true;
+            CodeFixesApplied = true;
+            FixStatus.Text = $"\"{row.Name}\" applied. Hack ROM rebuilt: {romPath}";
+        }
+        catch (Exception ex) when (Ui.IsExpectedError(ex))
+        {
+            Ui.ShowError(this, $"The fix could not be applied; the project is unchanged.\n\n{ex.Message}");
+        }
     }
 
     private void OnChangeOutput(object sender, RoutedEventArgs e)

@@ -1,3 +1,4 @@
+using PW64Editor.Core.Code;
 using PW64Editor.Core.FileSystem;
 using PW64Editor.Core.Project;
 using PW64Editor.Core.Rom;
@@ -184,6 +185,59 @@ internal static class ProjectCommands
                 BackupInfo info = ProjectBackups.Create(project);
                 Console.WriteLine($"Restore point created: {info.Name}");
             }
+        });
+    }
+
+    public static int Fixes(string[] args)
+    {
+        bool apply = CommandHelpers.ExtractFlag(ref args, "--apply");
+        if (!TryParseRomOption(ref args, out string? romOverride))
+        {
+            return ExitCodes.InvalidArguments;
+        }
+
+        if (args.Length != 1)
+        {
+            Console.Error.WriteLine("Usage: pw64cli project-fixes <folder> [--apply] [--rom <clean rom>]");
+            return ExitCodes.InvalidArguments;
+        }
+
+        return Run(() =>
+        {
+            HackProject project = HackProject.Load(args[0]);
+            IReadOnlyList<CodeFix> missing = project.MissingCodeFixes;
+
+            foreach (CodeFix fix in CodeFixes.All)
+            {
+                bool applied = !missing.Contains(fix);
+                Console.WriteLine($"[{(applied ? "x" : " ")}] {fix.Name} ({fix.Id})");
+                Console.WriteLine($"      Problem: {fix.Problem}");
+                Console.WriteLine($"      Fix:     {fix.Solution}");
+            }
+
+            if (missing.Count == 0)
+            {
+                Console.WriteLine("All code fixes are applied.");
+                return;
+            }
+
+            if (!apply)
+            {
+                Console.WriteLine($"{missing.Count} fix(es) not applied. Run again with --apply to apply them and build the hack ROM.");
+                return;
+            }
+
+            N64Rom cleanRom = LoadCleanRom(project, romOverride);
+            foreach (CodeFix fix in missing)
+            {
+                project.AddCodeFix(fix);
+            }
+
+            // Build first, save afterwards: if the build fails, the project stays as it was.
+            ProjectBuildResult result = ProjectBuilder.Build(project, cleanRom, RomLayout.PilotwingsUsa);
+            string romPath = ProjectBuilder.WriteRom(project, result);
+            project.Save();
+            Console.WriteLine($"Applied {missing.Count} code fix(es). Hack ROM written to {romPath}");
         });
     }
 

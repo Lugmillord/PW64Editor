@@ -24,10 +24,12 @@ public sealed record TextValidation(IReadOnlyList<TextIssue> Issues, TextLayoutI
 /// <para>What the game does when drawing a text (uvFontPrintStr16 in src/kernel/font.c):</para>
 /// <list type="bullet">
 ///   <item>A text is drawn in pieces: each line, and each part after an [x=...] position, is one
-///         piece. The buffer for a piece holds 44 characters (FONT_MAX_MSG_LEN). Tested in an
-///         emulator: a mission description with a full 44-character line keeps the game from
-///         starting (black screen). The editor therefore allows at most 40 characters per piece;
-///         the longest original piece has 39.</item>
+///         piece. The buffer for a piece holds 44 values (FONT_MAX_MSG_LEN) including the end
+///         marker. A bug in the original writes the marker behind the buffer for pieces of 43
+///         characters followed by a line break, or of 44 and more: the game crashes (black
+///         screen, confirmed in an emulator). The code fix "Safe text loading and drawing"
+///         (Code.CodeFixes.SafeText) removes the crash. The editor allows at most 40 characters
+///         per piece either way; the longest original piece has 39.</item>
 ///   <item>At most 30 pieces can be drawn per frame on the whole screen (FONT_MSG_COUNT). The game
 ///         does not check this; more pieces overwrite other memory and can crash the game.</item>
 ///   <item>There is no automatic line wrapping, and the boxes on screen are sized for the original
@@ -44,7 +46,7 @@ public sealed record TextValidation(IReadOnlyList<TextIssue> Issues, TextLayoutI
 public static class TextValidator
 {
     /// <summary>Size of the game's buffer for one piece (FONT_MAX_MSG_LEN, US version).</summary>
-    /// <remarks>Only for documentation: filling it completely crashed the game in tests.</remarks>
+    /// <remarks>Only for documentation: without the code fix, 43 characters plus a line break already crash the game.</remarks>
     public const int GameBufferCharactersPerPiece = 44;
 
     /// <summary>

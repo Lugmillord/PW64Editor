@@ -39,6 +39,13 @@ public sealed class ProjectSettings
 
     /// <summary>Build option: allow enlarging the ROM to 16/32/64 MiB if needed.</summary>
     public bool AllowExpansion { get; set; }
+
+    /// <summary>
+    /// Ids of the code fixes applied to this hack (see <see cref="Code.CodeFixes"/>). New projects get
+    /// all known fixes; projects made before a fix existed are offered it when opened. A fix cannot be
+    /// removed again (only by returning to a restore point).
+    /// </summary>
+    public List<string> AppliedCodeFixes { get; set; } = [];
 }
 
 /// <summary>

@@ -24,6 +24,8 @@ namespace PW64Editor.Core.Build;
 ///         Otherwise keep the original table bytes. This is what makes an unchanged rebuild
 ///         byte-identical: our MIO0 compressor works correctly but produces different bytes
 ///         than Nintendo's.</item>
+///   <item>Apply the selected code fixes (<see cref="RomBuildOptions.CodeFixes"/>). Each one checks
+///         that the original code is really there before changing it.</item>
 ///   <item>Update the boot checksum (skipped if the CIC type is unknown).</item>
 /// </list>
 /// <para>
@@ -111,7 +113,13 @@ public static class RomBuilder
         //    this range only holds the original zero padding (4 bytes).
         output.AsSpan(fileSystemEnd, placement.AudioOffset - fileSystemEnd).Clear();
 
-        // 5. Boot checksum. The code, the file table and the first game files all lie inside
+        // 5. Code fixes. They only exchange instructions inside the game code, which never moves.
+        foreach (CodeFix fix in options.CodeFixes ?? [])
+        {
+            fix.Apply(output, CodeFixes.CodeStart, CodeFixes.CodeEnd(layout));
+        }
+
+        // 6. Boot checksum. The code, the file table and the first game files all lie inside
         //    the checksummed first MiB. With an unknown CIC (only possible with homebrew or
         //    test data, never with a verified retail ROM) we cannot compute it, so we leave the
         //    header alone and report it in the result.

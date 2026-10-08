@@ -37,6 +37,7 @@ try
         "project-status" => ProjectCommands.Status(commandArgs),
         "project-build" => ProjectCommands.Build(commandArgs),
         "project-patch" => ProjectCommands.Patch(commandArgs),
+        "project-fixes" => ProjectCommands.Fixes(commandArgs),
         "project-backup" => ProjectCommands.Backup(commandArgs),
         "project-backups" => ProjectCommands.Backups(commandArgs),
         "project-restore" => ProjectCommands.Restore(commandArgs),
@@ -102,6 +103,8 @@ static void PrintUsage()
     Console.WriteLine("                             Build and overwrite the hack ROM (--backup: restore point)");
     Console.WriteLine("  project-patch <folder> <patch.bps> [--rom <path>]");
     Console.WriteLine("                             Create a BPS patch of the project");
+    Console.WriteLine("  project-fixes <folder> [--apply] [--rom <path>]");
+    Console.WriteLine("                             List the code fixes; --apply adds missing ones and builds");
     Console.WriteLine("  project-backup <folder>    Create a restore point (project files + hack ROM)");
     Console.WriteLine("  project-backups <folder>   List restore points");
     Console.WriteLine("  project-restore <folder> <name>");
