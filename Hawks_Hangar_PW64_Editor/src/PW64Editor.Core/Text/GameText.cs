@@ -11,6 +11,12 @@ public sealed record GameText(GameTextEntry Entry, string Markup, TextCategory C
     public int Index => Entry.Index;
 
     public string Name => Entry.Name;
+
+    /// <summary>True for texts added by the user (number at or above the original text count).</summary>
+    public bool IsCustom { get; init; }
+
+    /// <summary>True for a free slot left by a removed custom text (see <see cref="GameTextEntry.IsFree"/>).</summary>
+    public bool IsFree => Entry.IsFree;
 }
 
 /// <summary>
@@ -46,13 +52,21 @@ public sealed class GameTextLibrary
     /// <param name="font">The text font.</param>
     /// <param name="textFileData">The text file (FORM "ADAT").</param>
     /// <param name="fromProject">Whether the file comes from the project (for display only).</param>
-    public static GameTextLibrary Create(TextFont font, byte[] textFileData, bool fromProject)
+    /// <param name="originalCount">Number of texts of the original game. Texts from this number on are
+    /// custom texts and are grouped as such, whatever their name looks like.</param>
+    public static GameTextLibrary Create(TextFont font, byte[] textFileData, bool fromProject,
+        int originalCount = GameTextFile.RetailTextCount)
     {
         GameTextFile file = GameTextFile.Parse(textFileData);
         var codec = new TextCodec(font);
         List<GameText> texts = file.Entries
-            .Select(e => new GameText(e, codec.Decode(e.Data), TextCatalog.Categorize(e.Name)))
+            .Select(e => e.Index >= originalCount
+                ? new GameText(e, codec.Decode(e.Data), CustomTexts.Category(e.Name)) { IsCustom = true }
+                : new GameText(e, codec.Decode(e.Data), TextCatalog.Categorize(e.Name)))
             .ToList();
-        return new GameTextLibrary(font, file, texts, fromProject);
+        return new GameTextLibrary(font, file, texts, fromProject) { OriginalCount = originalCount };
     }
+
+    /// <summary>Number of texts of the original game; texts from this number on are custom texts.</summary>
+    public int OriginalCount { get; private init; } = GameTextFile.RetailTextCount;
 }

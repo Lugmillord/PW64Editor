@@ -72,6 +72,8 @@
         <!-- Search and group controls. -->
         <DockPanel DockPanel.Dock="Top" Margin="0,0,0,8">
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <Button x:Name="AddTextButton" Content="Add text…" Click="OnAddText" Style="{StaticResource DialogButton}"
+                        ToolTipService.ShowOnDisabled="True" />
                 <Button Content="Codes…" Click="OnShowCodes" Style="{StaticResource DialogButton}"
                         ToolTip="What the codes in square brackets mean, and which characters the font has" />
                 <Button Content="Expand all" Click="OnExpandAll" Style="{StaticResource DialogButton}" />
@@ -169,7 +171,16 @@
                                         ToolTip="Back to the last saved version of this text" />
                                 <Button x:Name="OriginalButton" Content="Restore original" Click="OnRestoreOriginal" Padding="10,3" Margin="0,0,6,6"
                                         ToolTip="Back to the text of the original game" />
+                                <Button x:Name="RemoveButton" Content="Remove text" Click="OnRemoveText" Padding="10,3" Margin="12,0,6,6"
+                                        ToolTip="Removes this added text. Its number becomes free for the next new text." />
                             </WrapPanel>
+
+                            <!-- Only for added texts: the game does not check their length where they are used later. -->
+                            <Border x:Name="CustomWarning" Background="#FFF4E0" BorderBrush="#E8B04B" BorderThickness="1"
+                                    Padding="8,5" Margin="0,4,0,0" Visibility="Collapsed">
+                                <TextBlock TextWrapping="Wrap" Foreground="#6B4500"
+                                           Text="Added text: it may have up to 10 lines, but the game does not check this. Make sure yourself that the text is not too long for the place where you will use it. The game does not show the text anywhere yet." />
+                            </Border>
 
                             <!-- Short message about rejected input; disappears after a few seconds. -->
                             <TextBlock x:Name="InputMessage" Foreground="#B3261E" TextWrapping="Wrap" Margin="0,2,0,0"

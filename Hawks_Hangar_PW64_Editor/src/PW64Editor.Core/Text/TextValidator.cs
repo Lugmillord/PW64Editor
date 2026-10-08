@@ -60,7 +60,8 @@ public static class TextValidator
 
     /// <param name="maxLines">Most lines the text may have (see <see cref="TextLimits"/>). More is an error.
     /// If null, more lines than the original text only give a warning.</param>
-    public static TextValidation Validate(TextCodec codec, string markup, string originalMarkup, int? maxLines = null)
+    /// <param name="name">The text's name, to check texts into which the game writes numbers (<see cref="TextNumberSlots"/>).</param>
+    public static TextValidation Validate(TextCodec codec, string markup, string originalMarkup, int? maxLines = null, string? name = null)
     {
         var issues = new List<TextIssue>();
         TextEncodeResult encoded = codec.Encode(markup);
@@ -76,6 +77,11 @@ public static class TextValidator
 
         TextLayoutInfo layout = Measure(encoded.Codes);
         IReadOnlyList<int> pieces = PieceLengths(encoded.Codes);
+
+        if (name is not null)
+        {
+            issues.AddRange(TextNumberSlots.Validate(name, encoded.Codes));
+        }
 
         foreach (int value in PositionValues(encoded.Codes).Where(v => v is TextCodec.CodeLineBreak or TextCodec.CodeEnd).Distinct())
         {

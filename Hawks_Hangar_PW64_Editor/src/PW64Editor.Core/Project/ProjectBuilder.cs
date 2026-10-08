@@ -52,6 +52,8 @@ public static class ProjectBuilder
             files[position] = ApplyOverride(files[position], replacement, name);
         }
 
+        CheckTextFile(project, fileSystem, files);
+
         RomBuildResult romBuild;
         try
         {
@@ -103,6 +105,45 @@ public static class ProjectBuilder
         }
 
         return patch;
+    }
+
+    /// <summary>
+    /// A text file with more texts than the game's tables hold would crash the game: refuse to build it.
+    /// </summary>
+    private static void CheckTextFile(HackProject project, GameFileSystem cleanFileSystem, List<GameFile> files)
+    {
+        GameFile originalText;
+        try
+        {
+            originalText = Text.GameTextFile.FindFile(cleanFileSystem);
+        }
+        catch (InvalidDataException)
+        {
+            return; // not the retail layout (test data): nothing to check
+        }
+
+        GameFile current = files.First(f => f.TableIndex == originalText.TableIndex);
+        if (ReferenceEquals(current.Data, originalText.Data))
+        {
+            return;
+        }
+
+        int count, originalCount;
+        try
+        {
+            count = Text.GameTextFile.Parse(current.Data).Entries.Count;
+            originalCount = Text.GameTextFile.Parse(originalText.Data).Entries.Count;
+        }
+        catch (InvalidDataException ex)
+        {
+            throw new ProjectException($"The project's text file is damaged: {ex.Message}", ex);
+        }
+
+        if (Text.CustomTexts.CountProblem(count, originalCount,
+                project.Settings.AppliedCodeFixes.Contains(Code.CodeFixes.ExpandedTexts.Id)) is { } problem)
+        {
+            throw new ProjectException(problem);
+        }
     }
 
     private static GameFile ApplyOverride(GameFile original, FileOverride replacement, string name)

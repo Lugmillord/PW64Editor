@@ -6,6 +6,12 @@ using PW64Editor.Core.Text;
 
 namespace PW64Editor.Core.Workspace;
 
+/// <summary>A custom text to add (see <see cref="EditorSession.SaveTexts(GameTextLibrary, IReadOnlyDictionary{int, string}, IReadOnlyList{NewText}, IReadOnlyCollection{int})"/>).</summary>
+/// <param name="Index">Its number: a free number at or above the original text count.</param>
+/// <param name="Name">Its unique name.</param>
+/// <param name="Markup">Its content.</param>
+public sealed record NewText(int Index, string Name, string Markup);
+
 /// <summary>
 /// An open project in the editor, together with the clean ROM it is based on.
 /// </summary>
@@ -179,7 +185,7 @@ public sealed class EditorSession
         TextFont font = TextFont.Load(CleanFileSystem);
         GameFile textFile = GameTextFile.FindFile(CleanFileSystem);
         byte[] data = GetCurrentFileData(textFile.TableIndex, out bool fromProject);
-        return GameTextLibrary.Create(font, data, fromProject);
+        return GameTextLibrary.Create(font, data, fromProject, OriginalTextCount);
     }
 
     /// <summary>Loads the texts of the original game (ignoring the project), for comparison.</summary>
@@ -189,6 +195,14 @@ public sealed class EditorSession
         return GameTextLibrary.Create(font, GameTextFile.FindFile(CleanFileSystem).Data, fromProject: false);
     }
 
+    /// <summary>Number of texts in the original game (439 in the US version).</summary>
+    public int OriginalTextCount => _originalTextCount ??= GameTextFile.Parse(GameTextFile.FindFile(CleanFileSystem).Data).Entries.Count;
+
+    private int? _originalTextCount;
+
+    /// <summary>True if the project may contain more texts than the original game (code fix applied).</summary>
+    public bool CanAddTexts => Project.Settings.AppliedCodeFixes.Contains(CodeFixes.ExpandedTexts.Id);
+
     /// <summary>
     /// Saves edited texts into the project's copy of the text file.
     /// </summary>
@@ -196,22 +210,98 @@ public sealed class EditorSession
     /// <param name="changedMarkup">New markup by text index.</param>
     /// <returns>Path of the written text file.</returns>
     /// <exception cref="ProjectException">A text has errors and cannot be encoded.</exception>
-    public string SaveTexts(GameTextLibrary library, IReadOnlyDictionary<int, string> changedMarkup)
+    public string SaveTexts(GameTextLibrary library, IReadOnlyDictionary<int, string> changedMarkup) =>
+        SaveTexts(library, changedMarkup, [], []);
+
+    /// <summary>
+    /// Saves edited, added and removed texts into the project's copy of the text file.
+    /// </summary>
+    /// <param name="library">The texts the edits are based on (from <see cref="LoadTexts"/>).</param>
+    /// <param name="changedMarkup">New markup of existing texts, by text index.</param>
+    /// <param name="added">New custom texts. Their numbers must be free (see <see cref="CustomTexts.NextFreeIndex"/>).</param>
+    /// <param name="removed">Numbers of custom texts to remove; their slots become free.</param>
+    /// <returns>Path of the written text file.</returns>
+    /// <exception cref="ProjectException">A text has errors, a rule for custom texts is broken, or the
+    /// project lacks the code fix needed for more texts.</exception>
+    public string SaveTexts(GameTextLibrary library, IReadOnlyDictionary<int, string> changedMarkup,
+        IReadOnlyList<NewText> added, IReadOnlyCollection<int> removed)
     {
-        var newData = new Dictionary<int, byte[]>();
+        List<TextFileEntry> texts = library.File.ToEntries();
+        int originalCount = OriginalTextCount;
+
         foreach ((int index, string markup) in changedMarkup)
         {
-            TextEncodeResult result = library.Codec.Encode(markup);
-            if (!result.Success)
+            if (index < 0 || index >= texts.Count || texts[index].IsFree)
             {
-                throw new ProjectException($"Text {index} ({library.Texts[index].Name}) has errors: {result.Errors[0].Message}");
+                throw new ProjectException($"There is no text number {index}.");
             }
 
-            newData[index] = TextCodec.ToChunkData(result.Codes, library.Texts[index].Entry.Data.Length);
+            texts[index] = texts[index] with { Data = EncodeForSaving(library, markup, texts[index].Name, library.Texts[index].Entry.Data.Length) };
+        }
+
+        foreach (int index in removed)
+        {
+            if (index < originalCount)
+            {
+                throw new ProjectException($"Text {index} belongs to the original game and cannot be removed.");
+            }
+
+            if (index < texts.Count)
+            {
+                texts[index] = TextFileEntry.FreeSlot;
+            }
+        }
+
+        foreach (NewText text in added.OrderBy(t => t.Index))
+        {
+            if (text.Index < originalCount)
+            {
+                throw new ProjectException($"New texts must come after the {originalCount} original texts (number {text.Index}).");
+            }
+
+            string? nameProblem = CustomTexts.CheckName(text.Name, texts.Where(t => !t.IsFree).Select(t => t.Name));
+            if (nameProblem is not null)
+            {
+                throw new ProjectException($"Text {text.Index}: {nameProblem}");
+            }
+
+            while (texts.Count <= text.Index)
+            {
+                texts.Add(TextFileEntry.FreeSlot);
+            }
+
+            if (!texts[text.Index].IsFree)
+            {
+                throw new ProjectException($"Text number {text.Index} is already used by {texts[text.Index].Name}.");
+            }
+
+            texts[text.Index] = new TextFileEntry(text.Name, EncodeForSaving(library, text.Markup, text.Name, 0));
+        }
+
+        // Free slots at the end are not needed: no text behind them has to keep its number.
+        while (texts.Count > originalCount && texts[^1].IsFree)
+        {
+            texts.RemoveAt(texts.Count - 1);
+        }
+
+        if (CustomTexts.CountProblem(texts.Count, originalCount, CanAddTexts) is { } problem)
+        {
+            throw new ProjectException(problem);
         }
 
         GameFile original = GameTextFile.FindFile(CleanFileSystem);
-        return Project.WriteOverride(original, library.File.Build(newData));
+        return Project.WriteOverride(original, library.File.Build(texts));
+    }
+
+    private static byte[] EncodeForSaving(GameTextLibrary library, string markup, string name, int minimumSize)
+    {
+        TextEncodeResult result = library.Codec.Encode(markup);
+        if (!result.Success)
+        {
+            throw new ProjectException($"Text {name} has errors: {result.Errors[0].Message}");
+        }
+
+        return TextCodec.ToChunkData(result.Codes, minimumSize);
     }
 
     /// <summary>Lists the restore points, newest first.</summary>

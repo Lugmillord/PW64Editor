@@ -70,8 +70,115 @@ public static class CodeFixes
                 [0x0067082A, 0x5420FFD3, 0x000878C0, 0x14670008, 0x2416FFFF]),
         ]);
 
+    /// <summary>Address of the moved text name table (see <see cref="ExpandedTexts"/>).</summary>
+    public const uint TextNameTableAddress = 0x801FE000;
+
+    /// <summary>Address of the moved text data table (see <see cref="ExpandedTexts"/>).</summary>
+    public const uint TextDataTableAddress = 0x801FF000;
+
+    /// <summary>Number of texts the game can hold with <see cref="ExpandedTexts"/> (439 without it).</summary>
+    public const int ExpandedTextCapacity = 1024;
+
+    /// <summary>
+    /// Room for 1024 texts, and four more corrections of the text code (US version).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Text tables</b> (textLoadBlock, textGetDataByName, textGetDataByIdx in
+    /// src/app/text_data.c): the game keeps one pointer per text name and per text in two arrays
+    /// of exactly 440 and 439 entries, without any bounds check. The retail game fills them
+    /// completely, so one more text overwrites the counters behind them and crashes the game.
+    /// The fix moves both arrays to 0x801FE000 and 0x801FF000, with room for 1024 entries each
+    /// (8 KiB). This memory lies directly in front of the program block (0x80200000), so the
+    /// room behind the game's variables (0x803805E0) stays free for new program code. Two more
+    /// changes keep the game from using the tables' memory otherwise: the memory manager treats
+    /// it as part of the program block, which now starts at 0x801FE000 (uvMemInitBlocks), and the
+    /// clearing of free memory at every level start ends in front of it (uvMemClearRegions). The
+    /// tables therefore behave exactly like the original ones.</para>
+    /// <para>The program block is enlarged instead of adding a block of its own on purpose: the
+    /// memory manager only checks whether the start or the end of a new allocation lies inside a
+    /// reserved block, so an allocation larger than a small block could cover it completely.</para>
+    /// <para>Memory layout rule for future fixes: new data goes further down in front of
+    /// 0x801FE000, new program code behind 0x803805E0.</para>
+    /// <para><b>Missing texts</b> (textGetDataByIdx): for a text number that does not exist, the
+    /// game returns NULL, and most callers crash on it. Now it returns an empty text instead. That
+    /// text (a line break and the end code) is written over the start of a debug message
+    /// ("Null Kanji string...") that the retail game never prints, because its print function
+    /// is empty.</para>
+    /// <para><b>Flight messages</b> (hudText_8031D8E0, hudWarningText in src/app/hud.c): the copy into
+    /// the 60-value message buffers is meant to stop at the end code, but compares the signed value
+    /// with 0xFFFF and never stops, reading up to 120 bytes past every text. The comparison now uses -1.</para>
+    /// <para><b>ASCII strings</b> (uvFontPrintStr, src/kernel/font.c): the same overflow as in
+    /// uvFontPrintStr16 for strings of 44 or more characters; they are now cut after 43.</para>
+    /// <para><b>Numbers in texts</b> (textFmtIntAt, src/app/text_data.c): the game writes numbers into
+    /// texts at fixed places, e.g. the track number of "Sound Track". A number with more digits
+    /// than its slot moves the write position in front of the slot, possibly in front of the text.
+    /// Now the number is cut to the size of its slot instead (the last digits are shown).</para>
+    /// </remarks>
+    public static readonly CodeFix ExpandedTexts = new(
+        Id: "expanded-texts-v1",
+        Name: "Room for 1024 texts and safer text handling",
+        Problem:
+            "The game has room for exactly its 439 texts; one more crashes it. Missing texts, long flight messages " +
+            "and numbers that are too big for their place in a text can also crash it or damage memory.",
+        Solution:
+            "The text tables move to a reserved memory area with room for 1024 texts. Missing texts show up empty, " +
+            "message copies stop at the end of the text, and lines and numbers are cut instead of overflowing.",
+        Patches:
+        [
+            // 1. Reserve 8 KiB in front of the program block: block start 0x80200000 -> 0x801FE000 (uvMemInitBlocks).
+            //    The start needs two instructions (lui + addiu). The second one takes the place of "lui $t3, 0x8000",
+            //    whose only use is the start of block 5 (exception vectors, 0x80000000-0x80000400). Block 5 now
+            //    starts at 0 instead: the heap only uses addresses from 0x80000000 on, so it protects the same memory.
+            CodePatch.FromWords("memory block list, uvMemInitBlocks", 0x2B3AC,
+                [0x3C098020, 0x254A05E0, 0x3C0B8000, 0xAC4E0000, 0xAC440004, 0xAC440008, 0xAC4F000C, 0xAC580010,
+                    0xAC590014, 0xAC450018, 0xAC48001C, 0xAC490020, 0xAC4A0024, 0xAC4B0028, 0xAC45002C],
+                [0x3C098020, 0x254A05E0, 0x2529E000, 0xAC4E0000, 0xAC440004, 0xAC440008, 0xAC4F000C, 0xAC580010,
+                    0xAC590014, 0xAC450018, 0xAC48001C, 0xAC490020, 0xAC4A0024, 0xAC400028, 0xAC45002C]),
+            // ... and do not clear it at every level start (the second loop of uvMemClearRegions ends in front of it;
+            //     it ended at 0x802000A0, the start of the kernel code).
+            CodePatch.FromWords("free memory clearing, uvMemClearRegions", 0x2B44C,
+                [0x3C038020, 0x246300A0, 0x3C028012, 0x10600005, 0x34425800],
+                [0x3C038020, 0x2463E000, 0x3C028012, 0x10600005, 0x34425800]),
+            // 2. Text tables: names 0x80377F10 -> 0x801FE000, data 0x803785F0 -> 0x801FF000.
+            CodePatch.FromWords("text data table, textLoadBlock", 0xC94B8,
+                [0x3C128038, 0x265285F0, 0x37DE5441],
+                [0x3C128020, 0x2652F000, 0x37DE5441]),
+            CodePatch.FromWords("text name table, textLoadBlock", 0xC9504,
+                [0x3C018037, 0x00402025, 0x000E7880, 0x002F0821, 0xAC227F10],
+                [0x3C018020, 0x00402025, 0x000E7880, 0x002F0821, 0xAC22E000]),
+            CodePatch.FromWords("text name table, textGetDataByName", 0xC965C,
+                [0x3C118037, 0x26317F10, 0x00009025],
+                [0x3C118020, 0x2631E000, 0x00009025]),
+            CodePatch.FromWords("text data table, textGetDataByName", 0xC9678,
+                [0x3C0F8038, 0x01F27821, 0x8DEF85F0],
+                [0x3C0F8020, 0x01F27821, 0x8DEFF000]),
+            // 3. textGetDataByIdx: new table, and an empty text instead of NULL for unknown numbers.
+            CodePatch.FromWords("text lookup by number, textGetDataByIdx", 0xC96D8,
+                [0x3C028038, 0x008E082A, 0x10200003, 0x004F1021, 0x03E00008, 0x8C4285F0, 0x00001025, 0x03E00008, 0x00000000],
+                [0x3C028020, 0x008E082A, 0x10200003, 0x004F1021, 0x03E00008, 0x8C42F000, 0x3C028035, 0x03E00008, 0x24425C60]),
+            // The empty text at 0x80355C60 (ROM 0xDD190): line break, end code. Was "Null" of an unused debug message.
+            CodePatch.FromWords("empty text, unused debug message", 0xDD190,
+                [0x4E756C6C, 0x204B616E, 0x6A692073],
+                [0x0FFEFFFF, 0x204B616E, 0x6A692073]),
+            // 4. Flight messages: stop the copy at the end code (compare with -1 instead of 0xFFFF).
+            CodePatch.FromWords("message copy, hudText_8031D8E0", 0xA4E90,
+                [0x00402025, 0x3405FFFF, 0x84990000, 0x24630002, 0xA4790BCE],
+                [0x00402025, 0x2405FFFF, 0x84990000, 0x24630002, 0xA4790BCE]),
+            CodePatch.FromWords("message copy, hudWarningText", 0xA4F68,
+                [0x00402025, 0x3405FFFF, 0x84990000, 0x24630002, 0xA4790B3E],
+                [0x00402025, 0x2405FFFF, 0x84990000, 0x24630002, 0xA4790B3E]),
+            // 5. ASCII strings: at most 43 characters (uvFontPrintStr).
+            CodePatch.FromWords("ASCII line limit, uvFontPrintStr", 0x1AB6C,
+                [0x2841002D, 0x14200003, 0x0040B825, 0xA2C0002C, 0x2417002C],
+                [0x2841002C, 0x14200003, 0x0040B825, 0xA2C0002B, 0x2417002B]),
+            // 6. Numbers in texts: digits = min(digits, length) (textFmtIntAt, first 10 instructions rewritten).
+            CodePatch.FromWords("number digits, textFmtIntAt", 0xC9934,
+                [0x28A10064, 0x14200003, 0x00077040, 0x10000006, 0x24030003, 0x28A1000A, 0x14200003, 0x24030001, 0x10000001, 0x24030002],
+                [0x00077040, 0x28A1000A, 0x38210001, 0x24230001, 0x28A10064, 0x38210001, 0x00611821, 0x00C3082A, 0x54200001, 0x00C01825]),
+        ]);
+
     /// <summary>All known fixes.</summary>
-    public static IReadOnlyList<CodeFix> All { get; } = [SafeText];
+    public static IReadOnlyList<CodeFix> All { get; } = [SafeText, ExpandedTexts];
 
     /// <summary>The ids of all known fixes (what new projects get).</summary>
     public static IReadOnlyList<string> AllIds { get; } = All.Select(f => f.Id).ToList();

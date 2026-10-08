@@ -64,7 +64,10 @@ public partial class TextTab : UserControl
     public event EventHandler? UnsavedChangesChanged;
 
     /// <summary>True if at least one text was edited and not saved yet.</summary>
-    public bool HasUnsavedChanges => _rows.Any(r => r.IsUnsaved);
+    public bool HasUnsavedChanges => _rows.Any(r => r.IsUnsaved) || _removedRows.Count > 0;
+
+    /// <summary>Saved custom texts the user removed; they disappear from the file when saving.</summary>
+    private readonly List<TextRow> _removedRows = [];
 
     /// <summary>One line of the table. Public properties, because WPF data binding reads them.</summary>
     public sealed partial class TextRow : INotifyPropertyChanged
@@ -123,7 +126,13 @@ public partial class TextTab : UserControl
             }
         }
 
-        public bool IsUnsaved => _markup != _savedMarkup;
+        /// <summary>True for a text added in this session and not saved yet.</summary>
+        public bool IsNew { get; init; }
+
+        /// <summary>True for texts added by the user (they come after the original texts).</summary>
+        public bool IsCustom => Text.IsCustom;
+
+        public bool IsUnsaved => IsNew || _markup != _savedMarkup;
 
         public bool DiffersFromOriginal => _markup != OriginalMarkup;
 
@@ -131,9 +140,10 @@ public partial class TextTab : UserControl
         public string Preview => ToPreview(_markup);
 
         /// <summary>● for unsaved edits, ✎ for saved changes compared to the original game.</summary>
-        public string StatusMark => IsUnsaved ? "●" : DiffersFromOriginal ? "✎" : string.Empty;
+        public string StatusMark => IsUnsaved ? "●" : IsCustom ? "+" : DiffersFromOriginal ? "✎" : string.Empty;
 
-        public string? StatusText => IsUnsaved ? "Changed, not saved yet" : DiffersFromOriginal ? "Changed compared to the original game" : null;
+        public string? StatusText => IsNew ? "Added, not saved yet" : IsUnsaved ? "Changed, not saved yet"
+            : IsCustom ? "Added text" : DiffersFromOriginal ? "Changed compared to the original game" : null;
 
         private void NotifyAll()
         {
@@ -184,7 +194,10 @@ public partial class TextTab : UserControl
         }
 
         _library = library;
-        _rows = library.Texts.Select(t => new TextRow(t, OriginalMarkupOf(original, t))).ToList();
+        // Free slots (numbers of removed custom texts) are not shown.
+        _rows = library.Texts.Where(t => !t.IsFree).Select(t => new TextRow(t, OriginalMarkupOf(original, t))).ToList();
+        _removedRows.Clear();
+        UpdateAddTextButton();
 
         // For the preview: other texts on the same screen are looked up by name. Names are unique
         // in the retail game; should a file contain one twice, the first one counts (like in the game).
@@ -208,9 +221,11 @@ public partial class TextTab : UserControl
         ShowDetails(null);
 
         int changed = _rows.Count(r => r.DiffersFromOriginal);
+        int custom = _rows.Count(r => r.IsCustom);
+        string added = custom > 0 ? $", {custom} added (marked +)" : string.Empty;
         SourceText.Text = library.FromProject
-            ? $"{library.Texts.Count} texts from the project, {changed} changed compared to the original game (marked ✎). Unsaved edits are marked ●."
-            : $"{library.Texts.Count} texts from the original game. Edited texts are marked ● until saved.";
+            ? $"{_rows.Count} texts from the project, {changed} changed compared to the original game (marked ✎){added}. Unsaved edits are marked ●."
+            : $"{_rows.Count} texts from the original game. Edited texts are marked ● until saved.";
         UnsavedChangesChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -227,7 +242,7 @@ public partial class TextTab : UserControl
 
         foreach (TextRow row in _rows.Where(r => r.IsUnsaved))
         {
-            if (TextValidator.Validate(_library.Codec, row.Markup, row.OriginalMarkup, MaxLines(row)).HasErrors)
+            if (TextValidator.Validate(_library.Codec, row.Markup, row.OriginalMarkup, MaxLines(row), row.Name).HasErrors)
             {
                 SearchBox.Text = string.Empty;
                 TextGrid.SelectedItem = row;
@@ -251,13 +266,16 @@ public partial class TextTab : UserControl
             return 0;
         }
 
-        Dictionary<int, string> changes = _rows.Where(r => r.IsUnsaved).ToDictionary(r => r.Index, r => r.Markup);
-        if (changes.Count == 0)
+        Dictionary<int, string> changes = _rows.Where(r => r.IsUnsaved && !r.IsNew).ToDictionary(r => r.Index, r => r.Markup);
+        List<NewText> added = _rows.Where(r => r.IsNew).Select(r => new NewText(r.Index, r.Name, r.Markup)).ToList();
+        List<int> removed = _removedRows.Select(r => r.Index).ToList();
+        if (changes.Count + added.Count + removed.Count == 0)
         {
             return 0;
         }
 
-        session.SaveTexts(_library, changes);
+        session.SaveTexts(_library, changes, added, removed);
+        _removedRows.Clear();
 
         // Reload, so sizes and "saved" states come from the file that was just written.
         int? selected = (TextGrid.SelectedItem as TextRow)?.Index;
@@ -268,16 +286,22 @@ public partial class TextTab : UserControl
             TextGrid.ScrollIntoView(row);
         }
 
-        return changes.Count;
+        return changes.Count + added.Count + removed.Count;
     }
 
-    /// <summary>Drops all unsaved edits.</summary>
+    /// <summary>Drops all unsaved edits, additions and removals.</summary>
     public void DiscardChanges()
     {
+        _rows.RemoveAll(r => r.IsNew);
+        _rows.AddRange(_removedRows);
+        _removedRows.Clear();
+        _rowsByName = _rows.GroupBy(r => r.Name).ToDictionary(g => g.Key, g => g.First());
         foreach (TextRow row in _rows.Where(r => r.IsUnsaved))
         {
             row.Markup = row.SavedMarkup;
         }
+
+        _view?.Refresh();
 
         ShowDetails(TextGrid.SelectedItem as TextRow);
         UnsavedChangesChanged?.Invoke(this, EventArgs.Empty);
@@ -414,9 +438,18 @@ public partial class TextTab : UserControl
         DetailCategory.Text = category.Description.Length > 0
             ? $"Text {row.Index}: {category.Area} › {category.Section} › {category.Description}"
             : $"Text {row.Index}: {category.Area} › {category.Section}";
-        DetailUsage.Text = category.SourceFiles.Count > 0
-            ? $"Used in the game code: {string.Join(", ", category.SourceFiles.Select(Path.GetFileName))}"
-            : "Looked up by a name the game builds while running.";
+        DetailUsage.Text = row.IsCustom
+            ? "Added text. The game finds it by its number or its name, but does not use it anywhere yet."
+            : category.SourceFiles.Count > 0
+                ? $"Used in the game code: {string.Join(", ", category.SourceFiles.Select(Path.GetFileName))}"
+                : "Looked up by a name the game builds while running.";
+        if (TextNumberSlots.Find(row.Name) is { } slot)
+        {
+            DetailUsage.Text += $" The game writes a number into {TextNumberSlots.Describe(slot)} of this text.";
+        }
+
+        CustomWarning.Visibility = row.IsCustom ? Visibility.Visible : Visibility.Collapsed;
+        RemoveButton.Visibility = row.IsCustom ? Visibility.Visible : Visibility.Collapsed;
 
         ClearFlash();
         _updatingTextBox = true;
@@ -444,7 +477,8 @@ public partial class TextTab : UserControl
     /// or more if the saved text already has more lines (so it can still be shortened).
     /// </summary>
     private static int MaxLines(TextRow row) =>
-        Math.Max(TextLimits.GetMaxLines(row.Name, row.OriginalMarkup), TextWrapper.CountLines(row.SavedMarkup));
+        Math.Max(row.IsCustom ? CustomTexts.MaxLines : TextLimits.GetMaxLines(row.Name, row.OriginalMarkup),
+            TextWrapper.CountLines(row.SavedMarkup));
 
     private bool IsAllowed(char c) =>
         _library is not null
@@ -635,8 +669,8 @@ public partial class TextTab : UserControl
 
     private void UpdateValidation(TextRow row)
     {
-        UndoButton.IsEnabled = row.IsUnsaved;
-        OriginalButton.IsEnabled = row.DiffersFromOriginal;
+        UndoButton.IsEnabled = row.IsUnsaved && !row.IsNew;
+        OriginalButton.IsEnabled = row.DiffersFromOriginal && !row.IsCustom;
 
         if (_library is null)
         {
@@ -644,7 +678,7 @@ public partial class TextTab : UserControl
         }
 
         int maxLines = MaxLines(row);
-        TextValidation result = TextValidator.Validate(_library.Codec, row.Markup, row.OriginalMarkup, maxLines);
+        TextValidation result = TextValidator.Validate(_library.Codec, row.Markup, row.OriginalMarkup, maxLines, row.Name);
         IssueList.ItemsSource = result.Issues;
 
         if (result.Layout is { } layout && result.OriginalLayout is { } original)
@@ -660,6 +694,91 @@ public partial class TextTab : UserControl
         }
 
         UpdatePreview(row);
+    }
+
+    // ----------------------------------------------------------------- adding and removing texts
+
+    private void UpdateAddTextButton()
+    {
+        bool canAdd = _session?.CanAddTexts == true && _library is not null;
+        AddTextButton.IsEnabled = canAdd;
+        AddTextButton.ToolTip = canAdd
+            ? "Adds a new text with the lowest free number and a name of your choice"
+            : $"Needs the code fix \"{CodeFixes.ExpandedTexts.Name}\" (File › Project settings): the original game has no room for more texts.";
+    }
+
+    private void OnAddText(object sender, RoutedEventArgs e)
+    {
+        if (_library is null || _session is null || !_session.CanAddTexts)
+        {
+            return;
+        }
+
+        Window owner = Window.GetWindow(this);
+        int? index = CustomTexts.NextFreeIndex(_rows.Select(r => r.Index), _library.OriginalCount);
+        if (index is not { } number)
+        {
+            Ui.ShowError(owner, $"The game has room for {CustomTexts.Capacity} texts, and all are used.");
+            return;
+        }
+
+        string? input = InputDialog.Ask(owner, "Add text",
+            $"Name of the new text {number}. Capital letters A-Z, digits 0-9 and '_', at most {CustomTexts.MaxNameLength} characters. " +
+            "Every name may be used only once.", "MY_TEXT");
+        if (input is null)
+        {
+            return;
+        }
+
+        string name = input.Trim().ToUpperInvariant();
+        if (CustomTexts.CheckName(name, _rows.Select(r => r.Name)) is { } problem)
+        {
+            Ui.ShowError(owner, problem);
+            return;
+        }
+
+        var entry = new GameTextEntry(number, name, TextFileEntry.FreeSlotData);
+        var text = new GameText(entry, string.Empty, CustomTexts.Category(name)) { IsCustom = true };
+        var row = new TextRow(text, string.Empty) { IsNew = true };
+        _rows.Add(row);
+        _rowsByName[name] = row;
+
+        SearchBox.Text = string.Empty;
+        _view?.Refresh();
+        Dispatcher.InvokeAsync(() =>
+        {
+            SetAllExpanded(true);
+            TextGrid.SelectedItem = row;
+            TextGrid.ScrollIntoView(row);
+            DetailText.Focus();
+        }, DispatcherPriority.Loaded);
+        UnsavedChangesChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnRemoveText(object sender, RoutedEventArgs e)
+    {
+        if (SelectedRow is not { IsCustom: true } row)
+        {
+            return;
+        }
+
+        if (!Ui.Confirm(Window.GetWindow(this),
+                $"Remove the text {row.Name} (number {row.Index})?\n\nIts number becomes free and is given to the next new text. " +
+                "The removal is saved together with the other changes."))
+        {
+            return;
+        }
+
+        _rows.Remove(row);
+        _rowsByName.Remove(row.Name);
+        if (!row.IsNew)
+        {
+            _removedRows.Add(row);
+        }
+
+        _view?.Refresh();
+        ShowDetails(null);
+        UnsavedChangesChanged?.Invoke(this, EventArgs.Empty);
     }
 
     // ----------------------------------------------------------------- in-game preview
@@ -683,9 +802,13 @@ public partial class TextTab : UserControl
         }
     }
 
-    /// <summary>Draws the preview again, e.g. after code fixes were applied to the project.</summary>
+    /// <summary>
+    /// Updates what depends on the project's code fixes: the preview (which draws like the fixed
+    /// game) and whether texts can be added.
+    /// </summary>
     public void RefreshPreview()
     {
+        UpdateAddTextButton();
         if (SelectedRow is { } row && DetailPanel.Visibility == Visibility.Visible)
         {
             UpdatePreview(row);

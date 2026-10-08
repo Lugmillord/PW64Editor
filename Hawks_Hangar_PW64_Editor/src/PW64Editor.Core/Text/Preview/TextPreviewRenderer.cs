@@ -100,6 +100,13 @@ public sealed class TextPreviewRenderer
     {
         options ??= new TextPreviewOptions();
         TextScreen screen = TextScreen.For(name, category);
+
+        // Texts into which the game writes a number are shown with an example number, like in the game.
+        if (category.Area != CustomTexts.AreaName)
+        {
+            codes = TextNumberSlots.WithExampleNumber(name, codes);
+        }
+
         GameTextMemory text = GameTextMemory.FromCodes(name, codes, isEdited: true);
 
         var context = new PreviewContext

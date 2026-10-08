@@ -53,6 +53,12 @@ internal abstract class TextScreen
     /// <summary>Picks the screen on which a text appears.</summary>
     public static TextScreen For(string name, TextCategory category)
     {
+        // Custom texts are not shown anywhere yet; their name may look like any other.
+        if (category.Area == CustomTexts.AreaName)
+        {
+            return new GenericScreen(custom: true);
+        }
+
         if (MissionBriefingScreen.TryCreate(name) is { } briefing)
         {
             return briefing;
@@ -463,11 +469,20 @@ internal sealed class InFlightScreen : TextScreen
 /// <summary>Texts whose exact place on the screen is not known: shown line by line at the left.</summary>
 internal sealed class GenericScreen : TextScreen
 {
-    public override string Title => "General preview";
+    private readonly bool _custom;
 
-    public override string Note =>
-        "The exact place of this text is not known; it is shown with the game's font and line spacing at a " +
-        "typical position. Widths are exact.";
+    public GenericScreen(bool custom = false)
+    {
+        _custom = custom;
+    }
+
+    public override string Title => _custom ? "New text" : "General preview";
+
+    public override string Note => _custom
+        ? "This text is not shown anywhere in the game yet. It is drawn with the game's font and line spacing; " +
+          "where you use it later, less room may be available."
+        : "The exact place of this text is not known; it is shown with the game's font and line spacing at a " +
+          "typical position. Widths are exact.";
 
     public override void Draw(PreviewContext context)
     {
