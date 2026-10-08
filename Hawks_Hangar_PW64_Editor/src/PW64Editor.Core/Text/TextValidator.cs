@@ -32,6 +32,9 @@ public sealed record TextValidation(IReadOnlyList<TextIssue> Issues, TextLayoutI
 ///         does not check this; more pieces overwrite other memory and can crash the game.</item>
 ///   <item>There is no automatic line wrapping, and the boxes on screen are sized for the original
 ///         texts. Longer lines can run past their box, extra lines can overlap other things.</item>
+///   <item>The loader (textLoadBlock in src/app/text_data.c) replaces every 16-bit value 254 and 255
+///         with its line break and end codes, without skipping the numbers of [x=...] codes. So
+///         positions 254 and 255 are destroyed while loading.</item>
 /// </list>
 /// <para>
 /// Hard limits are errors; going beyond the original text's size is a warning, because it may or
@@ -71,6 +74,13 @@ public static class TextValidator
 
         TextLayoutInfo layout = Measure(encoded.Codes);
         IReadOnlyList<int> pieces = PieceLengths(encoded.Codes);
+
+        foreach (int value in PositionValues(encoded.Codes).Where(v => v is TextCodec.CodeLineBreak or TextCodec.CodeEnd).Distinct())
+        {
+            issues.Add(new TextIssue(true,
+                $"A position of {value} cannot be used: while loading the texts, the game changes every value 254 " +
+                $"and 255 into its line break and end codes, also inside [x=...]. Use {value - 2} or {value + 2} instead."));
+        }
 
         for (int i = 0; i < pieces.Count; i++)
         {
@@ -160,6 +170,21 @@ public static class TextValidator
         }
 
         return pieces;
+    }
+
+    /// <summary>The numbers of all position codes ([x=...,y=...]).</summary>
+    private static IEnumerable<int> PositionValues(IReadOnlyList<ushort> codes)
+    {
+        // Walk the codes themselves: a position number of 255 must not be taken for the end code.
+        for (int i = 0; i < codes.Count && codes[i] != TextCodec.CodeEnd; i++)
+        {
+            if (codes[i] == TextCodec.CodePosition && i + 2 < codes.Count)
+            {
+                yield return codes[i + 1];
+                yield return codes[i + 2];
+                i += 2;
+            }
+        }
     }
 
     /// <summary>The codes without the end code and the final line break.</summary>

@@ -410,6 +410,18 @@ public class TextMarkupTests
 
 public class TextValidatorTests
 {
+    [Theory]
+    [InlineData("[x=254]A", true)]
+    [InlineData("[x=10,y=255]A", true)]
+    [InlineData("[x=253]A", false)]
+    [InlineData("[x=256]A", false)]
+    public void Validate_Position254Or255_IsAnError(string markup, bool error)
+    {
+        TextValidation result = TextValidator.Validate(new TextCodec(TextFontTests.SmallFont), markup, "A");
+
+        Assert.Equal(error, result.Issues.Any(i => i.IsError && i.Message.Contains("cannot be used")));
+    }
+
     private static readonly TextCodec Codec = new(TextFontTests.SmallFont);
 
     [Fact]

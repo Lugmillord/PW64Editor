@@ -7,10 +7,12 @@ using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using PW64Editor.App.Dialogs;
 using PW64Editor.App.Services;
 using PW64Editor.Core.Text;
+using PW64Editor.Core.Text.Preview;
 using PW64Editor.Core.Workspace;
 
 namespace PW64Editor.App.Views;
@@ -27,7 +29,17 @@ public partial class TextTab : UserControl
     private ListCollectionView? _view;
     private GameTextLibrary? _library;
     private List<TextRow> _rows = [];
+    private Dictionary<string, TextRow> _rowsByName = [];
     private string _search = string.Empty;
+
+    /// <summary>Draws texts like the game; null if the game's fonts could not be read.</summary>
+    private TextPreviewRenderer? _previewRenderer;
+
+    /// <summary>Why there is no preview, if <see cref="_previewRenderer"/> is null.</summary>
+    private string? _previewProblem;
+
+    /// <summary>Name of the text the preview picture currently shows.</summary>
+    private string? _previewName;
 
     /// <summary>Set while the text box is filled by code, so that does not count as an edit.</summary>
     private bool _updatingTextBox;
@@ -159,6 +171,7 @@ public partial class TextTab : UserControl
             _view = null;
             _library = null;
             _rows = [];
+            _rowsByName = [];
             ShowDetails(null);
             SourceText.Text = $"The texts could not be read: {ex.Message}";
             UnsavedChangesChanged?.Invoke(this, EventArgs.Empty);
@@ -167,6 +180,11 @@ public partial class TextTab : UserControl
 
         _library = library;
         _rows = library.Texts.Select(t => new TextRow(t, OriginalMarkupOf(original, t))).ToList();
+
+        // For the preview: other texts on the same screen are looked up by name. Names are unique
+        // in the retail game; should a file contain one twice, the first one counts (like in the game).
+        _rowsByName = _rows.GroupBy(r => r.Name).ToDictionary(g => g.Key, g => g.First());
+        LoadPreviewRenderer(session);
 
         var view = new ListCollectionView(_rows);
 
@@ -635,6 +653,167 @@ public partial class TextTab : UserControl
         {
             LayoutText.Text = string.Empty;
         }
+
+        UpdatePreview(row);
+    }
+
+    // ----------------------------------------------------------------- in-game preview
+
+    /// <summary>Reads the game's fonts for the preview. Problems only disable the preview.</summary>
+    private void LoadPreviewRenderer(EditorSession session)
+    {
+        if (_previewRenderer is not null)
+        {
+            return; // the fonts are part of the clean ROM and never change
+        }
+
+        try
+        {
+            _previewRenderer = TextPreviewRenderer.Load(session.CleanFileSystem);
+            _previewProblem = null;
+        }
+        catch (Exception ex) when (Ui.IsExpectedError(ex))
+        {
+            _previewProblem = $"The preview is not available: the game's font could not be read ({ex.Message}).";
+        }
+    }
+
+    /// <summary>Draws the selected text the way the game shows it.</summary>
+    private void UpdatePreview(TextRow row)
+    {
+        if (_library is null || _previewRenderer is null)
+        {
+            PreviewImage.Source = null;
+            PreviewTitle.Text = string.Empty;
+            PreviewInfo.Text = _previewProblem ?? string.Empty;
+            PreviewIssueList.ItemsSource = null;
+            PreviewNote.Text = string.Empty;
+            return;
+        }
+
+        TextEncodeResult encoded = _library.Codec.Encode(row.Markup);
+        if (!encoded.Success)
+        {
+            // Keep the last picture of this text, so it does not flicker while typing a tag.
+            if (_previewName != row.Name)
+            {
+                PreviewImage.Source = null;
+            }
+
+            PreviewInfo.Text = "The text has errors (see above). The preview shows the last version without errors.";
+            PreviewIssueList.ItemsSource = null;
+            return;
+        }
+
+        var options = new TextPreviewOptions(ShowTextArea: PreviewAreaCheck.IsChecked == true);
+        TextPreview preview;
+        try
+        {
+            preview = _previewRenderer.Render(row.Name, row.Text.Category, encoded.Codes, OtherTextCodes, options);
+        }
+        catch (Exception ex)
+        {
+            // The preview is only a help; a problem in it must never stop the user from editing.
+            PreviewImage.Source = null;
+            PreviewInfo.Text = $"The preview could not be drawn: {ex.Message}";
+            PreviewIssueList.ItemsSource = null;
+            return;
+        }
+
+        BitmapSource bitmap = BitmapSource.Create(TextPreview.Width, TextPreview.Height, 96, 96,
+            PixelFormats.Bgra32, null, preview.Pixels, TextPreview.Width * 4);
+        bitmap.Freeze();
+        PreviewImage.Source = bitmap;
+        _previewName = row.Name;
+
+        PreviewTitle.Text = preview.ScreenTitle;
+        PreviewNote.Text = preview.ScreenNote;
+        PreviewIssueList.ItemsSource = preview.Issues;
+        PreviewInfo.Text = DescribeRoom(preview);
+    }
+
+    /// <summary>A sentence about the widest line and the room on the screen.</summary>
+    private static string DescribeRoom(TextPreview preview)
+    {
+        string pieces = $"Pieces on this screen: {preview.PiecesOnScreen} of {TextValidator.MaxPiecesPerFrame}.";
+        if (preview.WidestLine is not { } widest || widest.Width == 0)
+        {
+            return pieces;
+        }
+
+        string text = $"Widest line: line {widest.Line}, {widest.Width} pixels (ends at x = {widest.Right}).";
+        if (preview.TextArea is { } area)
+        {
+            int left = area.Right - widest.Right;
+            text += left >= 0
+                ? $" Room up to x = {area.Right}: {left} pixel(s) left."
+                : $" Room up to x = {area.Right}: {-left} pixel(s) too wide.";
+        }
+
+        return $"{text} {pieces}";
+    }
+
+    /// <summary>
+    /// Passes mouse wheel turns over the preview on to the scroller of the whole panel. The
+    /// preview's own scroller only scrolls sideways, but would otherwise swallow the wheel.
+    /// </summary>
+    private void OnPreviewMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (e.Handled)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        DetailPanel.RaiseEvent(new MouseWheelEventArgs(e.MouseDevice, e.Timestamp, e.Delta)
+        {
+            RoutedEvent = MouseWheelEvent,
+            Source = sender,
+        });
+    }
+
+    /// <summary>The current version of another text, encoded, for screens that show several texts.</summary>
+    private IReadOnlyList<ushort>? OtherTextCodes(string name)
+    {
+        if (_library is null || !_rowsByName.TryGetValue(name, out TextRow? row))
+        {
+            return null;
+        }
+
+        TextEncodeResult encoded = _library.Codec.Encode(row.Markup);
+        return encoded.Success ? encoded.Codes : null;
+    }
+
+    private void OnPreviewOptionChanged(object sender, RoutedEventArgs e)
+    {
+        // Also raised while the XAML is loaded, before all elements exist.
+        if (PreviewImage is null || PreviewScroller is null || PreviewZoom is null)
+        {
+            return;
+        }
+
+        int zoom = PreviewZoom.SelectedIndex;
+        if (zoom <= 0)
+        {
+            // Fit: as wide as the panel, keeping the 4:3 shape (the height follows the width).
+            PreviewScroller.HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
+            PreviewImage.Stretch = Stretch.Uniform;
+            PreviewImage.Width = double.NaN;
+            PreviewImage.Height = double.NaN;
+        }
+        else
+        {
+            // Fixed size; if it is wider than the panel, the preview scrolls sideways.
+            PreviewScroller.HorizontalScrollBarVisibility = ScrollBarVisibility.Auto;
+            PreviewImage.Stretch = Stretch.Fill;
+            PreviewImage.Width = TextPreview.Width * zoom;
+            PreviewImage.Height = TextPreview.Height * zoom;
+        }
+
+        if (SelectedRow is { } row && DetailPanel.Visibility == Visibility.Visible)
+        {
+            UpdatePreview(row);
+        }
     }
 
     private void OnInsertBold(object sender, RoutedEventArgs e)
@@ -661,6 +840,13 @@ public partial class TextTab : UserControl
         if (!int.TryParse(input.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out int x) || x > 320)
         {
             Ui.ShowError(Window.GetWindow(this), $"\"{input}\" is not a position between 0 and 320.");
+            return;
+        }
+
+        if (x is TextCodec.CodeLineBreak or TextCodec.CodeEnd)
+        {
+            Ui.ShowError(Window.GetWindow(this),
+                $"The game cannot use position {x}: while loading, it turns 254 and 255 into its line break and end codes. Use {x - 2} or {x + 2}.");
             return;
         }
 

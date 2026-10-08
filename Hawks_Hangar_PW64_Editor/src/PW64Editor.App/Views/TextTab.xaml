@@ -6,6 +6,24 @@
         <converters:GroupItemCountConverter x:Key="GroupItemCount" />
         <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
 
+        <!-- A warning or error line (TextIssue). -->
+        <DataTemplate x:Key="IssueTemplate">
+            <TextBlock TextWrapping="Wrap" Margin="0,2,0,0">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                        <Setter Property="Foreground" Value="#8A5A00" />
+                        <Setter Property="Text" Value="{Binding Message, StringFormat='Warning: {0}'}" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsError}" Value="True">
+                                <Setter Property="Foreground" Value="#B3261E" />
+                                <Setter Property="Text" Value="{Binding Message, StringFormat='Error: {0}'}" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
+        </DataTemplate>
+
         <!-- Groups are collapsible expanders. Only the headers are indented, so the rows stay
              aligned with the column headers. Level 1 = area, level 2 = section. -->
         <Style x:Key="AreaGroup" TargetType="GroupItem">
@@ -109,16 +127,36 @@
             <!-- Right: details of the selected text. -->
             <Border Grid.Column="2" BorderBrush="#D5DCE3" BorderThickness="1" Padding="14">
                 <Grid>
-                    <DockPanel x:Name="DetailPanel" Visibility="Collapsed">
-                        <StackPanel DockPanel.Dock="Top">
+                    <!-- Everything on the right scrolls as one column, so the text box and the preview
+                         always get their full size, however small the window is. -->
+                    <ScrollViewer x:Name="DetailPanel" Visibility="Collapsed"
+                                  VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel Margin="0,0,6,0">
                             <TextBlock x:Name="DetailName" FontSize="18" FontWeight="SemiBold" />
                             <TextBlock x:Name="DetailCategory" Margin="0,4,0,0" TextWrapping="Wrap" />
                             <TextBlock x:Name="DetailUsage" Margin="0,4,0,0" TextWrapping="Wrap"
                                        Foreground="{StaticResource MutedTextBrush}" />
                             <TextBlock Text="Text" FontWeight="SemiBold" Margin="0,14,0,4" />
-                        </StackPanel>
 
-                        <StackPanel DockPanel.Dock="Bottom">
+                            <!-- The text box, with a layer on top that briefly shows rejected characters in red.
+                                 The bar below it can be dragged to make the box taller or smaller. -->
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="190" MinHeight="80" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <TextBox x:Name="DetailText" FontFamily="Consolas" FontSize="13"
+                                         TextWrapping="NoWrap" AcceptsReturn="True" AllowDrop="False"
+                                         TextChanged="OnDetailTextChanged"
+                                         PreviewTextInput="OnDetailPreviewTextInput"
+                                         PreviewKeyDown="OnDetailPreviewKeyDown"
+                                         HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" />
+                                <Canvas x:Name="FlashLayer" IsHitTestVisible="False" />
+                                <GridSplitter Grid.Row="1" Height="7" HorizontalAlignment="Stretch" ResizeDirection="Rows"
+                                              ResizeBehavior="PreviousAndCurrent" Background="#E3E8ED"
+                                              ToolTip="Drag to make the text box taller or smaller" />
+                            </Grid>
+
                             <!-- Formatting and undo. -->
                             <WrapPanel Margin="0,8,0,0">
                                 <Button Content="Bold" Click="OnInsertBold" Padding="10,3" Margin="0,0,6,6"
@@ -140,39 +178,42 @@
                             <!-- Size information and problems. -->
                             <TextBlock x:Name="LayoutText" TextWrapping="Wrap" Margin="0,4,0,0"
                                        Foreground="{StaticResource MutedTextBrush}" />
-                            <ItemsControl x:Name="IssueList" Margin="0,4,0,0">
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate>
-                                        <TextBlock TextWrapping="Wrap" Margin="0,2,0,0">
-                                            <TextBlock.Style>
-                                                <Style TargetType="TextBlock">
-                                                    <Setter Property="Foreground" Value="#8A5A00" />
-                                                    <Setter Property="Text" Value="{Binding Message, StringFormat='Warning: {0}'}" />
-                                                    <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding IsError}" Value="True">
-                                                            <Setter Property="Foreground" Value="#B3261E" />
-                                                            <Setter Property="Text" Value="{Binding Message, StringFormat='Error: {0}'}" />
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </TextBlock.Style>
-                                        </TextBlock>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                        </StackPanel>
+                            <ItemsControl x:Name="IssueList" Margin="0,4,0,0" ItemTemplate="{StaticResource IssueTemplate}" />
 
-                        <!-- The text box, with a layer on top that briefly shows rejected characters in red. -->
-                        <Grid>
-                            <TextBox x:Name="DetailText" FontFamily="Consolas" FontSize="13"
-                                     TextWrapping="NoWrap" AcceptsReturn="True" AllowDrop="False"
-                                     TextChanged="OnDetailTextChanged"
-                                     PreviewTextInput="OnDetailPreviewTextInput"
-                                     PreviewKeyDown="OnDetailPreviewKeyDown"
-                                     HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" />
-                            <Canvas x:Name="FlashLayer" IsHitTestVisible="False" />
-                        </Grid>
-                    </DockPanel>
+                            <!-- In-game preview: the text drawn with the game's font on a rebuilt screen. -->
+                            <DockPanel Margin="0,16,0,4">
+                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                    <CheckBox x:Name="PreviewAreaCheck" Content="Show room" IsChecked="True" VerticalAlignment="Center"
+                                              Margin="0,0,10,0" Checked="OnPreviewOptionChanged" Unchecked="OnPreviewOptionChanged"
+                                              ToolTip="Dashed yellow frame: the room the text has on this screen. Parts outside are drawn in red." />
+                                    <ComboBox x:Name="PreviewZoom" Width="70" SelectedIndex="0" SelectionChanged="OnPreviewOptionChanged"
+                                              ToolTip="Size of the preview. Fit = as wide as the panel; 1× is the game's own resolution (320 × 240).">
+                                        <ComboBoxItem Content="Fit" />
+                                        <ComboBoxItem Content="1×" />
+                                        <ComboBoxItem Content="2×" />
+                                        <ComboBoxItem Content="3×" />
+                                    </ComboBox>
+                                </StackPanel>
+                                <TextBlock Text="In-game preview" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                <TextBlock x:Name="PreviewTitle" Margin="8,0,0,0" VerticalAlignment="Center"
+                                           Foreground="{StaticResource MutedTextBrush}" TextTrimming="CharacterEllipsis" />
+                            </DockPanel>
+
+                            <!-- Scrolls sideways only, when a fixed zoom is wider than the panel.
+                                 Mouse wheel turns are passed on to the outer scroller (OnPreviewMouseWheel). -->
+                            <ScrollViewer x:Name="PreviewScroller" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Disabled"
+                                          Background="Black" PreviewMouseWheel="OnPreviewMouseWheel">
+                                <!-- Nearest neighbor keeps the game's pixels sharp when enlarged. -->
+                                <Image x:Name="PreviewImage" Stretch="Uniform" RenderOptions.BitmapScalingMode="NearestNeighbor"
+                                       HorizontalAlignment="Center" />
+                            </ScrollViewer>
+
+                            <TextBlock x:Name="PreviewInfo" TextWrapping="Wrap" Margin="0,4,0,0" />
+                            <ItemsControl x:Name="PreviewIssueList" Margin="0,2,0,0" ItemTemplate="{StaticResource IssueTemplate}" />
+                            <TextBlock x:Name="PreviewNote" TextWrapping="Wrap" Margin="0,4,0,8" FontSize="11"
+                                       Foreground="{StaticResource MutedTextBrush}" />
+                        </StackPanel>
+                    </ScrollViewer>
 
                     <TextBlock x:Name="NoSelectionText" Text="Select a text to see it in full."
                                HorizontalAlignment="Center" VerticalAlignment="Center"
