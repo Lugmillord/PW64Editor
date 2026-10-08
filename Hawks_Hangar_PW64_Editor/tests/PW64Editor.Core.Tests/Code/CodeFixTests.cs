@@ -260,3 +260,42 @@ public class ExpandedTextFixTests
         Assert.All(CodeFixes.All, f => Assert.Equal(CodeFixState.Applied, f.GetState(patched, CodeFixes.CodeStart, codeEnd)));
     }
 }
+
+public class PhotoAlbumFixTests
+{
+    [RealRomFact]
+    public void PhotoAlbum_OnRealRom_ChangesOnlyTheListedPlaces()
+    {
+        N64Rom rom = N64Rom.Load(TestRomLocator.RomPath!);
+        int codeEnd = CodeFixes.CodeEnd(RomLayout.PilotwingsUsa);
+        Assert.Equal(CodeFixState.NotApplied, CodeFixes.PhotoAlbum.GetState(rom.Data, CodeFixes.CodeStart, codeEnd));
+
+        byte[] patched = rom.Data.ToArray();
+        CodeFixes.PhotoAlbum.Apply(patched, CodeFixes.CodeStart, codeEnd);
+
+        Assert.Equal(CodeFixState.Applied, CodeFixes.PhotoAlbum.GetState(patched, CodeFixes.CodeStart, codeEnd));
+        int[] changedWords = Enumerable.Range(0, patched.Length / 4)
+            .Where(w => !patched.AsSpan(w * 4, 4).SequenceEqual(rom.Data.AsSpan(w * 4, 4)))
+            .Select(w => w * 4)
+            .ToArray();
+        int[] expected =
+        [
+            .. Enumerable.Range(0, 12).Select(i => CodeFixes.CodeCaveStart + 4 * i), // code cave
+            0xBF284, 0xBF290,                                                     // album reset
+            0xC5290,                                                              // empty photos
+            0xC6514, 0xC663C,                                                     // saving and loading
+        ];
+        Assert.Equal(expected, changedWords);
+    }
+
+    [Fact]
+    public void PhotoAlbum_UsesTheStartOfTheCodeCave()
+    {
+        CodePatch cave = CodeFixes.PhotoAlbum.Patches[0];
+        Assert.Equal(CodeFixes.CodeCaveStart, cave.RomOffset);
+
+        // The cave starts with "jr ra; nop", so uvMemScanBlocks returns at once.
+        Assert.Equal(new byte[] { 0x03, 0xE0, 0x00, 0x08, 0, 0, 0, 0 }, cave.Replacement[..8]);
+    }
+}
+

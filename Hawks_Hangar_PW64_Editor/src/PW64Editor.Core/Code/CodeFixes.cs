@@ -7,10 +7,19 @@ namespace PW64Editor.Core.Code;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Fixes only exchange existing instructions. They need no extra room in the ROM or in memory, and
+/// Fixes only exchange instructions inside the game code. They need no extra room in the ROM, and
 /// they do not depend on where data lies, so they keep working when the editor moves game files or
 /// the audio data. New fixes are added at the end of <see cref="All"/>; the <see cref="CodeFix.Id"/>
 /// of a released fix never changes, because projects store it.
+/// </para>
+/// <para>
+/// Fixes only correct bugs that damage memory, data or saved games, or crash the game. Bugs that
+/// only change how the game plays, looks or sounds are kept, so the game feels like the original.
+/// </para>
+/// <para>
+/// <b>Code cave</b>: a fix that needs more instructions than it replaces puts them into
+/// <see cref="CodeCaveStart"/> (the body of uvMemScanBlocks, see <see cref="PhotoAlbum"/>). Used so far:
+/// 0x2B4A4–0x2B4D4 (PhotoAlbum). Later fixes continue behind the last used word.
 /// </para>
 /// </remarks>
 public static class CodeFixes
@@ -177,8 +186,75 @@ public static class CodeFixes
                 [0x00077040, 0x28A1000A, 0x38210001, 0x24230001, 0x28A10064, 0x38210001, 0x00611821, 0x00C3082A, 0x54200001, 0x00C01825]),
         ]);
 
+    /// <summary>
+    /// ROM offset of the code cave: the body of uvMemScanBlocks (kernel, 0x8022A4F4), 0x100 bytes up to
+    /// ROM 0x2B5A4. The function only checks the memory block list and reports overlaps through
+    /// _uvDebugPrintf, which is empty in the retail game; so it does nothing visible and may return at once.
+    /// </summary>
+    public const int CodeCaveStart = 0x2B4A4;
+
+    /// <summary>
+    /// Three bugs of the photo album (snap.c, US version).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Saving photos</b> (func_8033E860 / func_8033F050): every photo is packed into a 24-byte
+    /// record and copied bit by bit (172 bits) into the saved game, bit n of a byte being 1 &lt;&lt; n. The
+    /// record's last 4 used bits, however, are the upper 4 bits of byte 21 (big-endian bit fields): the
+    /// last bit of the 5th object's value and the 3 bits of the 6th object's value. The copy takes the
+    /// lower 4 bits of byte 21 instead, which hold nothing. So these values are lost when saving, and
+    /// when loading they come from uninitialised stack memory; they then index small tables
+    /// unchecked. Fix: the two calls that read and write the record go through two small helpers in the
+    /// code cave, which shift bit numbers 168–171 to 172–175. Saved games stay compatible: all other bits
+    /// keep their place, and the 4 bits moved held nothing useful before.</para>
+    /// <para><b>Photos without objects</b> (func_8033DCD0): when a photo is copied, the object count is
+    /// only copied if it is not 0, so an empty photo keeps the count of the photo that was in that slot
+    /// before. A "branch likely" becomes a normal branch, so the store in its delay slot (the count)
+    /// always runs.</para>
+    /// <para><b>Resetting the album</b> (func_80337D50): the function resets the photos of D_80373060 but
+    /// clears the object list of the other photo array, D_80373390. It now clears the object list of
+    /// D_80373060.</para>
+    /// </remarks>
+    public static readonly CodeFix PhotoAlbum = new(
+        Id: "photo-album-v1",
+        Name: "Correct saving of photos",
+        Problem:
+            "Photos with five or more objects lose data when saved; after loading they show wrong objects and can crash " +
+            "the game. An empty photo also takes over the object count of the photo that was in its slot before.",
+        Solution:
+            "All bits of a photo are saved, empty photos get the count 0, and resetting the album clears the right list. " +
+            "Saved games of the original game can still be loaded.",
+        Patches:
+        [
+            // 1. Code cave (uvMemScanBlocks): return at once, then two helpers. Each moves bit numbers >= 168 by 4
+            //    and jumps on to the original bit function:  a1 += (a1 >= 168) * 4.
+            CodePatch.FromWords("photo bit helpers, code cave in uvMemScanBlocks", CodeCaveStart,
+                [0x27BDFFC8, 0x3C02802C, 0x8C428820, 0xAFB30028, 0xAFBF0034, 0xAFB50030,
+                    0xAFB4002C, 0xAFB20024, 0xAFB10020, 0xAFB0001C, 0x1840002C, 0x00009825],
+                [
+                    0x03E00008, 0x00000000,                                     // jr ra; nop (uvMemScanBlocks)
+                    0x28A100A8, 0x38210001, 0x00010880, 0x080CFA04, 0x00A12821, // 0x8022A4FC: get bit -> func_8033E810
+                    0x28A100A8, 0x38210001, 0x00010880, 0x080CF9E1, 0x00A12821, // 0x8022A510: set bit -> func_8033E784
+                ]),
+            // 2. Saving (func_8033E860): read the photo record through the helper.
+            CodePatch.FromWords("photo saving, func_8033E860", 0xC6510,
+                [0x02202025, 0x0C0CFA04, 0x02002825, 0x8EE40000, 0x02A02825, 0x0C0CF9E1],
+                [0x02202025, 0x0C08A93F, 0x02002825, 0x8EE40000, 0x02A02825, 0x0C0CF9E1]),
+            // 3. Loading (func_8033F050): write the photo record through the helper.
+            CodePatch.FromWords("photo loading, func_8033F050", 0xC6634,
+                [0x02202025, 0x02002825, 0x0C0CF9E1, 0x00403025, 0x26100001, 0x2A0100AC],
+                [0x02202025, 0x02002825, 0x0C08A944, 0x00403025, 0x26100001, 0x2A0100AC]),
+            // 4. Empty photos (func_8033DCD0): bnel -> bne, so "sb v0, 0x42(a0)" also runs for a count of 0.
+            CodePatch.FromWords("photo copy, func_8033DCD0", 0xC528C,
+                [0x90A20042, 0x54400004, 0xA0820042, 0x10000018],
+                [0x90A20042, 0x14400004, 0xA0820042, 0x10000018]),
+            // 5. Album reset (func_80337D50): object list of D_80373060 (0x80373060-0x80373300) instead of D_80373390.
+            CodePatch.FromWords("album reset, func_80337D50", 0xBF280,
+                [0x3C0E8037, 0x25C63390, 0x3C038037, 0x3C088037, 0x25083630],
+                [0x3C0E8037, 0x25C63060, 0x3C038037, 0x3C088037, 0x25083300]),
+        ]);
+
     /// <summary>All known fixes.</summary>
-    public static IReadOnlyList<CodeFix> All { get; } = [SafeText, ExpandedTexts];
+    public static IReadOnlyList<CodeFix> All { get; } = [SafeText, ExpandedTexts, PhotoAlbum];
 
     /// <summary>The ids of all known fixes (what new projects get).</summary>
     public static IReadOnlyList<string> AllIds { get; } = All.Select(f => f.Id).ToList();
