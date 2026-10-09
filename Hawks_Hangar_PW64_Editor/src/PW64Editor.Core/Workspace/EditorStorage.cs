@@ -9,6 +9,9 @@ public sealed class EditorSettings
 {
     /// <summary>Recently opened project folders, most recent first.</summary>
     public List<string> RecentProjects { get; set; } = [];
+
+    /// <summary>Language of the editor's controls ("en", "de", "fr", "ja"); English until the user chooses another.</summary>
+    public string Language { get; set; } = "en";
 }
 
 /// <summary>

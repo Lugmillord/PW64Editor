@@ -1,4 +1,5 @@
 using PW64Editor.Core.FileSystem;
+using PW64Editor.Core.Localization;
 
 namespace PW64Editor.Core.Text.Preview;
 
@@ -172,8 +173,8 @@ public sealed class TextPreviewRenderer
                     if (edited)
                     {
                         context.Issues.Add(new TextIssue(true,
-                            $"Line {message.Line}: the code [#{(ushort)code:X2}] is not a character of the font. The game " +
-                            "would draw whatever lies behind the font table in memory."));
+                            CoreText.F("Line {0}: the code [#{1:X2}] is not a character of the font. The game would " +
+                                "draw whatever lies behind the font table in memory.", message.Line, (ushort)code)));
                     }
 
                     break;
@@ -185,8 +186,9 @@ public sealed class TextPreviewRenderer
                     if (edited && i < message.Codes.Count && stoppedAt.Add($"{message.Line}:{code}"))
                     {
                         context.Issues.Add(new TextIssue(false,
-                            $"Line {message.Line}: [#{(ushort)code:X2}] has no image in the font. The game stops drawing the " +
-                            "line there; everything behind it on this line (or up to the next [x=...]) is invisible."));
+                            CoreText.F("Line {0}: [#{1:X2}] has no image in the font. The game stops drawing the " +
+                                "line there; everything behind it on this line (or up to the next [x=...]) is " +
+                                "invisible.", message.Line, (ushort)code)));
                     }
 
                     break;
@@ -210,15 +212,16 @@ public sealed class TextPreviewRenderer
                 if (message.Overflow)
                 {
                     context.Issues.Add(new TextIssue(true,
-                        $"Line {message.Line}: the piece is too long for the game's buffer of {FontPrinter.MaxMessageLength} values. " +
-                        "The game writes past the buffer and crashes (black screen). The code fix \"Safe text loading and drawing\" prevents this."));
+                        CoreText.F("Line {0}: the piece is too long for the game's buffer of {1} values. The game " +
+                            "writes past the buffer and crashes (black screen). The code fix \"Safe text loading " +
+                            "and drawing\" prevents this.", message.Line, FontPrinter.MaxMessageLength)));
                 }
 
                 if (message.X >= ScreenCanvas.Width)
                 {
                     context.Issues.Add(new TextIssue(false,
-                        $"Line {message.Line}: a part starts at x = {message.X}, outside the screen (320 pixels wide). " +
-                        "It is not visible."));
+                        CoreText.F("Line {0}: a part starts at x = {1}, outside the screen (320 pixels wide). It is " +
+                            "not visible.", message.Line, message.X)));
                 }
 
                 int line = message.Line;
@@ -273,13 +276,16 @@ public sealed class TextPreviewRenderer
                 if (line.Right > area.Right)
                 {
                     context.Issues.Add(new TextIssue(false,
-                        $"Line {line.Line} is {line.Right - area.Right} pixel(s) too wide for its room on this screen."));
+                        CoreText.F("Line {0} is {1} pixel(s) too wide for its room on this screen.",
+                            line.Line, line.Right - area.Right)));
                 }
 
                 if (line.Bottom > area.Bottom || line.Top < area.Top)
                 {
                     context.Issues.Add(new TextIssue(false,
-                        $"Line {line.Line} lies outside its room on this screen (too far {(line.Top < area.Top ? "up" : "down")})."));
+                        line.Top < area.Top
+                            ? CoreText.F("Line {0} lies outside its room on this screen (too far up).", line.Line)
+                            : CoreText.F("Line {0} lies outside its room on this screen (too far down).", line.Line)));
                 }
             }
         }
@@ -288,8 +294,8 @@ public sealed class TextPreviewRenderer
         if (pieces > FontPrinter.MaxMessages)
         {
             context.Issues.Add(new TextIssue(true,
-                $"This screen would draw {pieces} pieces of text, but the game has room for {FontPrinter.MaxMessages}. " +
-                "More pieces overwrite other memory and can crash the game."));
+                CoreText.F("This screen would draw {0} pieces of text, but the game has room for {1}. " +
+                    "More pieces overwrite other memory and can crash the game.", pieces, FontPrinter.MaxMessages)));
         }
     }
 }

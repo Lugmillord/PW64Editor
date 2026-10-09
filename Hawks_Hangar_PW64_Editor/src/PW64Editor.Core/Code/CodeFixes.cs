@@ -1,4 +1,5 @@
 using PW64Editor.Core.FileSystem;
+using PW64Editor.Core.Localization;
 
 namespace PW64Editor.Core.Code;
 
@@ -59,13 +60,14 @@ public static class CodeFixes
     /// </remarks>
     public static readonly CodeFix SafeText = new(
         Id: "safe-text-v1",
-        Name: "Safe text loading and drawing",
+        Name: CoreText.K("Safe text loading and drawing"),
         Problem:
-            "When loading texts, the game runs over twice the length of each text and may damage memory behind it. " +
-            "When drawing, a line of 43 or more characters overflows its buffer and crashes the game.",
+            CoreText.K("When loading texts, the game runs over twice the length of each text and may damage memory " +
+                "behind it. " +
+            "When drawing, a line of 43 or more characters overflows its buffer and crashes the game."),
         Solution:
-            "Loading stops exactly at the end of each text, and a drawn line can no longer leave its buffer: " +
-            "overlong lines are cut instead of crashing the game.",
+            CoreText.K("Loading stops exactly at the end of each text, and a drawn line can no longer leave its buffer: " +
+            "overlong lines are cut instead of crashing the game."),
         Patches:
         [
             CodePatch.FromWords("text loader loop, textLoadBlock", 0xC95A8,
@@ -125,13 +127,15 @@ public static class CodeFixes
     /// </remarks>
     public static readonly CodeFix ExpandedTexts = new(
         Id: "expanded-texts-v1",
-        Name: "Room for 1024 texts and safer text handling",
+        Name: CoreText.K("Room for 1024 texts and safer text handling"),
         Problem:
-            "The game has room for exactly its 439 texts; one more crashes it. Missing texts, long flight messages " +
-            "and numbers that are too big for their place in a text can also crash it or damage memory.",
+            CoreText.K("The game has room for exactly its 439 texts; one more crashes it. Missing texts, long flight " +
+                "messages " +
+            "and numbers that are too big for their place in a text can also crash it or damage memory."),
         Solution:
-            "The text tables move to a reserved memory area with room for 1024 texts. Missing texts show up empty, " +
-            "message copies stop at the end of the text, and lines and numbers are cut instead of overflowing.",
+            CoreText.K("The text tables move to a reserved memory area with room for 1024 texts. Missing texts show " +
+                "up empty, " +
+            "message copies stop at the end of the text, and lines and numbers are cut instead of overflowing."),
         Patches:
         [
             // 1. Reserve 8 KiB in front of the program block: block start 0x80200000 -> 0x801FE000 (uvMemInitBlocks).
@@ -216,13 +220,15 @@ public static class CodeFixes
     /// </remarks>
     public static readonly CodeFix PhotoAlbum = new(
         Id: "photo-album-v1",
-        Name: "Correct saving of photos",
+        Name: CoreText.K("Correct saving of photos"),
         Problem:
-            "Photos with five or more objects lose data when saved; after loading they show wrong objects and can crash " +
-            "the game. An empty photo also takes over the object count of the photo that was in its slot before.",
+            CoreText.K("Photos with five or more objects lose data when saved; after loading they show wrong objects " +
+                "and can crash " +
+            "the game. An empty photo also takes over the object count of the photo that was in its slot before."),
         Solution:
-            "All bits of a photo are saved, empty photos get the count 0, and resetting the album clears the right list. " +
-            "Saved games of the original game can still be loaded.",
+            CoreText.K("All bits of a photo are saved, empty photos get the count 0, and resetting the album clears " +
+                "the right list. " +
+            "Saved games of the original game can still be loaded."),
         Patches:
         [
             // 1. Code cave (uvMemScanBlocks): return at once, then two helpers. Each moves bit numbers >= 168 by 4

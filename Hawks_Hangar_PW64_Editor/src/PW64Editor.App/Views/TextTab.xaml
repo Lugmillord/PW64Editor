@@ -4,6 +4,7 @@
              xmlns:converters="clr-namespace:PW64Editor.App.Converters">
     <UserControl.Resources>
         <converters:GroupItemCountConverter x:Key="GroupItemCount" />
+        <converters:LocalizedFormatConverter x:Key="Format" />
         <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
 
         <!-- A warning or error line (TextIssue). -->
@@ -12,11 +13,11 @@
                 <TextBlock.Style>
                     <Style TargetType="TextBlock">
                         <Setter Property="Foreground" Value="#8A5A00" />
-                        <Setter Property="Text" Value="{Binding Message, StringFormat='Warning: {0}'}" />
+                        <Setter Property="Text" Value="{Binding Message, Converter={StaticResource Format}, ConverterParameter='Warning: {0}'}" />
                         <Style.Triggers>
                             <DataTrigger Binding="{Binding IsError}" Value="True">
                                 <Setter Property="Foreground" Value="#B3261E" />
-                                <Setter Property="Text" Value="{Binding Message, StringFormat='Error: {0}'}" />
+                                <Setter Property="Text" Value="{Binding Message, Converter={StaticResource Format}, ConverterParameter='Error: {0}'}" />
                             </DataTrigger>
                         </Style.Triggers>
                     </Style>

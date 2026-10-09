@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using PW64Editor.Core.Boot;
+using PW64Editor.Core.Localization;
 
 namespace PW64Editor.Core.Rom;
 
@@ -63,14 +64,15 @@ public sealed class N64Rom
         var fileInfo = new FileInfo(path);
         if (!fileInfo.Exists)
         {
-            throw new FileNotFoundException("ROM file not found.", path);
+            throw new FileNotFoundException(CoreText.T("ROM file not found."), path);
         }
 
         // Check the size before reading, so we never load a multi-gigabyte file by accident.
         if (fileInfo.Length > MaximumSize)
         {
             throw new InvalidRomException(
-                $"File is too large to be an N64 ROM ({fileInfo.Length:N0} bytes, maximum is {MaximumSize:N0}).");
+                CoreText.F("File is too large to be an N64 ROM ({0:N0} bytes, maximum is {1:N0}).",
+                    fileInfo.Length, MaximumSize));
         }
 
         byte[] data = File.ReadAllBytes(path);
@@ -158,20 +160,21 @@ public sealed class N64Rom
         if (data.Length < MinimumSize)
         {
             throw new InvalidRomException(
-                $"File is too small to be an N64 ROM ({data.Length:N0} bytes, minimum is {MinimumSize:N0}).");
+                CoreText.F("File is too small to be an N64 ROM ({0:N0} bytes, minimum is {1:N0}).",
+                    data.Length, MinimumSize));
         }
 
         if (data.Length % 4 != 0)
         {
             throw new InvalidRomException(
-                $"ROM size must be a multiple of 4 bytes, but is {data.Length:N0} bytes.");
+                CoreText.F("ROM size must be a multiple of 4 bytes, but is {0:N0} bytes.", data.Length));
         }
 
         RomByteOrder order = ByteOrderConverter.Detect(data);
         if (order == RomByteOrder.Unknown)
         {
             throw new InvalidRomException(
-                "Unrecognized file format: the first four bytes do not match any known N64 ROM layout.");
+                CoreText.T("Unrecognized file format: the first four bytes do not match any known N64 ROM layout."));
         }
 
         ByteOrderConverter.ConvertToBigEndian(data, order);

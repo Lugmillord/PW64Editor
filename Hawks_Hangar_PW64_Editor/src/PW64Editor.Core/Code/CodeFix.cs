@@ -1,3 +1,5 @@
+using PW64Editor.Core.Localization;
+
 namespace PW64Editor.Core.Code;
 
 /// <summary>
@@ -62,7 +64,7 @@ public enum CodeFixState
 /// are always applied together.
 /// </summary>
 /// <param name="Id">Stable identifier, stored in project.json. Never change it once released.</param>
-/// <param name="Name">Short name for the user.</param>
+/// <param name="Name">Short name for the user. Name, problem and solution are English; they are translated where they are shown (<see cref="CoreText.T"/>).</param>
 /// <param name="Problem">What goes wrong in the original game (one or two sentences).</param>
 /// <param name="Solution">How the fix corrects it (one or two sentences).</param>
 /// <param name="Patches">The code changes.</param>
@@ -118,8 +120,8 @@ public sealed record CodeFix(string Id, string Name, string Problem, string Solu
                     break;
                 default:
                     throw new InvalidDataException(
-                        $"The code fix \"{Name}\" cannot be applied: the expected code ({patch.Description}) was not found. " +
-                        "The ROM is not the game version this fix was made for.");
+                        CoreText.F("The code fix \"{0}\" cannot be applied: the expected code ({1}) was not found. " +
+                            "The ROM is not the game version this fix was made for.", CoreText.T(Name), patch.Description));
             }
         }
 

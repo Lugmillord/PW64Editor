@@ -15,4 +15,9 @@
     <ProjectReference Include="..\PW64Editor.Core\PW64Editor.Core.csproj" />
   </ItemGroup>
 
+  <!-- One file per language of the editor's controls (English is in the code), built into the program. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Languages\*.json" LogicalName="Languages.%(Filename)%(Extension)" />
+  </ItemGroup>
+
 </Project>

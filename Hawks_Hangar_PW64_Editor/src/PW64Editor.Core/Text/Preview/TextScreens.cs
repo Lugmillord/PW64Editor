@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
+using PW64Editor.Core.Localization;
 
 namespace PW64Editor.Core.Text.Preview;
 
@@ -130,9 +131,9 @@ internal abstract class TextScreen
         if (rounds >= MaxRounds || index < 0)
         {
             context.Issues.Add(new TextIssue(true,
-                "On this screen the game prints lines until it reaches the end of the text. Without a line break " +
-                "at the very end ([nonl]) it never finds the end and prints the last line again and again, or reads " +
-                "memory in front of the text: the game hangs or crashes. Remove [nonl]."));
+                CoreText.T("On this screen the game prints lines until it reaches the end of the text. Without a " +
+                    "line break at the very end ([nonl]) it never finds the end and prints the last line again and " +
+                    "again, or reads memory in front of the text: the game hangs or crashes. Remove [nonl].")));
         }
     }
 
@@ -174,11 +175,11 @@ internal sealed partial class MissionBriefingScreen : TextScreen
         _kind = kind;
     }
 
-    public override string Title => _kind == "H" ? "Mission screen with hint" : "Mission screen";
+    public override string Title => _kind == "H" ? CoreText.T("Mission screen with hint") : CoreText.T("Mission screen");
 
     public override string Note =>
-        "Name box at the top, description (or hint, after pressing the button for it) in the large box. " +
-        "Mission number and points are examples; the 3D scene behind is only suggested.";
+        CoreText.T("Name box at the top, description (or hint, after pressing the button for it) in the large box. " +
+            "Mission number and points are examples; the 3D scene behind is only suggested.");
 
     public static MissionBriefingScreen? TryCreate(string name)
     {
@@ -266,13 +267,15 @@ internal sealed partial class MissionBriefingScreen : TextScreen
 
             if (!reachedEnd && body.IsEdited && body[index] != GameTextMemory.End)
             {
-                context.Issues.Add(new TextIssue(false, "This screen prints at most 20 lines; the rest of the text is not shown."));
+                context.Issues.Add(new TextIssue(false, CoreText.T("This screen prints at most 20 lines; the rest of " +
+                    "the text is not shown.")));
             }
         }
 
         if (_kind == "N" && name is not null && HasMoreLines(name))
         {
-            context.Issues.Add(new TextIssue(false, "Only the first line of a mission name is shown on this screen."));
+            context.Issues.Add(new TextIssue(false, CoreText.T("Only the first line of a mission name is shown on " +
+                "this screen.")));
         }
     }
 
@@ -310,13 +313,14 @@ internal sealed partial class ResultsScreen : TextScreen
         _vehicle = vehicle;
     }
 
-    public override string Title => _isTip ? "Tip screen after a flight" : $"Results screen, sheet {_sheet}";
+    public override string Title =>
+        _isTip ? CoreText.T("Tip screen after a flight") : CoreText.F("Results screen, sheet {0}", _sheet);
 
     public override string Note => _isTip
-        ? "Shown on the results screen after asking for a tip. The menu (Replay, Next, ...) is not shown."
+        ? CoreText.T("Shown on the results screen after asking for a tip. The menu (Replay, Next, ...) is not shown.")
         : _sheet == 2 && !_isBirdman
-            ? "Points on the right are example values. The menu (Photo, Replay, Next) is not shown."
-            : "The menu (Photo, Replay, Next) is not shown.";
+            ? CoreText.T("Points on the right are example values. The menu (Photo, Replay, Next) is not shown.")
+            : CoreText.T("The menu (Photo, Replay, Next) is not shown.");
 
     public static ResultsScreen? TryCreate(string name)
     {
@@ -437,11 +441,11 @@ internal sealed partial class ResultsScreen : TextScreen
 /// </summary>
 internal sealed class InFlightScreen : TextScreen
 {
-    public override string Title => "Message during the flight";
+    public override string Title => CoreText.T("Message during the flight");
 
     public override string Note =>
-        "Centered like the game's flight messages (hudDrawStartText). Some messages appear a little higher or " +
-        "lower, or in another color. Only the first line is shown.";
+        CoreText.T("Centered like the game's flight messages (hudDrawStartText). Some messages appear a little " +
+            "higher or lower, or in another color. Only the first line is shown.");
 
     public override void Draw(PreviewContext context)
     {
@@ -460,8 +464,9 @@ internal sealed class InFlightScreen : TextScreen
         if (used != -1 && context.Text[used] != GameTextMemory.End)
         {
             context.Issues.Add(new TextIssue(false,
-                "Flight messages are printed with a single call: only the first line is shown, and further " +
-                "lines also shift the first one to the left, because the game measures the whole text to center it."));
+                CoreText.T("Flight messages are printed with a single call: only the first line is shown, and " +
+                    "further lines also shift the first one to the left, because the game measures the whole text " +
+                    "to center it.")));
         }
     }
 }
@@ -476,13 +481,13 @@ internal sealed class GenericScreen : TextScreen
         _custom = custom;
     }
 
-    public override string Title => _custom ? "New text" : "General preview";
+    public override string Title => _custom ? CoreText.T("New text") : CoreText.T("General preview");
 
     public override string Note => _custom
-        ? "This text is not shown anywhere in the game yet. It is drawn with the game's font and line spacing; " +
-          "where you use it later, less room may be available."
-        : "The exact place of this text is not known; it is shown with the game's font and line spacing at a " +
-          "typical position. Widths are exact.";
+        ? CoreText.T("This text is not shown anywhere in the game yet. It is drawn with the game's font and line " +
+            "spacing; where you use it later, less room may be available.")
+        : CoreText.T("The exact place of this text is not known; it is shown with the game's font and line spacing " +
+            "at a typical position. Widths are exact.");
 
     public override void Draw(PreviewContext context)
     {

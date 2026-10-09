@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Windows.Data;
+using PW64Editor.App.Services;
 
 namespace PW64Editor.App.Converters;
 
@@ -12,7 +13,7 @@ public sealed class GroupItemCountConverter : IValueConverter
     public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
     {
         int count = value is CollectionViewGroup group ? CountItems(group) : 0;
-        return count == 1 ? "1 text" : $"{count} texts";
+        return count == 1 ? L.T("1 text") : L.F("{0} texts", count);
     }
 
     public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture) =>

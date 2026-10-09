@@ -1,3 +1,5 @@
+using PW64Editor.Core.Localization;
+
 namespace PW64Editor.Core.Text;
 
 /// <summary>One element of the text markup, for the reference shown to users.</summary>
@@ -21,14 +23,20 @@ public sealed record TextCodeInfo(int Code, string WrittenAs, string Meaning, bo
 /// </summary>
 public static class TextMarkup
 {
-    public static IReadOnlyList<TextMarkupElement> Elements { get; } =
+    /// <summary>The elements of the markup, with descriptions in the editor's language.</summary>
+    public static IReadOnlyList<TextMarkupElement> Elements =>
     [
-        new("[b]Text[/b]", "Shows the text in the bold variant of the font. Spaces inside stay regular spaces, as in the original game.", "glyph number + 0x60"),
-        new("(line break)", "Starts a new line. Every text also ends with an invisible line break that the editor adds automatically.", "0xFE"),
-        new("[x=212]", "Continues the line at horizontal position 212. Used to line up columns, e.g. points in score sheets.", "0xFD, 212, 0"),
-        new("[x=212,y=5]", "Same, with a non-zero third value. Does not occur in the original game.", "0xFD, 212, 5"),
-        new("[#5C]", "A single code without a character of its own, by its hex number. The list below shows which codes this applies to.", "the given number"),
-        new("[nonl]", "Only at the very end: the text has no final line break. Does not occur in the original game.", "final 0xFE left out"),
+        new("[b]Text[/b]", CoreText.T("Shows the text in the bold variant of the font. Spaces inside stay regular " +
+            "spaces, as in the original game."), CoreText.T("glyph number + 0x60")),
+        new(CoreText.T("(line break)"), CoreText.T("Starts a new line. Every text also ends with an invisible line break that the editor adds automatically."), "0xFE"),
+        new("[x=212]", CoreText.T("Continues the line at horizontal position 212. Used to line up columns, e.g. " +
+            "points in score sheets."), "0xFD, 212, 0"),
+        new("[x=212,y=5]",
+            CoreText.T("Same, with a non-zero third value. Does not occur in the original game."), "0xFD, 212, 5"),
+        new("[#5C]", CoreText.T("A single code without a character of its own, by its hex number. The list below " +
+            "shows which codes this applies to."), CoreText.T("the given number")),
+        new("[nonl]", CoreText.T("Only at the very end: the text has no final line break. Does not occur in the " +
+            "original game."), CoreText.T("final 0xFE left out")),
     ];
 
     /// <summary>
@@ -50,21 +58,22 @@ public static class TextMarkup
         switch (code)
         {
             case TextCodec.CodePosition:
-                return new(code, "[x=…]", "Continue at a horizontal position. The next two codes are the position and a second value (always 0).", true);
+                return new(code, "[x=…]", CoreText.T("Continue at a horizontal position. The next two codes are the " +
+                    "position and a second value (always 0)."), true);
             case TextCodec.CodeLineBreak:
-                return new(code, "(line break)", "New line.", true);
+                return new(code, CoreText.T("(line break)"), CoreText.T("New line."), true);
             case TextCodec.CodeEnd:
-                return new(code, "(end)", "End of the text. Added automatically.", true);
+                return new(code, CoreText.T("(end)"), CoreText.T("End of the text. Added automatically."), true);
         }
 
         string raw = $"[#{code:X2}]";
         if (code >= font.GlyphCount)
         {
-            return new(code, raw, "Outside the font. The game would draw invalid data. Do not use.", false);
+            return new(code, raw, CoreText.T("Outside the font. The game would draw invalid data. Do not use."), false);
         }
 
         bool bold = code >= font.BoldOffset;
-        string style = bold ? "bold" : "regular";
+        string style = bold ? CoreText.T("bold") : CoreText.T("regular");
         char fontCharacter = font.Characters[code];
 
         if (font.TryGetCharacter(code, out char character, out _))
@@ -72,15 +81,18 @@ public static class TextMarkup
             if (character == ' ')
             {
                 return bold
-                    ? new(code, raw, "Space in bold. Looks like a regular space; the editor always writes spaces as 0x42.", true)
-                    : new(code, "(space)", "Space.", true);
+                    ? new(code, raw, CoreText.T("Space in bold. Looks like a regular space; the editor always writes " +
+                        "spaces as 0x42."), true)
+                    : new(code, CoreText.T("(space)"), CoreText.T("Space."), true);
             }
 
-            return new(code, bold ? $"[b]{character}[/b]" : character.ToString(), $"Character '{character}' ({style}).", true);
+            return new(code, bold ? $"[b]{character}[/b]" : character.ToString(), CoreText.F("Character '{0}' ({1}).",
+                character, style), true);
         }
 
         return fontCharacter == '\\'
-            ? new(code, raw, $"Empty position in the font ({style} half). Draws nothing useful.", false)
-            : new(code, raw, $"Second copy of '{fontCharacter}' ({style}). Probably looks the same as the first one.", true);
+            ? new(code, raw, CoreText.F("Empty position in the font ({0} half). Draws nothing useful.", style), false)
+            : new(code, raw, CoreText.F("Second copy of '{0}' ({1}). Probably looks the same as the first one.",
+                fontCharacter, style), true);
     }
 }

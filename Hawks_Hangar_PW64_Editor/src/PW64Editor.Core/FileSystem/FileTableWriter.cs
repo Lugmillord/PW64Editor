@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using PW64Editor.Core.Iff;
+using PW64Editor.Core.Localization;
 
 namespace PW64Editor.Core.FileSystem;
 
@@ -56,7 +57,7 @@ public static class FileTableWriter
         }
 
         throw new FileSystemFullException(
-            $"The compressed file table needs {withoutPadding.Length:N0} bytes, " +
-            $"but only {maxSize:N0} bytes are reserved for it.");
+            CoreText.F("The compressed file table needs {0:N0} bytes, but only {1:N0} bytes are reserved for it.",
+                withoutPadding.Length, maxSize));
     }
 }

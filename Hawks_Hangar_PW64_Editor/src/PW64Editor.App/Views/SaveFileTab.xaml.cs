@@ -16,7 +16,7 @@ namespace PW64Editor.App.Views;
 /// </summary>
 public partial class SaveFileTab : UserControl
 {
-    private const string FileFilter = "EEPROM save files (*.eep;*.eeprom)|*.eep;*.eeprom|All files (*.*)|*.*";
+    private static string FileFilter => L.T("EEPROM save files") + " (*.eep;*.eeprom)|*.eep;*.eeprom|" + L.T("All files") + " (*.*)|*.*";
 
     private SaveGameLayout _layout = SaveGameLayout.Retail;
     private EepromFile? _file;
@@ -25,6 +25,37 @@ public partial class SaveFileTab : UserControl
     public SaveFileTab()
     {
         InitializeComponent();
+    }
+
+    /// <summary>Path of the open save file, or null.</summary>
+    public string? FilePath => _path;
+
+    /// <summary>Opens a save file (without asking about unsaved changes).</summary>
+    public void OpenFile(string path)
+    {
+        try
+        {
+            _file = EepromFile.Load(path, _layout);
+            _path = path;
+            ShowFile();
+        }
+        catch (Exception ex) when (Ui.IsExpectedError(ex))
+        {
+            Ui.ShowError(Window.GetWindow(this)!, L.F("The save file could not be opened.\n\n{0}", ex.Message));
+        }
+    }
+
+    /// <summary>Saves the changes into the open file (keeping a .bak copy as "Save" does).</summary>
+    /// <returns>False if writing failed (the reason was shown).</returns>
+    public bool SaveNow()
+    {
+        if (_file is null || _path is null)
+        {
+            return true;
+        }
+
+        Write(_path, keepBackup: true);
+        return !_file.IsModified;
     }
 
     /// <summary>True if the open save file has changes that are not saved yet.</summary>
@@ -57,27 +88,18 @@ public partial class SaveFileTab : UserControl
     private void OnOpen(object sender, RoutedEventArgs e)
     {
         Window owner = Window.GetWindow(this)!;
-        if (HasUnsavedChanges && !Ui.Confirm(owner, "The open save file has unsaved changes. Discard them?"))
+        if (HasUnsavedChanges && !Ui.Confirm(owner, L.T("The open save file has unsaved changes. Discard them?")))
         {
             return;
         }
 
-        var dialog = new OpenFileDialog { Title = "Open save file", Filter = FileFilter };
+        var dialog = new OpenFileDialog { Title = L.T("Open save file"), Filter = FileFilter };
         if (dialog.ShowDialog(owner) != true)
         {
             return;
         }
 
-        try
-        {
-            _file = EepromFile.Load(dialog.FileName, _layout);
-            _path = dialog.FileName;
-            ShowFile();
-        }
-        catch (Exception ex) when (Ui.IsExpectedError(ex))
-        {
-            Ui.ShowError(owner, $"The save file could not be opened.\n\n{ex.Message}");
-        }
+        OpenFile(dialog.FileName);
     }
 
     private void OnSave(object sender, RoutedEventArgs e)
@@ -97,7 +119,7 @@ public partial class SaveFileTab : UserControl
 
         var dialog = new SaveFileDialog
         {
-            Title = "Save save file as",
+            Title = L.T("Save save file as"),
             Filter = FileFilter,
             FileName = _path is null ? "Pilotwings 64.eep" : Path.GetFileName(_path),
             OverwritePrompt = true,
@@ -134,7 +156,7 @@ public partial class SaveFileTab : UserControl
         }
         catch (Exception ex) when (Ui.IsExpectedError(ex))
         {
-            Ui.ShowError(owner, $"The save file could not be written.\n\n{ex.Message}");
+            Ui.ShowError(owner, L.F("The save file could not be written.\n\n{0}", ex.Message));
         }
     }
 
@@ -148,8 +170,8 @@ public partial class SaveFileTab : UserControl
 
         NoFileText.Visibility = Visibility.Collapsed;
         SlotTabs.Visibility = Visibility.Visible;
-        Slot1Host.Content = new SaveSlotView(_file.Slots[0], "File 1", OnSlotChanged);
-        Slot2Host.Content = new SaveSlotView(_file.Slots[1], "File 2", OnSlotChanged);
+        Slot1Host.Content = new SaveSlotView(_file.Slots[0], L.T("File 1"), OnSlotChanged);
+        Slot2Host.Content = new SaveSlotView(_file.Slots[1], L.T("File 2"), OnSlotChanged);
         UpdateFileState();
     }
 
@@ -163,12 +185,12 @@ public partial class SaveFileTab : UserControl
             return;
         }
 
-        string unsaved = _file.IsModified ? " (unsaved changes)" : string.Empty;
+        string unsaved = _file.IsModified ? $" ({L.T("unsaved changes")})" : string.Empty;
         FileText.Text = $"{_path}{unsaved}";
         SaveButton.IsEnabled = _file.IsModified && _path is not null;
         SaveAsButton.IsEnabled = true;
-        Slot1Tab.Header = SlotHeader("File 1", _file.Slots[0]);
-        Slot2Tab.Header = SlotHeader("File 2", _file.Slots[1]);
+        Slot1Tab.Header = SlotHeader(L.T("File 1"), _file.Slots[0]);
+        Slot2Tab.Header = SlotHeader(L.T("File 2"), _file.Slots[1]);
         ShowOther();
     }
 
@@ -177,8 +199,8 @@ public partial class SaveFileTab : UserControl
         string state = slot.State switch
         {
             SaveSlotState.InUse => string.Empty,
-            SaveSlotState.Empty => " (empty)",
-            _ => " (not prepared)",
+            SaveSlotState.Empty => $" ({L.T("empty")})",
+            _ => $" ({L.T("not prepared")})",
         };
         return $"{name}{state}{(slot.IsModified ? " *" : string.Empty)}";
     }
@@ -193,31 +215,31 @@ public partial class SaveFileTab : UserControl
 
         byte[] data = _file.ToBytes();
         var info = new StringBuilder();
-        info.AppendLine($"File size: {_file.Size} bytes. The game uses the first {EepromFile.UsedSize} bytes: File 1 at 0, File 2 at 256.");
+        info.AppendLine(L.F("File size: {0} bytes. The game uses the first {1} bytes: File 1 at 0, File 2 at 256.", _file.Size, EepromFile.UsedSize));
         for (int i = 0; i < 2; i++)
         {
             SaveSlot slot = _file.Slots[i];
             byte stored = data[(i * SaveSlot.Size) + SaveSlot.Size - 1];
             string state = slot.State switch
             {
-                SaveSlotState.InUse => "in use (\"PW\")",
-                SaveSlotState.Empty => "empty (\"pw\")",
-                _ => "not prepared (the game prepares it when it starts)",
+                SaveSlotState.InUse => L.T("in use (\"PW\")"),
+                SaveSlotState.Empty => L.T("empty (\"pw\")"),
+                _ => L.T("not prepared (the game prepares it when it starts)"),
             };
             string checksum = slot.State == SaveSlotState.InUse
                 ? stored == SaveSlot.Checksum(data.AsSpan(i * SaveSlot.Size, SaveSlot.Size))
-                    ? $"checksum {stored:X2}, correct"
-                    : $"checksum {stored:X2}, WRONG: the game does not load this file"
-                : $"checksum {stored:X2} (not checked for empty files)";
+                    ? L.F("checksum {0:X2}, correct", stored)
+                    : L.F("checksum {0:X2}, WRONG: the game does not load this file", stored)
+                : L.F("checksum {0:X2} (not checked for empty files)", stored);
             int unusedStart = (slot.Layout.DataEndBit + 7) / 8;
             info.AppendLine(
-                $"File {i + 1}: {state}, {checksum}. Bytes {unusedStart}-254 are unused; {slot.UnusedBytesInUse} of them are not 0.");
+                L.F("File {0}: {1}, {2}. Bytes {3}-254 are unused; {4} of them are not 0.", i + 1, state, checksum, unusedStart, slot.UnusedBytesInUse));
         }
 
         int extraUsed = _file.ExtraBytes.ToArray().Count(b => b != 0);
         info.Append(_file.ExtraBytes.Length == 0
-            ? "No bytes behind the two files."
-            : $"{_file.ExtraBytes.Length} bytes behind the two files (not used by the game, kept as they are); {extraUsed} of them are not 0.");
+            ? L.T("No bytes behind the two files.")
+            : L.F("{0} bytes behind the two files (not used by the game, kept as they are); {1} of them are not 0.", _file.ExtraBytes.Length, extraUsed));
         OtherInfo.Text = info.ToString();
         HexView.Text = HexDump(data);
     }

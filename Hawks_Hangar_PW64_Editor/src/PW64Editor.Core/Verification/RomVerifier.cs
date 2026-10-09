@@ -1,3 +1,4 @@
+using PW64Editor.Core.Localization;
 using PW64Editor.Core.Rom;
 
 namespace PW64Editor.Core.Verification;
@@ -27,11 +28,11 @@ public static class RomVerifier
             return match.IsSupported
                 ? new RomVerificationResult(
                     RomVerificationStatus.CleanSupported, sha1, match,
-                    $"Clean dump of {match.Name} (v{header.VersionString}). Ready to use.")
+                    CoreText.F("Clean dump of {0} (v{1}). Ready to use.", match.Name, header.VersionString))
                 : new RomVerificationResult(
                     RomVerificationStatus.CleanUnsupported, sha1, match,
-                    $"Clean dump of {match.Name}, but this release is not supported yet. " +
-                    $"Please use {KnownRoms.PilotwingsUsa.Name}.");
+                    CoreText.F("Clean dump of {0}, but this release is not supported yet. Please use {1}.",
+                        match.Name, KnownRoms.PilotwingsUsa.Name));
         }
 
         // Case 2: no hash match. Use the header to find out what went wrong.
@@ -39,7 +40,8 @@ public static class RomVerifier
         {
             return new RomVerificationResult(
                 RomVerificationStatus.NotPilotwings, sha1, null,
-                $"This is not Pilotwings 64 (game code {header.GameCode}, name \"{header.InternalName}\").");
+                CoreText.F("This is not Pilotwings 64 (game code {0}, name \"{1}\").",
+                    header.GameCode, header.InternalName));
         }
 
         // The header claims Pilotwings 64. Is it the supported release?
@@ -48,19 +50,19 @@ public static class RomVerifier
         {
             string sizeHint = rom.Size == expected.Size
                 ? string.Empty
-                : $" The file size is also wrong ({rom.Size:N0} bytes instead of {expected.Size:N0}), " +
-                  "which suggests a bad dump or an already expanded ROM.";
+                : CoreText.F(" The file size is also wrong ({0:N0} bytes instead of {1:N0}), which suggests a bad " +
+                    "dump or an already expanded ROM.", rom.Size, expected.Size);
 
             return new RomVerificationResult(
                 RomVerificationStatus.ModifiedOrBadDump, sha1, null,
-                $"The header says {expected.Name}, but the SHA-1 does not match the clean dump. " +
-                $"The ROM was probably already modified or is a bad dump.{sizeHint} " +
-                "Please use an unmodified dump of your cartridge.");
+                CoreText.F("The header says {0}, but the SHA-1 does not match the clean dump. The ROM was probably " +
+                    "already modified or is a bad dump.{1} Please use an unmodified dump of your cartridge.",
+                    expected.Name, sizeHint));
         }
 
         return new RomVerificationResult(
             RomVerificationStatus.UnknownRelease, sha1, null,
-            $"This is Pilotwings 64 ({header.RegionName}, game code {header.GameCode}, v{header.VersionString}), " +
-            $"but this release is not supported. Please use {expected.Name}.");
+            CoreText.F("This is Pilotwings 64 ({0}, game code {1}, v{2}), but this release is not supported. Please " +
+                "use {3}.", header.RegionName, header.GameCode, header.VersionString, expected.Name));
     }
 }

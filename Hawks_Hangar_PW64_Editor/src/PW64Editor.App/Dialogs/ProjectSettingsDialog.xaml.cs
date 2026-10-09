@@ -57,11 +57,11 @@ public partial class ProjectSettingsDialog : Window
             (_, string romPath) = await Ui.RunBusyAsync(this, () => _session.ApplyCodeFixes([row.Fix]));
             row.IsApplied = true;
             CodeFixesApplied = true;
-            FixStatus.Text = $"\"{row.Name}\" applied. Hack ROM rebuilt: {romPath}";
+            FixStatus.Text = L.F("\"{0}\" applied. Hack ROM rebuilt: {1}", row.Name, romPath);
         }
         catch (Exception ex) when (Ui.IsExpectedError(ex))
         {
-            Ui.ShowError(this, $"The fix could not be applied; the project is unchanged.\n\n{ex.Message}");
+            Ui.ShowError(this, L.F("The fix could not be applied; the project is unchanged.\n\n{0}", ex.Message));
         }
     }
 
@@ -69,7 +69,7 @@ public partial class ProjectSettingsDialog : Window
     {
         var dialog = new SaveFileDialog
         {
-            Title = "Where should the hack ROM be written?",
+            Title = L.T("Where should the hack ROM be written?"),
             Filter = "N64 ROM (*.z64)|*.z64",
             FileName = Path.GetFileName(_outputPath ?? _project.OutputRomPath),
             OverwritePrompt = false, // overwriting the hack ROM is the whole point
@@ -79,7 +79,7 @@ public partial class ProjectSettingsDialog : Window
         {
             if (_project.IsCleanRomPath(dialog.FileName))
             {
-                Ui.ShowError(this, "The hack ROM cannot be written to the clean ROM. Choose a different file.");
+                Ui.ShowError(this, L.T("The hack ROM cannot be written to the clean ROM. Choose a different file."));
                 return;
             }
 
@@ -96,14 +96,14 @@ public partial class ProjectSettingsDialog : Window
 
     private void ShowOutputPath()
     {
-        OutputBox.Text = _outputPath ?? $"{_project.Folder}\\(hack name).z64  (default)";
+        OutputBox.Text = _outputPath ?? $"{_project.Folder}\\{L.T("(hack name)")}.z64  ({L.T("default")})";
     }
 
     private void OnSave(object sender, RoutedEventArgs e)
     {
         if (NameBox.Text.Trim().Length == 0)
         {
-            Ui.ShowError(this, "The project needs a name.");
+            Ui.ShowError(this, L.T("The project needs a name."));
             return;
         }
 

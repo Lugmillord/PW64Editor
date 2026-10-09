@@ -34,7 +34,7 @@ public partial class NewProjectDialog : Window
 
     private void OnBrowse(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFolderDialog { Title = "Where should the project folder be created?" };
+        var dialog = new OpenFolderDialog { Title = L.T("Where should the project folder be created?") };
         if (Directory.Exists(LocationBox.Text))
         {
             dialog.InitialDirectory = LocationBox.Text;
@@ -68,19 +68,19 @@ public partial class NewProjectDialog : Window
 
         bool ready = ProjectName.Length > 0 && LocationBox.Text.Trim().Length > 0;
         CreateButton.IsEnabled = ready;
-        FolderPreview.Text = ready ? $"The project will be created in {ProjectFolder}" : string.Empty;
+        FolderPreview.Text = ready ? L.F("The project will be created in {0}", ProjectFolder) : string.Empty;
     }
 
     private string? Validate()
     {
         if (!Path.IsPathFullyQualified(LocationBox.Text.Trim()))
         {
-            return "Enter a complete location, for example C:\\Hacks.";
+            return L.T("Enter a complete location, for example C:\\Hacks.");
         }
 
         if (Directory.Exists(ProjectFolder) && Directory.EnumerateFileSystemEntries(ProjectFolder).Any())
         {
-            return $"The folder {ProjectFolder} already exists and is not empty. Choose a different name or location.";
+            return L.F("The folder {0} already exists and is not empty. Choose a different name or location.", ProjectFolder);
         }
 
         return null;

@@ -26,7 +26,7 @@ public partial class RestorePointsWindow : Window
     private void LoadPoints()
     {
         List<PointRow> rows = _session.GetRestorePoints()
-            .Select(b => new PointRow(b.Name, b.CreatedAt.ToString("g"), b.FileCount, b.ContainsRom ? "Yes" : "No"))
+            .Select(b => new PointRow(b.Name, b.CreatedAt.ToString("g"), b.FileCount, b.ContainsRom ? L.T("Yes") : L.T("No")))
             .ToList();
 
         PointGrid.ItemsSource = rows;
@@ -49,7 +49,9 @@ public partial class RestorePointsWindow : Window
         {
             BackupInfo info = _session.CreateRestorePoint();
             LoadPoints();
-            Ui.ShowInfo(this, $"Restore point created ({info.FileCount} file(s){(info.ContainsRom ? " and the hack ROM" : string.Empty)}).");
+            Ui.ShowInfo(this, info.ContainsRom
+                ? L.F("Restore point created ({0} file(s) and the hack ROM).", info.FileCount)
+                : L.F("Restore point created ({0} file(s)).", info.FileCount));
         });
     }
 
@@ -63,9 +65,9 @@ public partial class RestorePointsWindow : Window
         // Restoring replaces the current state, so offer to keep it first.
         MessageBoxResult answer = MessageBox.Show(
             this,
-            $"Return the project to the restore point from {row.Created}?\n\n" +
-            "Your current project files and hack ROM will be replaced.\n" +
-            "Save the current state as a new restore point first?",
+            L.F("Return the project to the restore point from {0}?", row.Created) + "\n\n" +
+            L.T("Your current project files and hack ROM will be replaced.") + "\n" +
+            L.T("Save the current state as a new restore point first?"),
             Ui.AppName,
             MessageBoxButton.YesNoCancel,
             MessageBoxImage.Question);
@@ -84,14 +86,14 @@ public partial class RestorePointsWindow : Window
 
             _session.RestoreTo(row.Name);
             LoadPoints();
-            Ui.ShowInfo(this, $"The project was restored to {row.Created}.");
+            Ui.ShowInfo(this, L.F("The project was restored to {0}.", row.Created));
         });
     }
 
     private void OnDelete(object sender, RoutedEventArgs e)
     {
         if (PointGrid.SelectedItem is not PointRow row
-            || !Ui.Confirm(this, $"Delete the restore point from {row.Created}? This cannot be undone."))
+            || !Ui.Confirm(this, L.F("Delete the restore point from {0}? This cannot be undone.", row.Created)))
         {
             return;
         }

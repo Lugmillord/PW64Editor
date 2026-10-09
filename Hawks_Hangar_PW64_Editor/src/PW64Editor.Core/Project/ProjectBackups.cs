@@ -1,4 +1,5 @@
 using System.Globalization;
+using PW64Editor.Core.Localization;
 
 namespace PW64Editor.Core.Project;
 
@@ -140,13 +141,13 @@ public static class ProjectBackups
         // Only plain folder names are allowed, so "..\..\something" cannot escape the backups folder.
         if (backupName.Length == 0 || backupName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || backupName.Contains(".."))
         {
-            throw new ProjectException($"Invalid restore point name '{backupName}'.");
+            throw new ProjectException(CoreText.F("Invalid restore point name '{0}'.", backupName));
         }
 
         string folder = Path.Combine(GetFolder(project), backupName);
         if (!File.Exists(Path.Combine(folder, HackProject.ProjectFileName)))
         {
-            throw new ProjectException($"Restore point '{backupName}' does not exist.");
+            throw new ProjectException(CoreText.F("Restore point '{0}' does not exist.", backupName));
         }
 
         return folder;

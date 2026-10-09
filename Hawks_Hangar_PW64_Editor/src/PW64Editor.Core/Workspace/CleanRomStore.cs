@@ -1,3 +1,4 @@
+using PW64Editor.Core.Localization;
 using PW64Editor.Core.Rom;
 using PW64Editor.Core.Verification;
 
@@ -47,7 +48,7 @@ public sealed class CleanRomStore
         }
         catch (Exception ex) when (ex is InvalidRomException or IOException or UnauthorizedAccessException)
         {
-            return new CleanRomImportResult(false, $"The file cannot be used: {ex.Message}");
+            return new CleanRomImportResult(false, CoreText.F("The file cannot be used: {0}", ex.Message));
         }
 
         RomVerificationResult verification = RomVerifier.Verify(rom);
@@ -65,7 +66,7 @@ public sealed class CleanRomStore
 
         string format = rom.OriginalByteOrder == RomByteOrder.BigEndian
             ? string.Empty
-            : $" It was converted from {ByteOrderConverter.GetFileExtension(rom.OriginalByteOrder)} to .z64.";
+            : CoreText.F(" It was converted from {0} to .z64.", ByteOrderConverter.GetFileExtension(rom.OriginalByteOrder));
         return new CleanRomImportResult(true, $"{verification.Message}{format}");
     }
 
@@ -78,7 +79,7 @@ public sealed class CleanRomStore
     {
         if (!File.Exists(RomPath))
         {
-            problem = "The editor does not have a copy of the clean ROM yet.";
+            problem = CoreText.T("The editor does not have a copy of the clean ROM yet.");
             return null;
         }
 
@@ -87,7 +88,7 @@ public sealed class CleanRomStore
             N64Rom rom = N64Rom.Load(RomPath);
             if (rom.ComputeSha1() != KnownRoms.PilotwingsUsa.Sha1)
             {
-                problem = "The editor's copy of the clean ROM is damaged. Please select the ROM again.";
+                problem = CoreText.T("The editor's copy of the clean ROM is damaged. Please select the ROM again.");
                 return null;
             }
 
@@ -96,7 +97,8 @@ public sealed class CleanRomStore
         }
         catch (Exception ex) when (ex is InvalidRomException or IOException or UnauthorizedAccessException)
         {
-            problem = $"The editor's copy of the clean ROM cannot be read ({ex.Message}). Please select the ROM again.";
+            problem = CoreText.F("The editor's copy of the clean ROM cannot be read ({0}). Please select the ROM " +
+                "again.", ex.Message);
             return null;
         }
     }

@@ -35,7 +35,7 @@ public partial class StressTestDialog : Window
         }
         else
         {
-            Ui.ShowError(this, $"\"{text}\" is not a valid size. Enter a positive number or leave the field empty.");
+            Ui.ShowError(this, L.F("\"{0}\" is not a valid size. Enter a positive number or leave the field empty.", text));
             return;
         }
 

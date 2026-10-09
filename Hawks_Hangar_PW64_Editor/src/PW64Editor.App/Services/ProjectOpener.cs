@@ -36,7 +36,7 @@ internal static class ProjectOpener
         }
         catch (Exception ex) when (Ui.IsExpectedError(ex))
         {
-            Ui.ShowError(owner, $"The project could not be created.\n\n{ex.Message}");
+            Ui.ShowError(owner, L.F("The project could not be created.\n\n{0}", ex.Message));
             return null;
         }
     }
@@ -44,7 +44,7 @@ internal static class ProjectOpener
     /// <summary>Lets the user pick a project folder and opens it.</summary>
     public static EditorSession? OpenWithDialog(Window owner)
     {
-        var dialog = new OpenFolderDialog { Title = "Open a Hawk's Hangar project folder" };
+        var dialog = new OpenFolderDialog { Title = L.T("Open a Hawk's Hangar project folder") };
         return dialog.ShowDialog(owner) == true ? Open(owner, dialog.FolderName) : null;
     }
 
@@ -65,7 +65,7 @@ internal static class ProjectOpener
         }
         catch (Exception ex) when (Ui.IsExpectedError(ex))
         {
-            Ui.ShowError(owner, $"The project could not be opened.\n\n{ex.Message}");
+            Ui.ShowError(owner, L.F("The project could not be opened.\n\n{0}", ex.Message));
             return null;
         }
     }

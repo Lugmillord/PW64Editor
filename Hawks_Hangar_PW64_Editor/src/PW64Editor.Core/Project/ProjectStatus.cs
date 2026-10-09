@@ -1,4 +1,5 @@
 using PW64Editor.Core.FileSystem;
+using PW64Editor.Core.Localization;
 
 namespace PW64Editor.Core.Project;
 
@@ -39,16 +40,16 @@ public static class ProjectStatus
 
             if (original is null)
             {
-                result.Add(new(replacement, OverrideState.Invalid, 0, data.Length, "no game file with this index"));
+                result.Add(new(replacement, OverrideState.Invalid, 0, data.Length, CoreText.T("no game file with this index")));
             }
             else if (original.FileType != replacement.FileType)
             {
                 result.Add(new(replacement, OverrideState.Invalid, original.Size, data.Length,
-                    $"type in name is '{replacement.FileType}', game file is '{original.FileType}'"));
+                    CoreText.F("type in name is '{0}', game file is '{1}'", replacement.FileType, original.FileType)));
             }
             else if (data.AsSpan().SequenceEqual(original.Data))
             {
-                result.Add(new(replacement, OverrideState.Unchanged, original.Size, data.Length, "identical to original"));
+                result.Add(new(replacement, OverrideState.Unchanged, original.Size, data.Length, CoreText.T("identical to original")));
             }
             else if (data.Length == original.Size)
             {
@@ -57,7 +58,7 @@ public static class ProjectStatus
             else
             {
                 result.Add(new(replacement, OverrideState.Resized, original.Size, data.Length,
-                    $"{data.Length - original.Size:+#,0;-#,0} bytes"));
+                    CoreText.F("{0:+#,0;-#,0} bytes", data.Length - original.Size)));
             }
         }
 
@@ -75,6 +76,6 @@ public static class ProjectStatus
             }
         }
 
-        return count == 1 ? "1 byte changed" : $"{count:N0} bytes changed";
+        return count == 1 ? CoreText.T("1 byte changed") : CoreText.F("{0:N0} bytes changed", count);
     }
 }

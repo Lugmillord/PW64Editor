@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using PW64Editor.App.Services;
 using PW64Editor.Core.Code;
 
 namespace PW64Editor.App.Dialogs;
@@ -20,11 +21,11 @@ public sealed class CodeFixRow : INotifyPropertyChanged
 
     public CodeFix Fix { get; }
 
-    public string Name => Fix.Name;
+    public string Name => L.T(Fix.Name);
 
-    public string Problem => Fix.Problem;
+    public string Problem => L.T(Fix.Problem);
 
-    public string Solution => Fix.Solution;
+    public string Solution => L.T(Fix.Solution);
 
     /// <summary>True once the fix is part of the project.</summary>
     public bool IsApplied

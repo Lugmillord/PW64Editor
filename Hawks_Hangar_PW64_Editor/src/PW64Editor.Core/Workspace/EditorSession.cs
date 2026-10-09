@@ -1,5 +1,6 @@
 using PW64Editor.Core.Code;
 using PW64Editor.Core.FileSystem;
+using PW64Editor.Core.Localization;
 using PW64Editor.Core.Project;
 using PW64Editor.Core.Rom;
 using PW64Editor.Core.Text;
@@ -69,8 +70,8 @@ public sealed class EditorSession
         if (!string.Equals(project.Settings.BaseRomSha1, cleanRom.ComputeSha1(), StringComparison.OrdinalIgnoreCase))
         {
             throw new ProjectException(
-                "This project was made for a different base ROM than the one the editor uses. " +
-                $"Project base ROM SHA-1: {project.Settings.BaseRomSha1}.");
+                CoreText.F("This project was made for a different base ROM than the one the editor uses. Project " +
+                    "base ROM SHA-1: {0}.", project.Settings.BaseRomSha1));
         }
 
         // Point the project at the editor's clean ROM copy, so the command line tool
@@ -147,7 +148,7 @@ public sealed class EditorSession
     public string AddFileToProject(int tableIndex)
     {
         GameFile file = CleanFileSystem.Files.FirstOrDefault(f => f.TableIndex == tableIndex)
-            ?? throw new ProjectException($"The game has no file with table index {tableIndex}.");
+            ?? throw new ProjectException(CoreText.F("The game has no file with table index {0}.", tableIndex));
         return Project.AddOverride(file);
     }
 
@@ -171,7 +172,7 @@ public sealed class EditorSession
 
         fromProject = false;
         GameFile original = CleanFileSystem.Files.FirstOrDefault(f => f.TableIndex == tableIndex)
-            ?? throw new ProjectException($"The game has no file with table index {tableIndex}.");
+            ?? throw new ProjectException(CoreText.F("The game has no file with table index {0}.", tableIndex));
         return original.Data;
     }
 
@@ -233,7 +234,7 @@ public sealed class EditorSession
         {
             if (index < 0 || index >= texts.Count || texts[index].IsFree)
             {
-                throw new ProjectException($"There is no text number {index}.");
+                throw new ProjectException(CoreText.F("There is no text number {0}.", index));
             }
 
             texts[index] = texts[index] with { Data = EncodeForSaving(library, markup, texts[index].Name, library.Texts[index].Entry.Data.Length) };
@@ -243,7 +244,8 @@ public sealed class EditorSession
         {
             if (index < originalCount)
             {
-                throw new ProjectException($"Text {index} belongs to the original game and cannot be removed.");
+                throw new ProjectException(CoreText.F("Text {0} belongs to the original game and cannot be removed.",
+                    index));
             }
 
             if (index < texts.Count)
@@ -256,13 +258,14 @@ public sealed class EditorSession
         {
             if (text.Index < originalCount)
             {
-                throw new ProjectException($"New texts must come after the {originalCount} original texts (number {text.Index}).");
+                throw new ProjectException(CoreText.F("New texts must come after the {0} original texts (number {1}).",
+                    originalCount, text.Index));
             }
 
             string? nameProblem = CustomTexts.CheckName(text.Name, texts.Where(t => !t.IsFree).Select(t => t.Name));
             if (nameProblem is not null)
             {
-                throw new ProjectException($"Text {text.Index}: {nameProblem}");
+                throw new ProjectException(CoreText.F("Text {0}: {1}", text.Index, nameProblem));
             }
 
             while (texts.Count <= text.Index)
@@ -272,7 +275,8 @@ public sealed class EditorSession
 
             if (!texts[text.Index].IsFree)
             {
-                throw new ProjectException($"Text number {text.Index} is already used by {texts[text.Index].Name}.");
+                throw new ProjectException(CoreText.F("Text number {0} is already used by {1}.",
+                    text.Index, texts[text.Index].Name));
             }
 
             texts[text.Index] = new TextFileEntry(text.Name, EncodeForSaving(library, text.Markup, text.Name, 0));
@@ -298,7 +302,7 @@ public sealed class EditorSession
         TextEncodeResult result = library.Codec.Encode(markup);
         if (!result.Success)
         {
-            throw new ProjectException($"Text {name} has errors: {result.Errors[0].Message}");
+            throw new ProjectException(CoreText.F("Text {0} has errors: {1}", name, result.Errors[0].Message));
         }
 
         return TextCodec.ToChunkData(result.Codes, minimumSize);

@@ -40,6 +40,8 @@
                 <Separator />
                 <MenuItem Header="E_xit" Click="OnExit" />
             </MenuItem>
+            <!-- Filled in code: one entry per language, in its own name. -->
+            <MenuItem x:Name="LanguageMenu" Header="_Language" />
         </Menu>
 
         <StatusBar DockPanel.Dock="Bottom" Padding="6,2">

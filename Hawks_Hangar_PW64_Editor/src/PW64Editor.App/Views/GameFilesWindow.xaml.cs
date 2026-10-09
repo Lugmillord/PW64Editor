@@ -68,16 +68,16 @@ public partial class GameFilesWindow : Window
                 s => s.Override.TableIndex,
                 s => s.State switch
                 {
-                    OverrideState.Unchanged => "Yes, unchanged",
-                    OverrideState.Modified => $"Yes, modified ({s.Message})",
-                    OverrideState.Resized => $"Yes, size changed ({s.Message})",
-                    _ => $"Problem: {s.Message}",
+                    OverrideState.Unchanged => L.T("Yes, unchanged"),
+                    OverrideState.Modified => L.F("Yes, modified ({0})", s.Message),
+                    OverrideState.Resized => L.F("Yes, size changed ({0})", s.Message),
+                    _ => L.F("Problem: {0}", s.Message),
                 });
         }
         catch (Exception ex) when (Ui.IsExpectedError(ex))
         {
             // E.g. a file in the "files" folder with a name that cannot be interpreted.
-            Ui.ShowError(this, $"The project's files folder has a problem:\n\n{ex.Message}");
+            Ui.ShowError(this, L.F("The project's files folder has a problem:\n\n{0}", ex.Message));
             return [];
         }
     }
@@ -95,7 +95,7 @@ public partial class GameFilesWindow : Window
             .ToList();
 
         FileGrid.ItemsSource = visible;
-        SummaryText.Text = $"{visible.Count} of {_allRows.Count} files, {_allRows.Count(r => r.InProject)} in the project";
+        SummaryText.Text = L.F("{0} of {1} files, {2} in the project", visible.Count, _allRows.Count, _allRows.Count(r => r.InProject));
         UpdateButtons();
     }
 
@@ -136,8 +136,7 @@ public partial class GameFilesWindow : Window
         {
             string path = _session.AddFileToProject(row.TableIndex);
             ReloadKeepingSelection(row.TableIndex);
-            Ui.ShowInfo(this, $"File {row.TableIndex} was copied into the project:\n\n{path}\n\n" +
-                              "Edit it there (for example with a hex editor). The next build uses your version.");
+            Ui.ShowInfo(this, L.F("File {0} was copied into the project:\n\n{1}\n\nEdit it there (for example with a hex editor). The next build uses your version.", row.TableIndex, path));
         }
         catch (Exception ex) when (Ui.IsExpectedError(ex))
         {
@@ -152,8 +151,7 @@ public partial class GameFilesWindow : Window
             return;
         }
 
-        if (!Ui.Confirm(this, $"Remove file {row.TableIndex} from the project?\n\n" +
-                              "Your edited version is deleted and the next build uses the original again."))
+        if (!Ui.Confirm(this, L.F("Remove file {0} from the project?\n\nYour edited version is deleted and the next build uses the original again.", row.TableIndex)))
         {
             return;
         }

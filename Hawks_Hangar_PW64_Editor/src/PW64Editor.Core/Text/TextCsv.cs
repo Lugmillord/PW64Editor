@@ -1,5 +1,6 @@
-using System.Text;
 using System.Text.RegularExpressions;
+using System.Text;
+using PW64Editor.Core.Localization;
 
 namespace PW64Editor.Core.Text;
 
@@ -108,28 +109,28 @@ public static partial class TextCsv
                 continue; // header row
             }
 
-            string id = idText.Length > 0 ? idText : $"line {line}";
+            string id = idText.Length > 0 ? idText : CoreText.F("line {0}", line);
             if (fields.Count < 2)
             {
-                rejected.Add(new(id, $"No '{Separator}' between ID and text"));
+                rejected.Add(new(id, CoreText.F("No '{0}' between ID and text", Separator)));
                 continue;
             }
 
             if (!int.TryParse(idText, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int index))
             {
-                rejected.Add(new(id, "The ID is not a number"));
+                rejected.Add(new(id, CoreText.T("The ID is not a number")));
                 continue;
             }
 
             if (!targets.TryGetValue(index, out TextImportTarget? target))
             {
-                rejected.Add(new(id, "There is no text with this ID"));
+                rejected.Add(new(id, CoreText.T("There is no text with this ID")));
                 continue;
             }
 
             if (!seen.Add(index))
             {
-                rejected.Add(new(id, "The ID appears more than once; only its first row was used"));
+                rejected.Add(new(id, CoreText.T("The ID appears more than once; only its first row was used")));
                 continue;
             }
 
@@ -168,13 +169,13 @@ public static partial class TextCsv
         {
             TextEncodeError error = encoded.Errors[0];
             int line = 1 + markup.Take(Math.Min(error.Position, markup.Length)).Count(c => c == '\n');
-            return $"Line {line}: {error.Message}";
+            return CoreText.F("Line {0}: {1}", line, error.Message);
         }
 
         int lines = TextWrapper.CountLines(markup);
         if (lines > target.MaxLines)
         {
-            return $"Too long: {lines} lines (after automatic line breaks), at most {target.MaxLines}";
+            return CoreText.F("Too long: {0} lines (after automatic line breaks), at most {1}", lines, target.MaxLines);
         }
 
         TextValidation validation = TextValidator.Validate(codec, markup, target.OriginalMarkup, target.MaxLines, target.Name);

@@ -2,6 +2,7 @@ using PW64Editor.Core.Boot;
 using PW64Editor.Core.Code;
 using PW64Editor.Core.FileSystem;
 using PW64Editor.Core.Iff;
+using PW64Editor.Core.Localization;
 using PW64Editor.Core.Rom;
 
 namespace PW64Editor.Core.Build;
@@ -156,8 +157,8 @@ public static class RomBuilder
             if (!fitsInPlace)
             {
                 throw new FileSystemFullException(
-                    $"Game files need {fileSystemEnd - layout.FileSystemOffset:N0} bytes, but only " +
-                    $"{layout.FileSystemCapacity:N0} are available (over by {fileSystemEnd - layout.FileSystemLimit:N0}).");
+                    CoreText.F("Game files need {0:N0} bytes, but only {1:N0} are available (over by {2:N0}).",
+                        fileSystemEnd - layout.FileSystemOffset, layout.FileSystemCapacity, fileSystemEnd - layout.FileSystemLimit));
             }
 
             return new AudioPlacement(layout.FileSystemLimit, false, baseRom.Size);
@@ -182,15 +183,16 @@ public static class RomBuilder
             if (!options.AllowExpansion)
             {
                 throw new FileSystemFullException(
-                    $"Game files and audio data need {requiredSize:N0} bytes, but the ROM has only {romSize:N0} " +
-                    $"(over by {requiredSize - romSize:N0}). Enable ROM expansion to make room.");
+                    CoreText.F("Game files and audio data need {0:N0} bytes, but the ROM has only {1:N0} (over by " +
+                        "{2:N0}). Enable ROM expansion to make room.", requiredSize, romSize, requiredSize - romSize));
             }
 
             romSize = ExpansionSizes.FirstOrDefault(size => size >= requiredSize);
             if (romSize == 0)
             {
                 throw new FileSystemFullException(
-                    $"Game files and audio data need {requiredSize:N0} bytes, more than the maximum ROM size of 64 MiB.");
+                    CoreText.F("Game files and audio data need {0:N0} bytes, more than the maximum ROM size of " +
+                        "64 MiB.", requiredSize));
             }
         }
 
@@ -208,8 +210,8 @@ public static class RomBuilder
             if (current != (uint)originalAddress)
             {
                 throw new InvalidDataException(
-                    $"Code reference '{reference.Description}' contains 0x{current:X}, expected 0x{originalAddress:X}. " +
-                    "The base ROM must be an unmodified ROM.");
+                    CoreText.F("Code reference '{0}' contains 0x{1:X}, expected 0x{2:X}. The base ROM must be an " +
+                        "unmodified ROM.", reference.Description, current, originalAddress));
             }
 
             MipsAddressPatcher.WriteValue(output, reference, (uint)(originalAddress + delta));
@@ -256,13 +258,14 @@ public static class RomBuilder
             if (formType != file.FileType)
             {
                 throw new InvalidDataException(
-                    $"File {i}: declared as '{file.FileType}', but its FORM type is '{formType}'.");
+                    CoreText.F("File {0}: declared as '{1}', but its FORM type is '{2}'.", i, file.FileType, formType));
             }
 
             if (formSize != file.Size)
             {
                 throw new InvalidDataException(
-                    $"File {i} ('{file.FileType}'): FORM header says {formSize:N0} bytes, data has {file.Size:N0}.");
+                    CoreText.F("File {0} ('{1}'): FORM header says {2:N0} bytes, data has {3:N0}.",
+                        i, file.FileType, formSize, file.Size));
             }
 
             // The game computes the next file's address by adding sizes; N64 DMA needs
@@ -270,7 +273,7 @@ public static class RomBuilder
             if (file.Size % 4 != 0)
             {
                 throw new InvalidDataException(
-                    $"File {i} ('{file.FileType}'): size {file.Size:N0} is not a multiple of 4.");
+                    CoreText.F("File {0} ('{1}'): size {2:N0} is not a multiple of 4.", i, file.FileType, file.Size));
             }
 
             string group = FileTypeLimits.GetGroup(file.FileType);
@@ -283,7 +286,7 @@ public static class RomBuilder
             if (count > limit)
             {
                 throw new InvalidDataException(
-                    $"Too many files in group '{group}': {count}, the game supports at most {limit}.");
+                    CoreText.F("Too many files in group '{0}': {1}, the game supports at most {2}.", group, count, limit));
             }
         }
     }

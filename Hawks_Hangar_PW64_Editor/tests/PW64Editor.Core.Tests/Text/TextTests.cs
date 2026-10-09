@@ -261,6 +261,17 @@ public class TextCatalogTests
     }
 
     [Fact]
+    public void Categorize_GivesThePatternOfTheDescription()
+    {
+        TextCategory mission = TextCatalog.Categorize("A_HG_2_H");
+        TextCategory known = TextCatalog.Categorize("HANG");
+
+        Assert.Equal("Mission {0} {1}", mission.DescriptionPattern);
+        Assert.Equal(["2", "hint"], mission.DescriptionArgs);
+        Assert.Equal(string.Empty, known.DescriptionPattern);
+    }
+
+    [Fact]
     public void Categorize_UnknownName_GoesToOther()
     {
         Assert.Equal("Other", TextCatalog.Categorize("SOMETHING_NEW").Area);

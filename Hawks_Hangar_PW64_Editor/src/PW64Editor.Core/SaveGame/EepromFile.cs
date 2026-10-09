@@ -1,3 +1,5 @@
+using PW64Editor.Core.Localization;
+
 namespace PW64Editor.Core.SaveGame;
 
 /// <summary>
@@ -39,7 +41,8 @@ public sealed class EepromFile
         if (data.Length < UsedSize || data.Length > MaxSize)
         {
             throw new InvalidDataException(
-                $"This is not an EEPROM save file: it has {data.Length} bytes, but should have {UsedSize} (or up to {MaxSize}).");
+                CoreText.F("This is not an EEPROM save file: it has {0} bytes, but should have {1} (or up to {2}).",
+                    data.Length, UsedSize, MaxSize));
         }
 
         return new EepromFile(data, layout);

@@ -91,11 +91,11 @@ public partial class TextTab : UserControl
 
         public string Name => Text.Name;
 
-        public string Area => Text.Category.Area;
+        public string Area => L.T(Text.Category.Area);
 
         public int AreaOrder => Text.Category.AreaOrder;
 
-        public string Section => Text.Category.Section;
+        public string Section => L.T(Text.Category.Section);
 
         public int SectionOrder => Text.Category.SectionOrder;
 
@@ -142,8 +142,8 @@ public partial class TextTab : UserControl
         /// <summary>● for unsaved edits, ✎ for saved changes compared to the original game.</summary>
         public string StatusMark => IsUnsaved ? "●" : IsCustom ? "+" : DiffersFromOriginal ? "✎" : string.Empty;
 
-        public string? StatusText => IsNew ? "Added, not saved yet" : IsUnsaved ? "Changed, not saved yet"
-            : IsCustom ? "Added text" : DiffersFromOriginal ? "Changed compared to the original game" : null;
+        public string? StatusText => IsNew ? L.T("Added, not saved yet") : IsUnsaved ? L.T("Changed, not saved yet")
+            : IsCustom ? L.T("Added text") : DiffersFromOriginal ? L.T("Changed compared to the original game") : null;
 
         private void NotifyAll()
         {
@@ -188,7 +188,7 @@ public partial class TextTab : UserControl
             _rows = [];
             _rowsByName = [];
             ShowDetails(null);
-            SourceText.Text = $"The texts could not be read: {ex.Message}";
+            SourceText.Text = L.F("The texts could not be read: {0}", ex.Message);
             UnsavedChangesChanged?.Invoke(this, EventArgs.Empty);
             return;
         }
@@ -222,10 +222,10 @@ public partial class TextTab : UserControl
 
         int changed = _rows.Count(r => r.DiffersFromOriginal);
         int custom = _rows.Count(r => r.IsCustom);
-        string added = custom > 0 ? $", {custom} added (marked +)" : string.Empty;
+        string added = custom > 0 ? L.F(", {0} added (marked +)", custom) : string.Empty;
         SourceText.Text = library.FromProject
-            ? $"{_rows.Count} texts from the project, {changed} changed compared to the original game (marked ✎){added}. Unsaved edits are marked ●."
-            : $"{_rows.Count} texts from the original game. Edited texts are marked ● until saved.";
+            ? L.F("{0} texts from the project, {1} changed compared to the original game (marked ✎){2}. Unsaved edits are marked ●.", _rows.Count, changed, added)
+            : L.F("{0} texts from the original game. Edited texts are marked ● until saved.", _rows.Count);
         UnsavedChangesChanged?.Invoke(this, EventArgs.Empty);
     }
 
@@ -307,6 +307,12 @@ public partial class TextTab : UserControl
         UnsavedChangesChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    /// <summary>The description of a text's category in the editor's language.</summary>
+    private static string DescriptionOf(TextCategory category) =>
+        category.DescriptionPattern.Length > 0
+            ? L.F(category.DescriptionPattern, category.DescriptionArgs.Select(a => (object?)L.T(a)).ToArray())
+            : L.T(category.Description);
+
     private static string OriginalMarkupOf(GameTextLibrary original, GameText text) =>
         text.Index < original.Texts.Count && original.Texts[text.Index].Name == text.Name
             ? original.Texts[text.Index].Markup
@@ -344,7 +350,8 @@ public partial class TextTab : UserControl
             || row.Preview.Contains(_search, StringComparison.OrdinalIgnoreCase)
             || row.Area.Contains(_search, StringComparison.OrdinalIgnoreCase)
             || row.Section.Contains(_search, StringComparison.OrdinalIgnoreCase)
-            || row.Text.Category.Description.Contains(_search, StringComparison.OrdinalIgnoreCase);
+            || row.Text.Category.Description.Contains(_search, StringComparison.OrdinalIgnoreCase)
+            || DescriptionOf(row.Text.Category).Contains(_search, StringComparison.OrdinalIgnoreCase);
     }
 
     private void OnShowCodes(object sender, RoutedEventArgs e)
@@ -436,16 +443,16 @@ public partial class TextTab : UserControl
         TextCategory category = row.Text.Category;
         DetailName.Text = row.Name;
         DetailCategory.Text = category.Description.Length > 0
-            ? $"Text {row.Index}: {category.Area} › {category.Section} › {category.Description}"
-            : $"Text {row.Index}: {category.Area} › {category.Section}";
+            ? L.F("Text {0}: {1} › {2} › {3}", row.Index, L.T(category.Area), L.T(category.Section), DescriptionOf(category))
+            : L.F("Text {0}: {1} › {2}", row.Index, L.T(category.Area), L.T(category.Section));
         DetailUsage.Text = row.IsCustom
-            ? "Added text. The game finds it by its number or its name, but does not use it anywhere yet."
+            ? L.T("Added text. The game finds it by its number or its name, but does not use it anywhere yet.")
             : category.SourceFiles.Count > 0
-                ? $"Used in the game code: {string.Join(", ", category.SourceFiles.Select(Path.GetFileName))}"
-                : "Looked up by a name the game builds while running.";
+                ? L.F("Used in the game code: {0}", string.Join(", ", category.SourceFiles.Select(Path.GetFileName)))
+                : L.T("Looked up by a name the game builds while running.");
         if (TextNumberSlots.Find(row.Name) is { } slot)
         {
-            DetailUsage.Text += $" The game writes a number into {TextNumberSlots.Describe(slot)} of this text.";
+            DetailUsage.Text += " " + L.F("The game writes a number into {0} of this text.", TextNumberSlots.Describe(slot));
         }
 
         CustomWarning.Visibility = row.IsCustom ? Visibility.Visible : Visibility.Collapsed;
@@ -538,7 +545,7 @@ public partial class TextTab : UserControl
 
         if (!FitsLineLimit(allowed))
         {
-            Flash($"This text can have at most {MaxLines(row)} line(s); the game's screen has no room for more.", null, position);
+            Flash(L.F("This text can have at most {0} line(s); the game's screen has no room for more.", MaxLines(row)), null, position);
             return;
         }
 
@@ -553,8 +560,8 @@ public partial class TextTab : UserControl
         {
             int count = input.Count(ch => !IsAllowed(ch));
             Flash(count == 1
-                    ? $"'{c}' is not in the game's font."
-                    : $"{count} characters are not in the game's font and were left out.",
+                    ? L.F("'{0}' is not in the game's font.", c)
+                    : L.F("{0} characters are not in the game's font and were left out.", count),
                 c,
                 position + allowed.Length);
         }
@@ -684,9 +691,8 @@ public partial class TextTab : UserControl
         if (result.Layout is { } layout && result.OriginalLayout is { } original)
         {
             LayoutText.Text =
-                $"{layout.Lines} of {maxLines} possible line(s), original {original.Lines}. " +
-                $"Longest line {layout.LongestPiece} characters, original {original.LongestPiece}, " +
-                $"allowed maximum {TextValidator.MaxCharactersPerPiece}.";
+                L.F("{0} of {1} possible line(s), original {2}. Longest line {3} characters, original {4}, allowed maximum {5}.",
+                    layout.Lines, maxLines, original.Lines, layout.LongestPiece, original.LongestPiece, TextValidator.MaxCharactersPerPiece);
         }
         else
         {
@@ -708,9 +714,9 @@ public partial class TextTab : UserControl
         Window owner = Window.GetWindow(this)!;
         var dialog = new Microsoft.Win32.SaveFileDialog
         {
-            Title = "Export texts as CSV",
+            Title = L.T("Export texts as CSV"),
             Filter = CsvFilter,
-            FileName = $"{_session?.Project.Settings.Name ?? "Pilotwings 64"} texts.csv",
+            FileName = L.F("{0} texts.csv", _session?.Project.Settings.Name ?? "Pilotwings 64"),
             OverwritePrompt = true,
         };
         if (dialog.ShowDialog(owner) != true)
@@ -722,11 +728,11 @@ public partial class TextTab : UserControl
         {
             // The texts as shown now, including edits that are not saved yet.
             File.WriteAllBytes(dialog.FileName, TextCsv.ToFileBytes(TextCsv.Export(_rows.Select(r => (r.Index, r.Markup)))));
-            Ui.ShowInfo(owner, $"{_rows.Count} texts exported to {dialog.FileName}.");
+            Ui.ShowInfo(owner, L.F("{0} texts exported to {1}.", _rows.Count, dialog.FileName));
         }
         catch (Exception ex) when (Ui.IsExpectedError(ex))
         {
-            Ui.ShowError(owner, $"The file could not be written.\n\n{ex.Message}");
+            Ui.ShowError(owner, L.F("The file could not be written.\n\n{0}", ex.Message));
         }
     }
 
@@ -738,7 +744,7 @@ public partial class TextTab : UserControl
         }
 
         Window owner = Window.GetWindow(this)!;
-        var dialog = new Microsoft.Win32.OpenFileDialog { Title = "Import texts from CSV", Filter = CsvFilter };
+        var dialog = new Microsoft.Win32.OpenFileDialog { Title = L.T("Import texts from CSV"), Filter = CsvFilter };
         if (dialog.ShowDialog(owner) != true)
         {
             return;
@@ -754,7 +760,7 @@ public partial class TextTab : UserControl
         }
         catch (Exception ex) when (Ui.IsExpectedError(ex))
         {
-            Ui.ShowError(owner, $"The file could not be read.\n\n{ex.Message}");
+            Ui.ShowError(owner, L.F("The file could not be read.\n\n{0}", ex.Message));
             return;
         }
 
@@ -774,19 +780,20 @@ public partial class TextTab : UserControl
             UnsavedChangesChanged?.Invoke(this, EventArgs.Empty);
         }
 
-        string summary = $"{result.Changes.Count} text(s) changed, {result.Unchanged} unchanged" +
-            (result.Changes.Count > 0 ? ". The changes are not saved yet: save and build as usual (Ctrl+S)." : ".");
+        string summary = result.Changes.Count > 0
+            ? L.F("{0} text(s) changed, {1} unchanged. The changes are not saved yet: save and build as usual (Ctrl+S).", result.Changes.Count, result.Unchanged)
+            : L.F("{0} text(s) changed, {1} unchanged.", result.Changes.Count, result.Unchanged);
         if (result.Rejected.Count == 0)
         {
             Ui.ShowInfo(owner, summary);
         }
         else
         {
-            new TextImportReportDialog($"{summary} {result.Rejected.Count} row(s) were not imported.", result.Rejected) { Owner = owner }.ShowDialog();
+            new TextImportReportDialog($"{summary} {L.F("{0} row(s) were not imported.", result.Rejected.Count)}", result.Rejected) { Owner = owner }.ShowDialog();
         }
     }
 
-    private const string CsvFilter = "CSV files (*.csv)|*.csv|All files (*.*)|*.*";
+    private static string CsvFilter => L.T("CSV files") + " (*.csv)|*.csv|" + L.T("All files") + " (*.*)|*.*";
 
     // ----------------------------------------------------------------- adding and removing texts
 
@@ -795,8 +802,8 @@ public partial class TextTab : UserControl
         bool canAdd = _session?.CanAddTexts == true && _library is not null;
         AddTextButton.IsEnabled = canAdd;
         AddTextButton.ToolTip = canAdd
-            ? "Adds a new text with the lowest free number and a name of your choice"
-            : $"Needs the code fix \"{CodeFixes.ExpandedTexts.Name}\" (File › Project settings): the original game has no room for more texts.";
+            ? L.T("Adds a new text with the lowest free number and a name of your choice")
+            : L.F("Needs the code fix \"{0}\" (File › Project settings): the original game has no room for more texts.", L.T(CodeFixes.ExpandedTexts.Name));
     }
 
     private void OnAddText(object sender, RoutedEventArgs e)
@@ -810,13 +817,13 @@ public partial class TextTab : UserControl
         int? index = CustomTexts.NextFreeIndex(_rows.Select(r => r.Index), _library.OriginalCount);
         if (index is not { } number)
         {
-            Ui.ShowError(owner, $"The game has room for {CustomTexts.Capacity} texts, and all are used.");
+            Ui.ShowError(owner, L.F("The game has room for {0} texts, and all are used.", CustomTexts.Capacity));
             return;
         }
 
-        string? input = InputDialog.Ask(owner, "Add text",
-            $"Name of the new text {number}. Capital letters A-Z, digits 0-9 and '_', at most {CustomTexts.MaxNameLength} characters. " +
-            "Every name may be used only once.", "MY_TEXT");
+        string? input = InputDialog.Ask(owner, L.T("Add text"),
+            L.F("Name of the new text {0}. Capital letters A-Z, digits 0-9 and '_', at most {1} characters. Every name may be used only once.",
+                number, CustomTexts.MaxNameLength), "MY_TEXT");
         if (input is null)
         {
             return;
@@ -855,8 +862,8 @@ public partial class TextTab : UserControl
         }
 
         if (!Ui.Confirm(Window.GetWindow(this),
-                $"Remove the text {row.Name} (number {row.Index})?\n\nIts number becomes free and is given to the next new text. " +
-                "The removal is saved together with the other changes."))
+                L.F("Remove the text {0} (number {1})?\n\nIts number becomes free and is given to the next new text. The removal is saved together with the other changes.",
+                    row.Name, row.Index)))
         {
             return;
         }
@@ -890,7 +897,7 @@ public partial class TextTab : UserControl
         }
         catch (Exception ex) when (Ui.IsExpectedError(ex))
         {
-            _previewProblem = $"The preview is not available: the game's font could not be read ({ex.Message}).";
+            _previewProblem = L.F("The preview is not available: the game's font could not be read ({0}).", ex.Message);
         }
     }
 
@@ -929,7 +936,7 @@ public partial class TextTab : UserControl
                 PreviewImage.Source = null;
             }
 
-            PreviewInfo.Text = "The text has errors (see above). The preview shows the last version without errors.";
+            PreviewInfo.Text = L.T("The text has errors (see above). The preview shows the last version without errors.");
             PreviewIssueList.ItemsSource = null;
             return;
         }
@@ -945,7 +952,7 @@ public partial class TextTab : UserControl
         {
             // The preview is only a help; a problem in it must never stop the user from editing.
             PreviewImage.Source = null;
-            PreviewInfo.Text = $"The preview could not be drawn: {ex.Message}";
+            PreviewInfo.Text = L.F("The preview could not be drawn: {0}", ex.Message);
             PreviewIssueList.ItemsSource = null;
             return;
         }
@@ -965,19 +972,19 @@ public partial class TextTab : UserControl
     /// <summary>A sentence about the widest line and the room on the screen.</summary>
     private static string DescribeRoom(TextPreview preview)
     {
-        string pieces = $"Pieces on this screen: {preview.PiecesOnScreen} of {TextValidator.MaxPiecesPerFrame}.";
+        string pieces = L.F("Pieces on this screen: {0} of {1}.", preview.PiecesOnScreen, TextValidator.MaxPiecesPerFrame);
         if (preview.WidestLine is not { } widest || widest.Width == 0)
         {
             return pieces;
         }
 
-        string text = $"Widest line: line {widest.Line}, {widest.Width} pixels (ends at x = {widest.Right}).";
+        string text = L.F("Widest line: line {0}, {1} pixels (ends at x = {2}).", widest.Line, widest.Width, widest.Right);
         if (preview.TextArea is { } area)
         {
             int left = area.Right - widest.Right;
             text += left >= 0
-                ? $" Room up to x = {area.Right}: {left} pixel(s) left."
-                : $" Room up to x = {area.Right}: {-left} pixel(s) too wide.";
+                ? " " + L.F("Room up to x = {0}: {1} pixel(s) left.", area.Right, left)
+                : " " + L.F("Room up to x = {0}: {1} pixel(s) too wide.", area.Right, -left);
         }
 
         return $"{text} {pieces}";
@@ -1060,8 +1067,8 @@ public partial class TextTab : UserControl
 
     private void OnInsertPosition(object sender, RoutedEventArgs e)
     {
-        string? input = InputDialog.Ask(Window.GetWindow(this), "Column position",
-            "Horizontal position where the rest of the line starts (0 = left edge, the screen is 320 wide):", "212");
+        string? input = InputDialog.Ask(Window.GetWindow(this), L.T("Column position"),
+            L.T("Horizontal position where the rest of the line starts (0 = left edge, the screen is 320 wide):"), "212");
         if (input is null)
         {
             return;
@@ -1069,14 +1076,14 @@ public partial class TextTab : UserControl
 
         if (!int.TryParse(input.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out int x) || x > 320)
         {
-            Ui.ShowError(Window.GetWindow(this), $"\"{input}\" is not a position between 0 and 320.");
+            Ui.ShowError(Window.GetWindow(this), L.F("\"{0}\" is not a position between 0 and 320.", input));
             return;
         }
 
         if (x is TextCodec.CodeLineBreak or TextCodec.CodeEnd)
         {
             Ui.ShowError(Window.GetWindow(this),
-                $"The game cannot use position {x}: while loading, it turns 254 and 255 into its line break and end codes. Use {x - 2} or {x + 2}.");
+                L.F("The game cannot use position {0}: while loading, it turns 254 and 255 into its line break and end codes. Use {1} or {2}.", x, x - 2, x + 2));
             return;
         }
 
@@ -1085,8 +1092,8 @@ public partial class TextTab : UserControl
 
     private void OnInsertCode(object sender, RoutedEventArgs e)
     {
-        string? input = InputDialog.Ask(Window.GetWindow(this), "Insert code",
-            "Code number in hex, for example 5C (see the Codes list):", string.Empty);
+        string? input = InputDialog.Ask(Window.GetWindow(this), L.T("Insert code"),
+            L.T("Code number in hex, for example 5C (see the Codes list):"), string.Empty);
         if (input is null)
         {
             return;
@@ -1095,7 +1102,7 @@ public partial class TextTab : UserControl
         string hex = input.Trim().Replace("0x", string.Empty, StringComparison.OrdinalIgnoreCase).TrimStart('#');
         if (!int.TryParse(hex, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int code) || code > 0xFC)
         {
-            Ui.ShowError(Window.GetWindow(this), $"\"{input}\" is not a code between 00 and FC. Line breaks are entered with Enter.");
+            Ui.ShowError(Window.GetWindow(this), L.F("\"{0}\" is not a code between 00 and FC. Line breaks are entered with Enter.", input));
             return;
         }
 

@@ -1,3 +1,5 @@
+using PW64Editor.Core.Localization;
+
 namespace PW64Editor.Core.Text;
 
 /// <summary>
@@ -30,7 +32,8 @@ public static class TextNumberSlots
 
     /// <summary>A short description for the user, e.g. "characters 14-15".</summary>
     public static string Describe(Slot slot) =>
-        slot.Length == 1 ? $"character {slot.Offset + 1}" : $"characters {slot.Offset + 1}-{slot.Offset + slot.Length}";
+        slot.Length == 1 ? CoreText.F("character {0}", slot.Offset + 1) : CoreText.F("characters {0}-{1}",
+            slot.Offset + 1, slot.Offset + slot.Length);
 
     /// <summary>
     /// Checks that the slot is usable: it must consist of ordinary characters on the first line.
@@ -51,9 +54,9 @@ public static class TextNumberSlots
             if (code is TextCodec.CodeEnd or TextCodec.CodeLineBreak or TextCodec.CodePosition)
             {
                 yield return new TextIssue(true,
-                    $"The game writes a number into {Describe(slot)} of this text. These must be ordinary characters " +
-                    $"(spaces are fine) on the first line: keep at least {needed} characters in front of the first line " +
-                    "break or [x=...].");
+                    CoreText.F("The game writes a number into {0} of this text. These must be ordinary characters " +
+                        "(spaces are fine) on the first line: keep at least {1} characters in front of the first " +
+                        "line break or [x=...].", Describe(slot), needed));
                 yield break;
             }
         }

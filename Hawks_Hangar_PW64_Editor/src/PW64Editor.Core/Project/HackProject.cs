@@ -3,6 +3,7 @@ using System.Text.RegularExpressions;
 using PW64Editor.Core.Build;
 using PW64Editor.Core.Code;
 using PW64Editor.Core.FileSystem;
+using PW64Editor.Core.Localization;
 
 namespace PW64Editor.Core.Project;
 
@@ -98,7 +99,8 @@ public sealed partial class HackProject
         string? fullPath = path is null ? null : System.IO.Path.GetFullPath(path);
         if (fullPath is not null && IsCleanRomPath(fullPath))
         {
-            throw new ProjectException("The hack ROM cannot be written to the clean ROM. Choose a different output path.");
+            throw new ProjectException(CoreText.T("The hack ROM cannot be written to the clean ROM. Choose a " +
+                "different output path."));
         }
 
         Local.OutputRomPath = fullPath;
@@ -124,7 +126,7 @@ public sealed partial class HackProject
         string fullPath = Path.GetFullPath(folder);
         if (Directory.Exists(fullPath) && Directory.EnumerateFileSystemEntries(fullPath).Any())
         {
-            throw new ProjectException($"The folder '{fullPath}' is not empty. Choose a new or empty folder.");
+            throw new ProjectException(CoreText.F("The folder '{0}' is not empty. Choose a new or empty folder.", fullPath));
         }
 
         Directory.CreateDirectory(fullPath);
@@ -155,23 +157,25 @@ public sealed partial class HackProject
         string projectFile = Path.Combine(fullPath, ProjectFileName);
         if (!File.Exists(projectFile))
         {
-            throw new ProjectException($"No {ProjectFileName} found in '{fullPath}'.");
+            throw new ProjectException(CoreText.F("No {0} found in '{1}'.", ProjectFileName, fullPath));
         }
 
         ProjectSettings settings = ReadJson<ProjectSettings>(projectFile)
-            ?? throw new ProjectException($"{ProjectFileName} is empty.");
+            ?? throw new ProjectException(CoreText.F("{0} is empty.", ProjectFileName));
 
         if (settings.FormatVersion > ProjectSettings.CurrentFormatVersion)
         {
             throw new ProjectException(
-                $"This project was created with a newer editor (format {settings.FormatVersion}). Please update Hawk's Hangar.");
+                CoreText.F("This project was created with a newer editor (format {0}). Please update Hawk's Hangar.",
+                    settings.FormatVersion));
         }
 
         settings.AppliedCodeFixes ??= [];
         if (settings.AppliedCodeFixes.FirstOrDefault(id => CodeFixes.Find(id) is null) is { } unknown)
         {
             throw new ProjectException(
-                $"This project uses the code fix '{unknown}', which this version of the editor does not know. Please update Hawk's Hangar.");
+                CoreText.F("This project uses the code fix '{0}', which this version of the editor does not know. " +
+                    "Please update Hawk's Hangar.", unknown));
         }
 
         string localFile = Path.Combine(fullPath, LocalFileName);
@@ -211,13 +215,14 @@ public sealed partial class HackProject
             if (!match.Success)
             {
                 throw new ProjectException(
-                    $"Cannot tell which game file '{fileName}' replaces. Expected a name like '1063_UPWT_005.bin'.");
+                    CoreText.F("Cannot tell which game file '{0}' replaces. Expected a name like '1063_UPWT_005.bin'.",
+                        fileName));
             }
 
             int index = int.Parse(match.Groups["index"].Value, System.Globalization.CultureInfo.InvariantCulture);
             if (seen.TryGetValue(index, out string? other))
             {
-                throw new ProjectException($"'{fileName}' and '{other}' both replace file {index}.");
+                throw new ProjectException(CoreText.F("'{0}' and '{1}' both replace file {2}.", fileName, other, index));
             }
 
             seen[index] = fileName;
@@ -236,7 +241,8 @@ public sealed partial class HackProject
     {
         if (GetOverrides().Any(o => o.TableIndex == original.TableIndex))
         {
-            throw new ProjectException($"The project already contains a replacement for file {original.TableIndex}.");
+            throw new ProjectException(CoreText.F("The project already contains a replacement for file {0}.",
+                original.TableIndex));
         }
 
         string path = Path.Combine(FilesFolder, original.ExportName);
@@ -291,7 +297,7 @@ public sealed partial class HackProject
         }
         catch (JsonException ex)
         {
-            throw new ProjectException($"'{Path.GetFileName(path)}' is not valid: {ex.Message}", ex);
+            throw new ProjectException(CoreText.F("'{0}' is not valid: {1}", Path.GetFileName(path), ex.Message), ex);
         }
     }
 

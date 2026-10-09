@@ -1,6 +1,7 @@
 using PW64Editor.Core.Build;
 using PW64Editor.Core.FileSystem;
 using PW64Editor.Core.Iff;
+using PW64Editor.Core.Localization;
 using PW64Editor.Core.Patching;
 using PW64Editor.Core.Rom;
 
@@ -33,7 +34,8 @@ public static class ProjectBuilder
         if (!string.Equals(sha1, project.Settings.BaseRomSha1, StringComparison.OrdinalIgnoreCase))
         {
             throw new ProjectException(
-                $"The ROM does not match this project (SHA-1 {sha1}, expected {project.Settings.BaseRomSha1}).");
+                CoreText.F("The ROM does not match this project (SHA-1 {0}, expected {1}).",
+                    sha1, project.Settings.BaseRomSha1));
         }
 
         GameFileSystem fileSystem = GameFileSystem.Read(cleanRom, layout);
@@ -46,7 +48,8 @@ public static class ProjectBuilder
             string name = Path.GetFileName(replacement.Path);
             if (position < 0)
             {
-                throw new ProjectException($"'{name}': the game has no file with table index {replacement.TableIndex}.");
+                throw new ProjectException(CoreText.F("'{0}': the game has no file with table index {1}.",
+                    name, replacement.TableIndex));
             }
 
             files[position] = ApplyOverride(files[position], replacement, name);
@@ -61,7 +64,7 @@ public static class ProjectBuilder
         }
         catch (InvalidDataException ex)
         {
-            throw new ProjectException($"Build failed: {ex.Message}", ex);
+            throw new ProjectException(CoreText.F("Build failed: {0}", ex.Message), ex);
         }
 
         return new ProjectBuildResult(romBuild, overrides.Count);
@@ -81,7 +84,8 @@ public static class ProjectBuilder
         // of defense, e.g. if project.user.json was edited by hand.)
         if (project.IsCleanRomPath(path))
         {
-            throw new ProjectException("The output ROM path points to the clean ROM. Choose a different output path.");
+            throw new ProjectException(CoreText.T("The output ROM path points to the clean ROM. Choose a different " +
+                "output path."));
         }
 
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -136,7 +140,7 @@ public static class ProjectBuilder
         }
         catch (InvalidDataException ex)
         {
-            throw new ProjectException($"The project's text file is damaged: {ex.Message}", ex);
+            throw new ProjectException(CoreText.F("The project's text file is damaged: {0}", ex.Message), ex);
         }
 
         if (Text.CustomTexts.CountProblem(count, originalCount,
@@ -151,7 +155,8 @@ public static class ProjectBuilder
         if (!string.Equals(replacement.FileType, original.FileType, StringComparison.Ordinal))
         {
             throw new ProjectException(
-                $"'{name}': the name says type '{replacement.FileType}', but file {original.TableIndex} is '{original.FileType}'.");
+                CoreText.F("'{0}': the name says type '{1}', but file {2} is '{3}'.",
+                    name, replacement.FileType, original.TableIndex, original.FileType));
         }
 
         byte[] data = File.ReadAllBytes(replacement.Path);
@@ -163,13 +168,14 @@ public static class ProjectBuilder
         }
         catch (InvalidDataException ex)
         {
-            throw new ProjectException($"'{name}' is not a valid game file: {ex.Message}", ex);
+            throw new ProjectException(CoreText.F("'{0}' is not a valid game file: {1}", name, ex.Message), ex);
         }
 
         if (formType != original.FileType)
         {
             throw new ProjectException(
-                $"'{name}': its content is a '{formType}' file, but file {original.TableIndex} must be '{original.FileType}'.");
+                CoreText.F("'{0}': its content is a '{1}' file, but file {2} must be '{3}'.",
+                    name, formType, original.TableIndex, original.FileType));
         }
 
         return original with { Data = data };

@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Globalization;
 using System.Text;
+using PW64Editor.Core.Localization;
 
 namespace PW64Editor.Core.Text;
 
@@ -207,14 +208,15 @@ public sealed class TextCodec
                 int close = text.IndexOf(']', i);
                 if (close < 0)
                 {
-                    errors.Add(new(i, "'[' starts a tag, but the closing ']' is missing."));
+                    errors.Add(new(i, CoreText.T("'[' starts a tag, but the closing ']' is missing.")));
                     break;
                 }
 
                 string tag = text[(i + 1)..close];
                 if (!ApplyTag(tag, i, close == text.Length - 1, codes, errors, ref bold, ref finalLineBreak))
                 {
-                    errors.Add(new(i, $"Unknown tag [{tag}]. Allowed: [b], [/b], [x=number], [#hex code], [nonl] at the end."));
+                    errors.Add(new(i, CoreText.F("Unknown tag [{0}]. Allowed: [b], [/b], [x=number], [#hex code], " +
+                        "[nonl] at the end.", tag)));
                 }
 
                 i = close;
@@ -234,8 +236,10 @@ public sealed class TextCodec
             else
             {
                 errors.Add(new(i, _font.TryGetGlyph(c, !bold, out _)
-                    ? $"'{c}' exists only in {(bold ? "regular" : "bold")} style in the game's font."
-                    : $"'{c}' is not in the game's font."));
+                    ? (bold
+                        ? CoreText.F("'{0}' exists only in regular style in the game's font.", c)
+                        : CoreText.F("'{0}' exists only in bold style in the game's font.", c))
+                    : CoreText.F("'{0}' is not in the game's font.", c)));
             }
         }
 
@@ -273,7 +277,7 @@ public sealed class TextCodec
             case "b":
                 if (bold)
                 {
-                    errors.Add(new(position, "[b] inside bold text: close the previous one with [/b] first."));
+                    errors.Add(new(position, CoreText.T("[b] inside bold text: close the previous one with [/b] first.")));
                 }
 
                 bold = true;
@@ -282,7 +286,7 @@ public sealed class TextCodec
             case "/b":
                 if (!bold)
                 {
-                    errors.Add(new(position, "[/b] without a matching [b]."));
+                    errors.Add(new(position, CoreText.T("[/b] without a matching [b].")));
                 }
 
                 bold = false;
@@ -291,7 +295,7 @@ public sealed class TextCodec
             case "nonl":
                 if (!atEnd)
                 {
-                    errors.Add(new(position, "[nonl] is only allowed at the very end of the text."));
+                    errors.Add(new(position, CoreText.T("[nonl] is only allowed at the very end of the text.")));
                 }
 
                 finalLineBreak = false;
@@ -307,7 +311,7 @@ public sealed class TextCodec
             }
             else
             {
-                errors.Add(new(position, $"[{tag}] is not a valid raw code."));
+                errors.Add(new(position, CoreText.F("[{0}] is not a valid raw code.", tag)));
             }
 
             return true;
@@ -327,7 +331,7 @@ public sealed class TextCodec
             }
             else
             {
-                errors.Add(new(position, $"[{tag}] is not a valid position. Example: [x=212]"));
+                errors.Add(new(position, CoreText.F("[{0}] is not a valid position. Example: [x=212]", tag)));
             }
 
             return true;

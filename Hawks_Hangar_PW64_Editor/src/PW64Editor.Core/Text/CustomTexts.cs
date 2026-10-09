@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using PW64Editor.Core.Code;
+using PW64Editor.Core.Localization;
 
 namespace PW64Editor.Core.Text;
 
@@ -46,22 +47,22 @@ public static partial class CustomTexts
     {
         if (name.Length == 0)
         {
-            return "The name must not be empty.";
+            return CoreText.T("The name must not be empty.");
         }
 
         if (name.Length > MaxNameLength)
         {
-            return $"The name may have at most {MaxNameLength} characters.";
+            return CoreText.F("The name may have at most {0} characters.", MaxNameLength);
         }
 
         if (!NamePattern().IsMatch(name))
         {
-            return "The name may only contain the capital letters A-Z, the digits 0-9 and '_'.";
+            return CoreText.T("The name may only contain the capital letters A-Z, the digits 0-9 and '_'.");
         }
 
         if (existingNames.Contains(name, StringComparer.Ordinal))
         {
-            return $"There already is a text named {name}. Every name may be used only once.";
+            return CoreText.F("There already is a text named {0}. Every name may be used only once.", name);
         }
 
         return null;
@@ -96,13 +97,14 @@ public static partial class CustomTexts
     {
         if (count > Capacity)
         {
-            return $"The game can hold at most {Capacity} texts; the project has {count}.";
+            return CoreText.F("The game can hold at most {0} texts; the project has {1}.", Capacity, count);
         }
 
         if (count > originalCount && !expandedTablesApplied)
         {
-            return $"The project has {count} texts, but the game only has room for {originalCount} and would crash. " +
-                   $"Apply the code fix \"{CodeFixes.ExpandedTexts.Name}\" in File › Project settings.";
+            return CoreText.F("The project has {0} texts, but the game only has room for {1} and would crash. " +
+                "Apply the code fix \"{2}\" in File › Project settings.",
+                count, originalCount, CoreText.T(CodeFixes.ExpandedTexts.Name));
         }
 
         return null;

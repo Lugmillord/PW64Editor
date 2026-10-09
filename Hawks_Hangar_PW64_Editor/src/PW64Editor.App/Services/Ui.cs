@@ -18,10 +18,10 @@ internal static class Ui
     public const string AppName = "Hawk's Hangar";
 
     /// <summary>File dialog filter for N64 ROMs.</summary>
-    public const string RomFilter = "N64 ROMs (*.z64;*.v64;*.n64)|*.z64;*.v64;*.n64|All files (*.*)|*.*";
+    public static string RomFilter => L.T("N64 ROMs") + " (*.z64;*.v64;*.n64)|*.z64;*.v64;*.n64|" + L.T("All files") + " (*.*)|*.*";
 
     /// <summary>File dialog filter for BPS patches.</summary>
-    public const string PatchFilter = "BPS patches (*.bps)|*.bps|All files (*.*)|*.*";
+    public static string PatchFilter => L.T("BPS patches") + " (*.bps)|*.bps|" + L.T("All files") + " (*.*)|*.*";
 
     public static void ShowError(Window owner, string message) =>
         MessageBox.Show(owner, message, AppName, MessageBoxButton.OK, MessageBoxImage.Warning);

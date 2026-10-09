@@ -17,4 +17,15 @@ public sealed record TextCategory(
     int SectionOrder,
     string Description,
     string SortKey,
-    IReadOnlyList<string> SourceFiles);
+    IReadOnlyList<string> SourceFiles)
+{
+    /// <summary>
+    /// The English pattern <see cref="Description"/> is made from, with placeholders {0}, {1}, …
+    /// for <see cref="DescriptionArgs"/> (e.g. "Mission {0} {1}" with "2", "hint"). Empty if the
+    /// description is a fixed text. The editor translates the pattern and the arguments.
+    /// </summary>
+    public string DescriptionPattern { get; init; } = string.Empty;
+
+    /// <summary>The values for the placeholders of <see cref="DescriptionPattern"/>.</summary>
+    public IReadOnlyList<string> DescriptionArgs { get; init; } = [];
+}

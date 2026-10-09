@@ -19,7 +19,22 @@ public partial class StartWindow : Window
     /// <summary>One entry in the recent projects list.</summary>
     public sealed record RecentEntry(string Name, string Folder);
 
-    private void OnLoaded(object sender, RoutedEventArgs e) => RefreshRecentList();
+    private void OnLoaded(object sender, RoutedEventArgs e)
+    {
+        RefreshRecentList();
+
+        // After a restart of the editor (new language), the project opens again by itself.
+        if (App.Restart is { } restart)
+        {
+            EditorSession? session = ProjectOpener.Open(this, restart.ProjectFolder);
+            if (session is null)
+            {
+                App.Restart = null;
+            }
+
+            ShowEditor(session);
+        }
+    }
 
     private void RefreshRecentList()
     {

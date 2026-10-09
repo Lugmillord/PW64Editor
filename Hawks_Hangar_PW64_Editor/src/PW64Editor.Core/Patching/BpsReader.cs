@@ -1,6 +1,7 @@
 using System.Buffers.Binary;
 using System.Text;
 using PW64Editor.Core.Hashing;
+using PW64Editor.Core.Localization;
 
 namespace PW64Editor.Core.Patching;
 
@@ -52,20 +53,21 @@ public static class BpsReader
         if (source.Length != info.SourceSize)
         {
             throw new BpsException(BpsError.WrongSource,
-                $"The input file has {source.Length:N0} bytes, but the patch expects {info.SourceSize:N0} bytes.");
+                CoreText.F("The input file has {0:N0} bytes, but the patch expects {1:N0} bytes.",
+                    source.Length, info.SourceSize));
         }
 
         uint sourceCrc = Crc32.Compute(source);
         if (sourceCrc != info.SourceCrc32)
         {
             throw new BpsException(BpsError.WrongSource,
-                $"The input file has CRC-32 {sourceCrc:X8}, but the patch expects {info.SourceCrc32:X8}. " +
-                "It is not the file this patch was made for.");
+                CoreText.F("The input file has CRC-32 {0:X8}, but the patch expects {1:X8}. It is not the file this " +
+                    "patch was made for.", sourceCrc, info.SourceCrc32));
         }
 
         if (info.TargetSize > Array.MaxLength)
         {
-            throw new BpsException(BpsError.InvalidFormat, $"Target size {info.TargetSize:N0} is too large.");
+            throw new BpsException(BpsError.InvalidFormat, CoreText.F("Target size {0:N0} is too large.", info.TargetSize));
         }
 
         byte[] target = new byte[info.TargetSize];
@@ -82,7 +84,8 @@ public static class BpsReader
 
             if (length > (ulong)(target.Length - outputOffset))
             {
-                throw Invalid($"Action at patch offset 0x{cursor.Position:X} writes beyond the end of the target.");
+                throw Invalid(CoreText.F("Action at patch offset 0x{0:X} writes beyond the end of the target.",
+                    cursor.Position));
             }
 
             int count = (int)length;
@@ -91,7 +94,7 @@ public static class BpsReader
                 case BpsFormat.ActionSourceRead:
                     if (outputOffset + count > source.Length)
                     {
-                        throw Invalid("SourceRead reads beyond the end of the source.");
+                        throw Invalid(CoreText.T("SourceRead reads beyond the end of the source."));
                     }
 
                     source.Slice(outputOffset, count).CopyTo(target.AsSpan(outputOffset));
@@ -107,7 +110,7 @@ public static class BpsReader
                     sourceRelativeOffset += cursor.ReadOffset();
                     if (sourceRelativeOffset < 0 || sourceRelativeOffset + count > source.Length)
                     {
-                        throw Invalid("SourceCopy reads outside the source.");
+                        throw Invalid(CoreText.T("SourceCopy reads outside the source."));
                     }
 
                     source.Slice((int)sourceRelativeOffset, count).CopyTo(target.AsSpan(outputOffset));
@@ -119,7 +122,7 @@ public static class BpsReader
                     targetRelativeOffset += cursor.ReadOffset();
                     if (targetRelativeOffset < 0 || targetRelativeOffset >= outputOffset)
                     {
-                        throw Invalid("TargetCopy reads data that has not been written yet.");
+                        throw Invalid(CoreText.T("TargetCopy reads data that has not been written yet."));
                     }
 
                     // Byte by byte on purpose: source and destination may overlap,
@@ -135,14 +138,14 @@ public static class BpsReader
 
         if (outputOffset != target.Length)
         {
-            throw Invalid($"The patch produced {outputOffset:N0} bytes instead of {target.Length:N0}.");
+            throw Invalid(CoreText.F("The patch produced {0:N0} bytes instead of {1:N0}.", outputOffset, target.Length));
         }
 
         uint targetCrc = Crc32.Compute(target);
         if (targetCrc != info.TargetCrc32)
         {
             throw new BpsException(BpsError.TargetMismatch,
-                $"The result has CRC-32 {targetCrc:X8}, but the patch expects {info.TargetCrc32:X8}.");
+                CoreText.F("The result has CRC-32 {0:X8}, but the patch expects {1:X8}.", targetCrc, info.TargetCrc32));
         }
 
         return target;
@@ -153,7 +156,7 @@ public static class BpsReader
         if (patch.Length < BpsFormat.Magic.Length + 3 + BpsFormat.FooterSize
             || !patch.StartsWith(BpsFormat.Magic))
         {
-            throw Invalid("The file is not a BPS patch (missing \"BPS1\" header).");
+            throw Invalid(CoreText.T("The file is not a BPS patch (missing \"BPS1\" header)."));
         }
 
         // Verify the patch checksum first: if the file is damaged, everything else is meaningless.
@@ -166,7 +169,7 @@ public static class BpsReader
         if (actualPatchCrc != patchCrc)
         {
             throw new BpsException(BpsError.PatchCorrupted,
-                $"The patch file is damaged (checksum {actualPatchCrc:X8}, expected {patchCrc:X8}).");
+                CoreText.F("The patch file is damaged (checksum {0:X8}, expected {1:X8}).", actualPatchCrc, patchCrc));
         }
 
         cursor.Position = BpsFormat.Magic.Length;
@@ -176,12 +179,12 @@ public static class BpsReader
 
         if (sourceSize > long.MaxValue || targetSize > long.MaxValue)
         {
-            throw Invalid("File sizes in the patch header are out of range.");
+            throw Invalid(CoreText.T("File sizes in the patch header are out of range."));
         }
 
         if (metadataSize > (ulong)(patch.Length - BpsFormat.FooterSize - cursor.Position))
         {
-            throw Invalid("Metadata extends beyond the end of the patch.");
+            throw Invalid(CoreText.T("Metadata extends beyond the end of the patch."));
         }
 
         string metadata = Encoding.UTF8.GetString(cursor.ReadBytes((int)metadataSize, patch.Length - BpsFormat.FooterSize));
@@ -208,7 +211,7 @@ public static class BpsReader
             {
                 if (Position >= limit || bytes >= 10)
                 {
-                    throw Invalid("Malformed number in patch.");
+                    throw Invalid(CoreText.T("Malformed number in patch."));
                 }
 
                 byte x = _patch[Position++];
@@ -234,7 +237,7 @@ public static class BpsReader
         {
             if (count > limit - Position)
             {
-                throw Invalid("Patch data ends unexpectedly.");
+                throw Invalid(CoreText.T("Patch data ends unexpectedly."));
             }
 
             ReadOnlySpan<byte> bytes = _patch.Slice(Position, count);

@@ -1,3 +1,5 @@
+using PW64Editor.Core.Localization;
+
 namespace PW64Editor.Core.Text;
 
 /// <summary>A problem with an edited text.</summary>
@@ -86,8 +88,9 @@ public static class TextValidator
         foreach (int value in PositionValues(encoded.Codes).Where(v => v is TextCodec.CodeLineBreak or TextCodec.CodeEnd).Distinct())
         {
             issues.Add(new TextIssue(true,
-                $"A position of {value} cannot be used: while loading the texts, the game changes every value 254 " +
-                $"and 255 into its line break and end codes, also inside [x=...]. Use {value - 2} or {value + 2} instead."));
+                CoreText.F("A position of {0} cannot be used: while loading the texts, the game changes every value " +
+                    "254 and 255 into its line break and end codes, also inside [x=...]. Use {1} or {2} instead.",
+                    value, value - 2, value + 2)));
         }
 
         for (int i = 0; i < pieces.Count; i++)
@@ -95,22 +98,24 @@ public static class TextValidator
             if (pieces[i] > MaxCharactersPerPiece)
             {
                 issues.Add(new TextIssue(true,
-                    $"Piece {i + 1} has {pieces[i]} characters. At most {MaxCharactersPerPiece} are allowed per line " +
-                    "(or per part after an [x=...] position); longer lines can crash the game. Add a line break."));
+                    CoreText.F("Piece {0} has {1} characters. At most {2} are allowed per line (or per part after an " +
+                        "[x=...] position); longer lines can crash the game. Add a line break.",
+                        i + 1, pieces[i], MaxCharactersPerPiece)));
             }
         }
 
         if (layout.Pieces > MaxPiecesPerFrame)
         {
             issues.Add(new TextIssue(true,
-                $"The text is drawn in {layout.Pieces} pieces (lines and [x=...] parts). The game can draw at most " +
-                $"{MaxPiecesPerFrame} per screen and may crash with more."));
+                CoreText.F("The text is drawn in {0} pieces (lines and [x=...] parts). The game can draw at most {1} " +
+                    "per screen and may crash with more.", layout.Pieces, MaxPiecesPerFrame)));
         }
 
         if (maxLines is { } limit && layout.Lines > limit)
         {
             issues.Add(new TextIssue(true,
-                $"{layout.Lines} lines, but the screen has room for {limit}. Remove {layout.Lines - limit} line(s)."));
+                CoreText.F("{0} lines, but the screen has room for {1}. Remove {2} line(s).",
+                    layout.Lines, limit, layout.Lines - limit)));
         }
 
         if (originalLayout is not null)
@@ -118,22 +123,24 @@ public static class TextValidator
             if (maxLines is null && layout.Lines > originalLayout.Lines)
             {
                 issues.Add(new TextIssue(false,
-                    $"{layout.Lines} lines instead of {originalLayout.Lines}. The screen only has room for the original " +
-                    "number of lines; extra lines may overlap other things or not be visible."));
+                    CoreText.F("{0} lines instead of {1}. The screen only has room for the original number of lines; " +
+                        "extra lines may overlap other things or not be visible.", layout.Lines, originalLayout.Lines)));
             }
 
             if (layout.LongestPiece > originalLayout.LongestPiece)
             {
                 issues.Add(new TextIssue(false,
-                    $"The longest line has {layout.LongestPiece} characters, the original {originalLayout.LongestPiece}. " +
-                    "It may run past the edge of its box, because characters have different widths."));
+                    CoreText.F("The longest line has {0} characters, the original {1}. It may run past the edge of " +
+                        "its box, because characters have different widths.",
+                        layout.LongestPiece, originalLayout.LongestPiece)));
             }
 
             if (layout.Pieces > originalLayout.Pieces && layout.Pieces <= MaxPiecesPerFrame)
             {
                 issues.Add(new TextIssue(false,
-                    $"The text is drawn in {layout.Pieces} pieces instead of {originalLayout.Pieces}. Together with other " +
-                    $"texts on the same screen, the game's limit of {MaxPiecesPerFrame} could be exceeded."));
+                    CoreText.F("The text is drawn in {0} pieces instead of {1}. Together with other texts on the " +
+                        "same screen, the game's limit of {2} could be exceeded.",
+                        layout.Pieces, originalLayout.Pieces, MaxPiecesPerFrame)));
             }
         }
 
@@ -210,6 +217,6 @@ public static class TextValidator
     private static string DescribePosition(string markup, int position)
     {
         int line = 1 + markup.Take(Math.Min(position, markup.Length)).Count(c => c == '\n');
-        return $"Line {line}";
+        return CoreText.F("Line {0}", line);
     }
 }

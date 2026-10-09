@@ -36,10 +36,109 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         _session = session;
+        BuildLanguageMenu();
         ReloadProject();
 
-        // Offer missing code fixes once the window is visible.
-        Loaded += async (_, _) => await OfferMissingCodeFixesAsync();
+        Loaded += async (_, _) =>
+        {
+            RestoreAfterRestart();
+
+            // Offer missing code fixes once the window is visible.
+            await OfferMissingCodeFixesAsync();
+        };
+    }
+
+    // ----------------------------------------------------------------- language
+
+    private void BuildLanguageMenu()
+    {
+        foreach (UiLanguage language in L.Languages)
+        {
+            var item = new MenuItem { Header = language.NativeName, IsCheckable = true, IsChecked = language.Code == L.Code, Tag = language };
+            item.Click += OnLanguageChosen;
+            LanguageMenu.Items.Add(item);
+        }
+
+        // The menu's own name also in English, so it can be found in any language.
+        if (L.Code != "en")
+        {
+            LanguageMenu.Header = $"{L.T("_Language")} (Language)";
+        }
+    }
+
+    /// <summary>
+    /// Changes the language: after a confirmation (in both languages), saves everything that is not
+    /// saved yet and restarts the editor with the same project, tab and save file.
+    /// </summary>
+    private async void OnLanguageChosen(object sender, RoutedEventArgs e)
+    {
+        var item = (MenuItem)sender;
+        var language = (UiLanguage)item.Tag;
+        item.IsChecked = language.Code == L.Code; // the check mark only moves after the restart
+        if (language.Code == L.Code)
+        {
+            return;
+        }
+
+        string message = L.K("To change the language, the editor restarts. Unsaved changes are saved first (texts: save and build; save file: saved into its file).");
+        string text = $"{L.T(message)}\n\n{L.TIn(language.Code, message)}";
+        if (MessageBox.Show(this, text, $"{L.Current.NativeName} → {language.NativeName}",
+                MessageBoxButton.OKCancel, MessageBoxImage.Information) != MessageBoxResult.OK)
+        {
+            return;
+        }
+
+        if (TextEditor.HasUnsavedChanges && !await SaveAndBuildAsync(restorePoint: false))
+        {
+            return; // saving failed; the reason was shown
+        }
+
+        if (SaveEditor.HasUnsavedChanges && !SaveEditor.SaveNow())
+        {
+            return;
+        }
+
+        EditorContext.Settings.Language = language.Code;
+        EditorContext.SaveSettings();
+
+        var restart = new RestartState(_session.Project.Folder, SaveEditor.FilePath, FeatureTabs.SelectedIndex);
+        try
+        {
+            var start = new System.Diagnostics.ProcessStartInfo(Environment.ProcessPath!) { UseShellExecute = false };
+            foreach (string argument in restart.ToArguments())
+            {
+                start.ArgumentList.Add(argument);
+            }
+
+            System.Diagnostics.Process.Start(start);
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            Ui.ShowError(this, L.F("The editor could not restart itself. Please start it again; the new language is used then.\n\n{0}", ex.Message));
+        }
+
+        _closeConfirmed = true;
+        Application.Current.Shutdown();
+    }
+
+    /// <summary>After a restart of the editor: selects the same tab and opens the same save file again.</summary>
+    private void RestoreAfterRestart()
+    {
+        if (App.Restart is not { } restart)
+        {
+            return;
+        }
+
+        App.Restart = null;
+        if (restart.TabIndex >= 0 && restart.TabIndex < FeatureTabs.Items.Count)
+        {
+            FeatureTabs.SelectedIndex = restart.TabIndex;
+        }
+
+        if (restart.SaveFile is { } path && File.Exists(path))
+        {
+            SaveEditor.OpenFile(path);
+        }
     }
 
     // ----------------------------------------------------------------- project
@@ -67,7 +166,7 @@ public partial class MainWindow : Window
 
         if (recent.Count == 0)
         {
-            RecentMenu.Items.Add(new MenuItem { Header = "(none)", IsEnabled = false });
+            RecentMenu.Items.Add(new MenuItem { Header = L.T("(none)"), IsEnabled = false });
             return;
         }
 
@@ -119,7 +218,7 @@ public partial class MainWindow : Window
 
         // Cancel for now; close again once the user has decided (and saving is done).
         e.Cancel = true;
-        if (saveFile && !Ui.Confirm(this, "The open save file (tab \"Save File\") has unsaved changes. Close without saving them?"))
+        if (saveFile && !Ui.Confirm(this, L.T("The open save file (tab \"Save File\") has unsaved changes. Close without saving them?")))
         {
             return;
         }
@@ -148,11 +247,11 @@ public partial class MainWindow : Window
         if (saved)
         {
             UpdateProjectInfo();
-            SetStatus(dialog.CodeFixesApplied ? "Project settings saved, code fix applied." : "Project settings saved.");
+            SetStatus(dialog.CodeFixesApplied ? L.T("Project settings saved, code fix applied.") : L.T("Project settings saved."));
         }
         else if (dialog.CodeFixesApplied)
         {
-            SetStatus("Code fix applied and hack ROM rebuilt.");
+            SetStatus(L.T("Code fix applied and hack ROM rebuilt."));
         }
     }
 
@@ -200,8 +299,7 @@ public partial class MainWindow : Window
         string? textWithErrors = TextEditor.FindTextWithErrors();
         if (textWithErrors is not null)
         {
-            Ui.ShowError(this, $"The text {textWithErrors} has errors and cannot be saved. It is selected now; " +
-                               "the problems are listed below the text.");
+            Ui.ShowError(this, L.F("The text {0} has errors and cannot be saved. It is selected now; the problems are listed below the text.", textWithErrors));
             return false;
         }
 
@@ -212,17 +310,16 @@ public partial class MainWindow : Window
         }
         catch (Exception ex) when (Ui.IsExpectedError(ex))
         {
-            Ui.ShowError(this, $"The texts could not be saved.\n\n{ex.Message}");
+            Ui.ShowError(this, L.F("The texts could not be saved.\n\n{0}", ex.Message));
             return false;
         }
 
-        string texts = savedTexts > 0 ? $"{savedTexts} text(s) saved. " : string.Empty;
-        return await RunAsync("Building hack ROM…", () => _session.Build(restorePoint), outcome =>
+        string texts = savedTexts > 0 ? L.F("{0} text(s) saved.", savedTexts) + " " : string.Empty;
+        return await RunAsync(L.T("Building hack ROM…"), () => _session.Build(restorePoint), outcome =>
         {
             RomBuildResult rom = outcome.Result.RomBuild;
-            string backup = outcome.RestorePoint is { } point ? $" Restore point {point.Name} created." : string.Empty;
-            SetStatus($"{texts}Hack ROM built ({outcome.Result.AppliedOverrides} changed file(s), " +
-                      $"room for {rom.FreeSpace:N0} more bytes).{backup}");
+            string backup = outcome.RestorePoint is { } point ? " " + L.F("Restore point {0} created.", point.Name) : string.Empty;
+            SetStatus(texts + L.F("Hack ROM built ({0} changed file(s), room for {1:N0} more bytes).", outcome.Result.AppliedOverrides, rom.FreeSpace) + backup);
         });
     }
 
@@ -240,8 +337,8 @@ public partial class MainWindow : Window
 
         MessageBoxResult answer = MessageBox.Show(
             this,
-            $"You have unsaved text changes. Save them before {action}?\n\n" +
-            "Yes: save the changes and build the hack ROM.\nNo: discard the changes.\nCancel: go back to editing.",
+            L.F("You have unsaved text changes. Save them before {0}?", L.T(action)) + "\n\n" +
+            L.T("Yes: save the changes and build the hack ROM.\nNo: discard the changes.\nCancel: go back to editing."),
             Ui.AppName,
             MessageBoxButton.YesNoCancel,
             MessageBoxImage.Warning);
@@ -268,7 +365,7 @@ public partial class MainWindow : Window
 
         var dialog = new SaveFileDialog
         {
-            Title = "Export BPS patch",
+            Title = L.T("Export BPS patch"),
             Filter = Ui.PatchFilter,
             FileName = $"{_session.Project.GetOutputBaseName()}_v{_session.Project.Settings.Version}.bps",
         };
@@ -279,13 +376,13 @@ public partial class MainWindow : Window
         }
 
         string path = dialog.FileName;
-        await RunAsync("Creating patch…", () => _session.ExportPatch(path),
-            size => SetStatus($"Patch exported to {path} ({size:N0} bytes, verified)."));
+        await RunAsync(L.T("Creating patch…"), () => _session.ExportPatch(path),
+            size => SetStatus(L.F("Patch exported to {0} ({1:N0} bytes, verified).", path, size)));
     }
 
     private async void OnApplyPatch(object sender, RoutedEventArgs e)
     {
-        var open = new OpenFileDialog { Title = "Select the BPS patch to apply to the clean ROM", Filter = Ui.PatchFilter };
+        var open = new OpenFileDialog { Title = L.T("Select the BPS patch to apply to the clean ROM"), Filter = Ui.PatchFilter };
         if (open.ShowDialog(this) != true)
         {
             return;
@@ -293,7 +390,7 @@ public partial class MainWindow : Window
 
         var save = new SaveFileDialog
         {
-            Title = "Save the patched ROM",
+            Title = L.T("Save the patched ROM"),
             Filter = Ui.RomFilter,
             FileName = Path.GetFileNameWithoutExtension(open.FileName) + ".z64",
         };
@@ -304,29 +401,29 @@ public partial class MainWindow : Window
         }
 
         string patchPath = open.FileName, outputPath = save.FileName;
-        await RunAsync("Applying patch…", () =>
+        await RunAsync(L.T("Applying patch…"), () =>
         {
             byte[] result = BpsReader.Apply(_session.CleanRom.Data, File.ReadAllBytes(patchPath));
             File.WriteAllBytes(outputPath, result);
             return result.Length;
-        }, size => SetStatus($"Patched ROM saved to {outputPath} ({size:N0} bytes)."));
+        }, size => SetStatus(L.F("Patched ROM saved to {0} ({1:N0} bytes).", outputPath, size)));
     }
 
     // ----------------------------------------------------------------- ROM
 
     private async void OnRomInfo(object sender, RoutedEventArgs e)
     {
-        var dialog = new OpenFileDialog { Title = "Select a ROM to inspect", Filter = Ui.RomFilter };
+        var dialog = new OpenFileDialog { Title = L.T("Select a ROM to inspect"), Filter = Ui.RomFilter };
         if (dialog.ShowDialog(this) != true)
         {
             return;
         }
 
         string path = dialog.FileName;
-        await RunAsync("Reading ROM…", () => RomReport.Describe(N64Rom.Load(path)), text =>
+        await RunAsync(L.T("Reading ROM…"), () => RomReport.Describe(N64Rom.Load(path)), text =>
         {
-            SetStatus("Ready");
-            TextReportWindow.ShowReport(this, $"ROM info: {Path.GetFileName(path)}", text);
+            SetStatus(L.T("Ready"));
+            TextReportWindow.ShowReport(this, L.F("ROM info: {0}", Path.GetFileName(path)), text);
         });
     }
 
@@ -334,7 +431,7 @@ public partial class MainWindow : Window
     {
         if (CleanRomSetup.SelectAndImport(this))
         {
-            SetStatus("Clean ROM replaced.");
+            SetStatus(L.T("Clean ROM replaced."));
         }
     }
 
@@ -342,16 +439,16 @@ public partial class MainWindow : Window
 
     private async void OnScanMio0(object sender, RoutedEventArgs e)
     {
-        await RunAsync("Scanning for MIO0 blocks…", () => DeveloperTools.DescribeMio0Blocks(_session.CleanRom), text =>
+        await RunAsync(L.T("Scanning for MIO0 blocks…"), () => DeveloperTools.DescribeMio0Blocks(_session.CleanRom), text =>
         {
-            SetStatus("Ready");
-            TextReportWindow.ShowReport(this, "MIO0 blocks in the clean ROM", text);
+            SetStatus(L.T("Ready"));
+            TextReportWindow.ShowReport(this, L.T("MIO0 blocks in the clean ROM"), text);
         });
     }
 
     private async void OnExtractMio0(object sender, RoutedEventArgs e)
     {
-        string? input = InputDialog.Ask(this, "Extract MIO0 block", "ROM offset of the block (hex like 0xDE754, or decimal):", "0x");
+        string? input = InputDialog.Ask(this, L.T("Extract MIO0 block"), L.T("ROM offset of the block (hex like 0xDE754, or decimal):"), "0x");
         if (input is null)
         {
             return;
@@ -359,28 +456,28 @@ public partial class MainWindow : Window
 
         if (!Ui.TryParseNumber(input, out int offset) || offset < 0 || offset >= _session.CleanRom.Size)
         {
-            Ui.ShowError(this, $"\"{input}\" is not a valid ROM offset.");
+            Ui.ShowError(this, L.F("\"{0}\" is not a valid ROM offset.", input));
             return;
         }
 
-        var save = new SaveFileDialog { Title = "Save the decompressed data", FileName = $"mio0_{offset:X6}.bin" };
+        var save = new SaveFileDialog { Title = L.T("Save the decompressed data"), FileName = $"mio0_{offset:X6}.bin" };
         if (save.ShowDialog(this) != true)
         {
             return;
         }
 
         string path = save.FileName;
-        await RunAsync("Decompressing…", () =>
+        await RunAsync(L.T("Decompressing…"), () =>
         {
             byte[] data = Mio0.Decompress(_session.CleanRom.Data.AsSpan(offset));
             File.WriteAllBytes(path, data);
             return data.Length;
-        }, size => SetStatus($"Decompressed {size:N0} bytes to {path}."));
+        }, size => SetStatus(L.F("Decompressed {0:N0} bytes to {1}.", size, path)));
     }
 
     private void OnShowChunks(object sender, RoutedEventArgs e)
     {
-        string? input = InputDialog.Ask(this, "Show file chunks", "Table index of the game file (0 - 1271):", string.Empty);
+        string? input = InputDialog.Ask(this, L.T("Show file chunks"), L.T("Table index of the game file (0 - 1271):"), string.Empty);
         if (input is null)
         {
             return;
@@ -388,13 +485,13 @@ public partial class MainWindow : Window
 
         if (!Ui.TryParseNumber(input, out int index))
         {
-            Ui.ShowError(this, $"\"{input}\" is not a number.");
+            Ui.ShowError(this, L.F("\"{0}\" is not a number.", input));
             return;
         }
 
         try
         {
-            TextReportWindow.ShowReport(this, $"Chunks of file {index}", DeveloperTools.DescribeChunks(_session.CleanFileSystem, index));
+            TextReportWindow.ShowReport(this, L.F("Chunks of file {0}", index), DeveloperTools.DescribeChunks(_session.CleanFileSystem, index));
         }
         catch (Exception ex) when (Ui.IsExpectedError(ex))
         {
@@ -404,26 +501,26 @@ public partial class MainWindow : Window
 
     private async void OnCreatePatchFromRoms(object sender, RoutedEventArgs e)
     {
-        var source = new OpenFileDialog { Title = "Select the original (source) ROM", Filter = Ui.RomFilter };
+        var source = new OpenFileDialog { Title = L.T("Select the original (source) ROM"), Filter = Ui.RomFilter };
         if (source.ShowDialog(this) != true)
         {
             return;
         }
 
-        var target = new OpenFileDialog { Title = "Select the modified (target) ROM", Filter = Ui.RomFilter };
+        var target = new OpenFileDialog { Title = L.T("Select the modified (target) ROM"), Filter = Ui.RomFilter };
         if (target.ShowDialog(this) != true)
         {
             return;
         }
 
-        var save = new SaveFileDialog { Title = "Save the patch", Filter = Ui.PatchFilter, FileName = "patch.bps" };
+        var save = new SaveFileDialog { Title = L.T("Save the patch"), Filter = Ui.PatchFilter, FileName = "patch.bps" };
         if (save.ShowDialog(this) != true)
         {
             return;
         }
 
         string sourcePath = source.FileName, targetPath = target.FileName, patchPath = save.FileName;
-        await RunAsync("Creating patch…", () =>
+        await RunAsync(L.T("Creating patch…"), () =>
         {
             N64Rom original = N64Rom.Load(sourcePath);
             N64Rom modified = N64Rom.Load(targetPath);
@@ -435,7 +532,7 @@ public partial class MainWindow : Window
 
             File.WriteAllBytes(patchPath, patch);
             return patch.Length;
-        }, size => SetStatus($"Patch saved to {patchPath} ({size:N0} bytes, verified)."));
+        }, size => SetStatus(L.F("Patch saved to {0} ({1:N0} bytes, verified).", patchPath, size)));
     }
 
     private async void OnStressTest(object sender, RoutedEventArgs e)
@@ -446,7 +543,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        var save = new SaveFileDialog { Title = "Save the test ROM", Filter = Ui.RomFilter, FileName = "stress_test.z64" };
+        var save = new SaveFileDialog { Title = L.T("Save the test ROM"), Filter = Ui.RomFilter, FileName = "stress_test.z64" };
         if (save.ShowDialog(this) != true)
         {
             return;
@@ -454,7 +551,7 @@ public partial class MainWindow : Window
 
         if (_session.Project.IsCleanRomPath(save.FileName))
         {
-            Ui.ShowError(this, "The test ROM cannot be written to the clean ROM. Choose a different file.");
+            Ui.ShowError(this, L.T("The test ROM cannot be written to the clean ROM. Choose a different file."));
             return;
         }
 
@@ -463,14 +560,15 @@ public partial class MainWindow : Window
         bool recompress = dialog.Recompress;
         int? dummySize = dialog.DummyFileSize;
 
-        await RunAsync("Building test ROM…", () =>
+        await RunAsync(L.T("Building test ROM…"), () =>
         {
             RomBuildResult result = DeveloperTools.BuildStressTest(_session.CleanRom, recompress, options, dummySize);
             result.Rom.Save(path);
             return result;
         }, result => SetStatus(
-            $"Test ROM saved to {path}: audio at 0x{result.AudioOffset:X}{(result.AudioRelocated ? " (relocated)" : string.Empty)}, " +
-            $"{result.Rom.Size / (1024 * 1024)} MiB."));
+            result.AudioRelocated
+                ? L.F("Test ROM saved to {0}: audio at 0x{1:X} (relocated), {2} MiB.", path, result.AudioOffset, result.Rom.Size / (1024 * 1024))
+                : L.F("Test ROM saved to {0}: audio at 0x{1:X}, {2} MiB.", path, result.AudioOffset, result.Rom.Size / (1024 * 1024))));
     }
 
     // ----------------------------------------------------------------- helpers
@@ -513,7 +611,7 @@ public partial class MainWindow : Window
 
         _session = session;
         ReloadProject();
-        SetStatus($"Opened project {session.Project.Settings.Name}.");
+        SetStatus(L.F("Opened project {0}.", session.Project.Settings.Name));
         _ = Dispatcher.InvokeAsync(OfferMissingCodeFixesAsync);
     }
 
@@ -532,13 +630,13 @@ public partial class MainWindow : Window
         var dialog = new CodeFixOfferDialog(missing) { Owner = this };
         if (dialog.ShowDialog() != true)
         {
-            SetStatus("Code fixes not applied. They are offered again next time, and in File › Project settings.");
+            SetStatus(L.T("Code fixes not applied. They are offered again next time, and in File › Project settings."));
             return;
         }
 
         bool restorePoint = dialog.CreateRestorePoint;
         EditorSession session = _session;
-        await RunAsync("Applying code fixes…", () =>
+        await RunAsync(L.T("Applying code fixes…"), () =>
         {
             // The restore point keeps the state before the fixes.
             BackupInfo? point = restorePoint ? session.CreateRestorePoint() : null;
@@ -547,8 +645,8 @@ public partial class MainWindow : Window
         }, point =>
         {
             TextEditor.RefreshPreview();
-            string backup = point is not null ? $" Restore point {point.Name} created before." : string.Empty;
-            SetStatus($"{missing.Count} code fix(es) applied, hack ROM rebuilt.{backup}");
+            string backup = point is not null ? " " + L.F("Restore point {0} created before.", point.Name) : string.Empty;
+            SetStatus(L.F("{0} code fix(es) applied, hack ROM rebuilt.", missing.Count) + backup);
         });
     }
 
@@ -567,8 +665,8 @@ public partial class MainWindow : Window
     private void UpdateProjectInfo()
     {
         UpdateTitle();
-        ProjectText.Text = $"Project: {_session.Project.Folder}";
-        HackRomText.Text = $"Hack ROM: {_session.Project.OutputRomPath}";
+        ProjectText.Text = L.F("Project: {0}", _session.Project.Folder);
+        HackRomText.Text = L.F("Hack ROM: {0}", _session.Project.OutputRomPath);
     }
 
     /// <summary>Window title with an asterisk while there are unsaved changes, as in most editors.</summary>
@@ -597,11 +695,11 @@ public partial class MainWindow : Window
         }
         catch (Exception ex) when (Ui.IsExpectedError(ex))
         {
-            SetStatus("Failed.");
+            SetStatus(L.T("Failed."));
             string hint = ex is FileSystemFullException
-                ? "\n\nTip: allow enlarging the ROM in File › Project settings."
+                ? "\n\n" + L.T("Tip: allow enlarging the ROM in File › Project settings.")
                 : ex is BpsException { Error: BpsError.WrongSource }
-                    ? "\n\nThe patch was made for a different ROM than the clean Pilotwings 64 (USA) ROM."
+                    ? "\n\n" + L.T("The patch was made for a different ROM than the clean Pilotwings 64 (USA) ROM.")
                     : string.Empty;
             Ui.ShowError(this, ex.Message + hint);
             return false;

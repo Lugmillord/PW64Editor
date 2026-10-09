@@ -127,28 +127,29 @@ public static partial class TextCatalog
             if (vehicle == "EX")
             {
                 return BonusGames.TryGetValue(cls, out string? game)
-                    ? Make(game, "Levels", 1, $"Level {number} {Kinds[kind]}", $"{number}{KindOrder(kind)}", sourceFiles)
+                    ? Make(game, "Levels", 1, ("Level {0} {1}", [number, Kinds[kind]]), $"{number}{KindOrder(kind)}", sourceFiles)
                     : Other(name, sourceFiles);
             }
 
             (string className, int classOrder) = Classes[cls];
-            return Make(Vehicles[vehicle], className, classOrder, $"Mission {number} {Kinds[kind]}", $"{number}{KindOrder(kind)}", sourceFiles);
+            return Make(Vehicles[vehicle], className, classOrder, ("Mission {0} {1}", [number, Kinds[kind]]), $"{number}{KindOrder(kind)}", sourceFiles);
         }
 
         // Tutorial page: HG_6_A
         if ((m = TutorialPattern().Match(name)).Success)
         {
             int page = int.Parse(m.Groups[2].Value, System.Globalization.CultureInfo.InvariantCulture);
-            return Make(Vehicles[m.Groups[1].Value], "Tutorial", 0, $"Tutorial page {page}", $"{page:D2}", sourceFiles);
+            return Make(Vehicles[m.Groups[1].Value], "Tutorial", 0, ("Tutorial page {0}", [page.ToString(System.Globalization.CultureInfo.InvariantCulture)]), $"{page:D2}", sourceFiles);
         }
 
         // Score sheet of a mission: HG_B3_S1, GC_E_S2
         if ((m = ScoreSheetPattern().Match(name)).Success)
         {
             (string className, int classOrder) = Classes[m.Groups[2].Value];
-            string mission = m.Groups[3].Value.Length > 0 ? $" mission {m.Groups[3].Value}" : string.Empty;
-            return Make(Vehicles[m.Groups[1].Value], "Score sheets", 6,
-                $"{className}{mission}, sheet {m.Groups[4].Value}",
+            (string, string[]) description = m.Groups[3].Value.Length > 0
+                ? ("{0} mission {1}, sheet {2}", [className, m.Groups[3].Value, m.Groups[4].Value])
+                : ("{0}, sheet {1}", [className, m.Groups[4].Value]);
+            return Make(Vehicles[m.Groups[1].Value], "Score sheets", 6, description,
                 $"{classOrder}{m.Groups[3].Value}{m.Groups[4].Value}", sourceFiles);
         }
 
@@ -156,15 +157,16 @@ public static partial class TextCatalog
         if ((m = BonusScoreSheetPattern().Match(name)).Success)
         {
             string levels = m.Groups[2].Value;
-            string which = levels.Length > 1 ? "all levels" : $"level {levels}";
-            return Make(Vehicles[m.Groups[1].Value], "Score sheets", 6, $"Score sheet {m.Groups[3].Value}, {which}",
-                $"{levels}{m.Groups[3].Value}", sourceFiles);
+            (string, string[]) description = levels.Length > 1
+                ? ("Score sheet {0}, all levels", [m.Groups[3].Value])
+                : ("Score sheet {0}, level {1}", [m.Groups[3].Value, levels]);
+            return Make(Vehicles[m.Groups[1].Value], "Score sheets", 6, description, $"{levels}{m.Groups[3].Value}", sourceFiles);
         }
 
         // Birdman: BD_ALL_S1
         if ((m = BirdmanSheetPattern().Match(name)).Success)
         {
-            return Make("Birdman", "Score sheets", 6, $"Message {m.Groups[1].Value}", m.Groups[1].Value, sourceFiles);
+            return Make("Birdman", "Score sheets", 6, ("Message {0}", [m.Groups[1].Value]), m.Groups[1].Value, sourceFiles);
         }
 
         // Badge requirements: A_S3_GOLD, BONUS_S3_SILVER
@@ -209,6 +211,16 @@ public static partial class TextCatalog
 
     private static TextCategory Other(string name, string[] sourceFiles) =>
         Make("Other", "Not assigned yet", 0, string.Empty, name, sourceFiles);
+
+    /// <summary>A category whose description is made from a pattern and its values.</summary>
+    private static TextCategory Make(string area, string section, int sectionOrder, (string Pattern, string[] Args) description,
+        string sortKey, string[] sourceFiles) =>
+        Make(area, section, sectionOrder, string.Format(System.Globalization.CultureInfo.InvariantCulture, description.Pattern, description.Args),
+            sortKey, sourceFiles) with
+        {
+            DescriptionPattern = description.Pattern,
+            DescriptionArgs = description.Args,
+        };
 
     private static TextCategory Make(string area, string section, int sectionOrder, string description, string sortKey, string[] sourceFiles)
     {
