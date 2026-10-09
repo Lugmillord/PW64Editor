@@ -116,13 +116,13 @@ public static class ProjectBuilder
     /// A text file with more texts than the game's tables hold would crash the game: refuse to build it.
     /// </summary>
     /// <summary>
-    /// The music file with the project's changes of songs, or null if the project changes no song.
+    /// The music file with the project's imported songs and changes of songs, or null if the
+    /// project changes no song.
     /// </summary>
     /// <exception cref="ProjectException">A change cannot be made.</exception>
     public static byte[]? BuildMusic(HackProject project, N64Rom cleanRom, RomLayout layout)
     {
-        List<Audio.SongSettings> songs = project.Settings.Music.Where(s => !s.IsEmpty).ToList();
-        if (songs.Count == 0 || layout.Audio is null)
+        if (layout.Audio is null)
         {
             return null;
         }
@@ -132,7 +132,17 @@ public static class ProjectBuilder
             Audio.SequenceBank bank = Audio.SequenceBank.Parse(
                 cleanRom.Data.AsSpan(layout.Audio.SequenceOffset, layout.Audio.SequenceSize));
             var sequences = bank.Sequences.ToList();
-            foreach (Audio.SongSettings song in songs)
+            bool changed = false;
+            for (int i = 0; i < sequences.Count; i++)
+            {
+                if (project.ReadImportedSong(i) is { } imported)
+                {
+                    sequences[i] = imported;
+                    changed = true;
+                }
+            }
+
+            foreach (Audio.SongSettings song in project.Settings.Music.Where(s => !s.IsEmpty))
             {
                 if (song.Song < 0 || song.Song >= sequences.Count)
                 {
@@ -140,6 +150,23 @@ public static class ProjectBuilder
                 }
 
                 sequences[song.Song] = Audio.SequenceEditor.Apply(sequences[song.Song], song);
+                changed = true;
+            }
+
+            if (!changed)
+            {
+                return null;
+            }
+
+            // The game reserves room for the longest original song only.
+            int maxSize = bank.Sequences.Max(s => s.Length);
+            for (int i = 0; i < sequences.Count; i++)
+            {
+                if (sequences[i].Length > maxSize)
+                {
+                    throw new ProjectException(CoreText.F("Song {0:D2} needs {1:N0} bytes, but the game has room for at most {2:N0}.",
+                        i, sequences[i].Length, maxSize));
+                }
             }
 
             return bank.With(sequences).Build();

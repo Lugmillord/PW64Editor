@@ -188,3 +188,123 @@ public class MusicTests
         Assert.InRange(differences, 1, 4);
     }
 }
+
+public class MidiTests
+{
+    private static readonly AudioLayout Audio = AudioLayout.PilotwingsUsa;
+
+    private static SequenceBank Sequences() =>
+        SequenceBank.Parse(N64Rom.Load(TestRomLocator.RomPath!).Data.AsSpan(Audio.SequenceOffset, Audio.SequenceSize));
+
+    private static List<string> Content(CompactSequence sequence) => sequence.Events
+        .Where(e => e.Kind is not (SequenceEventKind.LoopStart or SequenceEventKind.LoopEnd or SequenceEventKind.Tempo))
+        .Select(e => $"{e.Tick},{e.Kind},{e.Channel},{e.Data1},{e.Data2},{e.Duration}").Order().ToList();
+
+    [RealRomFact]
+    public void ExportThenImport_OfEverySong_KeepsAllEventsAndTheLoop()
+    {
+        SequenceBank bank = Sequences();
+        int maxSize = bank.Sequences.Max(s => s.Length);
+        foreach (byte[] original in bank.Sequences)
+        {
+            CompactSequence song = CompactSequence.Parse(original);
+            MidiImportResult result = StandardMidi.Import(StandardMidi.Export(song), _ => true, _ => 0, maxSize);
+            CompactSequence imported = CompactSequence.Parse(result.Sequence);
+
+            Assert.Equal(Content(song), Content(imported));
+            Assert.Equal(StandardMidi.FindLoop(song), StandardMidi.FindLoop(imported));
+            Assert.Equal(song.Events.Where(e => e.Kind == SequenceEventKind.Tempo).Select(e => e.Data1).Distinct(),
+                imported.Events.Where(e => e.Kind == SequenceEventKind.Tempo).Select(e => e.Data1).Distinct());
+        }
+    }
+
+    /// <summary>A small type 0 MIDI file: two notes on channel 1, program 25, a loop from beat 1 to 3.</summary>
+    private static byte[] SmallMidi(bool loop, int program = 25)
+    {
+        var track = new List<byte>
+        {
+            0, 0xFF, 0x51, 3, 0x07, 0xA1, 0x20, // 120 bpm
+            0, 0xC0, (byte)program,
+            0, 0x90, 60, 100,
+        };
+        if (loop)
+        {
+            track.AddRange([0, 0xFF, 0x06, 9, .. "loopStart"u8.ToArray()]);
+        }
+
+        track.AddRange([0x83, 0x60, 0x80, 60, 0, // 480 ticks later: off
+                        0, 0x90, 64, 90,
+                        0x83, 0x60, 0x90, 64, 0]); // note-on with velocity 0 = off
+        if (loop)
+        {
+            track.AddRange([0, 0xFF, 0x06, 7, .. "loopEnd"u8.ToArray()]);
+        }
+
+        track.AddRange([0, 0xFF, 0x2F, 0]);
+        return [.. "MThd"u8.ToArray(), 0, 0, 0, 6, 0, 0, 0, 1, 1, 0xE0,
+                .. "MTrk"u8.ToArray(), 0, 0, (byte)(track.Count >> 8), (byte)track.Count, .. track];
+    }
+
+    [Fact]
+    public void Import_ReadsNotesLoopsAndReplacesUnknownInstruments()
+    {
+        MidiImportResult result = StandardMidi.Import(SmallMidi(loop: true), p => p != 25, _ => 3, 10000);
+        CompactSequence song = CompactSequence.Parse(result.Sequence);
+
+        Assert.Equal(480, song.Division);
+        Assert.Equal([(0L, 60, 100, 480), (480L, 64, 90, 480)],
+            song.Events.Where(e => e.Kind == SequenceEventKind.Note).Select(e => (e.Tick, e.Data1, e.Data2, e.Duration)));
+        Assert.Equal(3, song.Events.Single(e => e.Kind == SequenceEventKind.Program).Data1);
+        Assert.Equal((0L, 960L), StandardMidi.FindLoop(song));
+        Assert.Contains(result.Warnings, w => w.Contains("instrument 25"));
+    }
+
+    [Fact]
+    public void Import_WithoutLoop_WarnsThatTheSongStops()
+    {
+        MidiImportResult result = StandardMidi.Import(SmallMidi(loop: false, program: 3), _ => true, _ => 0, 10000);
+        Assert.Null(StandardMidi.FindLoop(CompactSequence.Parse(result.Sequence)));
+        Assert.Contains(result.Warnings, w => w.Contains("no loop"));
+    }
+
+    [Fact]
+    public void Import_RejectsOtherFilesAndTooLargeSongs()
+    {
+        Assert.Throws<InvalidDataException>(() => StandardMidi.Import([1, 2, 3], _ => true, _ => 0, 10000));
+        Assert.Throws<InvalidDataException>(() => StandardMidi.Import(SmallMidi(loop: true), _ => true, _ => 0, 20));
+    }
+
+    [RealRomFact]
+    public void Session_ImportsExportsAndRestoresSongs()
+    {
+        using var temp = new TempDirectory();
+        N64Rom rom = N64Rom.Load(TestRomLocator.RomPath!);
+        EditorSession session = EditorSession.Create(temp.Combine("hack"), "Midi Test", false, rom, TestRomLocator.RomPath!);
+        session.SaveSong(new SongSettings { Song = 7, MutedChannels = [3] });
+
+        // Song 7 becomes the small MIDI; its old changes are gone.
+        IReadOnlyList<string> warnings = session.ImportSongFromMidi(7, SmallMidi(loop: true, program: 60));
+        Assert.Empty(warnings);
+        SongInfo song = session.LoadSongs()[7];
+        Assert.True(song.IsImported);
+        Assert.True(song.Settings.IsEmpty);
+        Assert.Equal([0], song.Channels.Select(c => c.Channel));
+
+        // Changes apply to the imported song, and the export contains them.
+        session.SaveSong(new SongSettings { Song = 7, Instruments = [new InstrumentChange(0, 60, 14)] });
+        byte[] exported = session.ExportSongAsMidi(7);
+        CompactSequence again = CompactSequence.Parse(StandardMidi.Import(exported, _ => true, _ => 0, 10000).Sequence);
+        Assert.Equal(14, again.Events.Single(e => e.Kind == SequenceEventKind.Program).Data1);
+
+        (_, string romPath, _) = session.Build(createRestorePoint: false);
+        byte[] built = File.ReadAllBytes(romPath);
+        int start = (int)MipsAddressPatcher.ReadValue(built, Audio.SequenceReferences[0]);
+        int bank = (int)MipsAddressPatcher.ReadValue(built, Audio.BankReferences[0]);
+        CompactSequence inRom = CompactSequence.Parse(SequenceBank.Parse(built.AsSpan(start, bank - start)).Sequences[7]);
+        Assert.Equal(2, inRom.Events.Count(e => e.Kind == SequenceEventKind.Note));
+
+        Assert.True(session.RestoreSong(7));
+        Assert.False(session.LoadSongs()[7].IsChanged);
+        Assert.Throws<PW64Editor.Core.Project.ProjectException>(() => session.ImportSongFromMidi(7, [0, 1, 2]));
+    }
+}

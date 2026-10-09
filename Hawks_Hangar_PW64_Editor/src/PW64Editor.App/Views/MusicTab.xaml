@@ -8,6 +8,10 @@
             <ComboBox x:Name="SongList" Width="340" DisplayMemberPath="Text" SelectionChanged="OnSongChanged" />
             <Button x:Name="RestoreButton" Content="Restore original" Click="OnRestore" Style="{StaticResource DialogButton}" Margin="10,0,0,0"
                     ToolTip="Removes all changes of this song from the project." />
+            <Button x:Name="ExportMidiButton" Content="Export MIDI…" Click="OnExportMidi" Style="{StaticResource DialogButton}"
+                    ToolTip="Saves the song as it is now in the project as a MIDI file. Program numbers are the game's instruments, the loop is marked with the markers loopStart and loopEnd." />
+            <Button x:Name="ImportMidiButton" Content="Import MIDI…" Click="OnImportMidi" Style="{StaticResource DialogButton}"
+                    ToolTip="Replaces the song with a MIDI file (type 0 or 1). Mark a loop with the markers loopStart and loopEnd, or with the controllers 102 and 103." />
             <TextBlock x:Name="SongInfoText" VerticalAlignment="Center" Margin="14,0,0,0" Foreground="{StaticResource MutedTextBrush}" />
         </DockPanel>
         <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" Margin="0,0,0,10" Foreground="{StaticResource MutedTextBrush}"

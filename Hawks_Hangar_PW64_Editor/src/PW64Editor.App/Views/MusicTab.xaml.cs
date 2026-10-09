@@ -28,7 +28,7 @@ public partial class MusicTab : UserControl
     public MusicTab()
     {
         InitializeComponent();
-        RestoreButton.IsEnabled = false;
+        RestoreButton.IsEnabled = ExportMidiButton.IsEnabled = ImportMidiButton.IsEnabled = false;
     }
 
     private Window Owner => Window.GetWindow(this)!;
@@ -85,6 +85,7 @@ public partial class MusicTab : UserControl
     {
         _building = true;
         SongList.ItemsSource = _songs.Select(s => new SongItem(s, L.F("{0:D2} – {1}", s.Number, L.T(s.Name))
+            + (s.IsImported ? " " + L.T("(imported)") : string.Empty)
             + (s.Settings.IsEmpty ? string.Empty : " " + L.T("(changed)")))).ToList();
         SongList.SelectedIndex = Math.Clamp(selectIndex, 0, Math.Max(0, _songs.Count - 1));
         _building = false;
@@ -107,7 +108,8 @@ public partial class MusicTab : UserControl
         VoiceGrid.Children.Clear();
         VoiceGrid.RowDefinitions.Clear();
         SongInfo? song = SelectedSong;
-        RestoreButton.IsEnabled = song is not null && !song.Settings.IsEmpty;
+        RestoreButton.IsEnabled = song is not null && song.IsChanged;
+        ExportMidiButton.IsEnabled = ImportMidiButton.IsEnabled = song is not null;
         if (song is null || _session is null || _bank is null)
         {
             SongInfoText.Text = string.Empty;
@@ -315,7 +317,7 @@ public partial class MusicTab : UserControl
     private void OnRestore(object sender, RoutedEventArgs e)
     {
         if (_session is null || SelectedSong is not { } song
-            || !Ui.Confirm(Owner, L.F("Restore the original instruments and voices of song {0:D2}?", song.Number)))
+            || !Ui.Confirm(Owner, L.F("Restore the original of song {0:D2}? An imported version, changed instruments and silenced voices of this song are removed.", song.Number)))
         {
             return;
         }
@@ -328,6 +330,88 @@ public partial class MusicTab : UserControl
         catch (Exception ex) when (Ui.IsExpectedError(ex))
         {
             Ui.ShowError(Owner, L.F("The change could not be made.\n\n{0}", ex.Message));
+        }
+
+        Reload();
+    }
+
+    // ----------------------------------------------------------------- MIDI files
+
+    private static string MidiFilter => L.T("MIDI files") + " (*.mid;*.midi)|*.mid;*.midi|" + L.T("All files") + " (*.*)|*.*";
+
+    private void OnExportMidi(object sender, RoutedEventArgs e)
+    {
+        if (_session is null || SelectedSong is not { } song)
+        {
+            return;
+        }
+
+        string name = new(L.T(song.Name).Select(c => Path.GetInvalidFileNameChars().Contains(c) || c == ':' ? '_' : c).ToArray());
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = L.T("Export song as MIDI"),
+            Filter = MidiFilter,
+            FileName = $"{song.Number:D2} {name}.mid",
+            OverwritePrompt = true,
+        };
+        if (dialog.ShowDialog(Owner) != true)
+        {
+            return;
+        }
+
+        try
+        {
+            File.WriteAllBytes(dialog.FileName, _session.ExportSongAsMidi(song.Number, channel => TrackName(song, channel)));
+            ActionText.Text = L.F("Song {0:D2} exported to {1}.", song.Number, dialog.FileName);
+        }
+        catch (Exception ex) when (Ui.IsExpectedError(ex))
+        {
+            Ui.ShowError(Owner, L.F("The file could not be written.\n\n{0}", ex.Message));
+        }
+    }
+
+    /// <summary>Name of a channel's track in an exported MIDI file: the voice and its (first) instrument.</summary>
+    private string? TrackName(SongInfo song, int channel)
+    {
+        if (song.Channels.FirstOrDefault(c => c.Channel == channel) is not { } info || info.Programs.Count == 0 || _session is null)
+        {
+            return L.F("Voice {0}", channel + 1);
+        }
+
+        int original = info.Programs[0];
+        int program = song.Settings.Instruments.FirstOrDefault(c => c.Channel == channel && c.Original == original)?.Instrument
+                      ?? (original >= 0 ? original : _session.DefaultProgram(channel));
+        return $"{L.F("Voice {0}", channel + 1)} - {Describe(program)}";
+    }
+
+    private void OnImportMidi(object sender, RoutedEventArgs e)
+    {
+        if (_session is null || SelectedSong is not { } song)
+        {
+            return;
+        }
+
+        var dialog = new Microsoft.Win32.OpenFileDialog { Title = L.F("Replace song {0:D2} with a MIDI file", song.Number), Filter = MidiFilter };
+        if (dialog.ShowDialog(Owner) != true
+            || !Ui.Confirm(Owner, L.F("Replace song {0:D2} with {1}? Changed instruments and silenced voices of this song are removed.",
+                song.Number, Path.GetFileName(dialog.FileName))))
+        {
+            return;
+        }
+
+        try
+        {
+            IReadOnlyList<string> warnings = _session.ImportSongFromMidi(song.Number, File.ReadAllBytes(dialog.FileName));
+            string summary = L.F("Song {0:D2} was replaced by {1}.", song.Number, Path.GetFileName(dialog.FileName)) + " "
+                             + L.T("Build the hack ROM (Ctrl+S) to hear it in the game.");
+            ActionText.Text = summary;
+            Ui.ShowInfo(Owner, warnings.Count == 0
+                ? summary
+                : summary + "\n\n" + L.T("Notes on the conversion:") + "\n" + string.Join("\n", warnings.Select(w => "• " + w)));
+        }
+        catch (Exception ex) when (Ui.IsExpectedError(ex))
+        {
+            Ui.ShowError(Owner, L.F("The MIDI file could not be imported.\n\n{0}", ex.Message));
         }
 
         Reload();

@@ -279,6 +279,38 @@ public sealed partial class HackProject
         return true;
     }
 
+    /// <summary>Folder for songs imported from MIDI files (inside the files folder, so restore points keep them).</summary>
+    public string MusicFolder => Path.Combine(FilesFolder, "music");
+
+    private string ImportedSongPath(int song) =>
+        Path.Combine(MusicFolder, $"song_{song.ToString("D2", System.Globalization.CultureInfo.InvariantCulture)}.seq");
+
+    /// <summary>True if the project replaces a song with an imported one.</summary>
+    public bool HasImportedSong(int song) => File.Exists(ImportedSongPath(song));
+
+    /// <summary>The imported version of a song (in the game's format), or null.</summary>
+    public byte[]? ReadImportedSong(int song) => HasImportedSong(song) ? File.ReadAllBytes(ImportedSongPath(song)) : null;
+
+    /// <summary>Stores an imported song (in the game's format).</summary>
+    public void WriteImportedSong(int song, byte[] sequence)
+    {
+        Directory.CreateDirectory(MusicFolder);
+        File.WriteAllBytes(ImportedSongPath(song), sequence);
+    }
+
+    /// <summary>Removes the imported version of a song.</summary>
+    /// <returns>False if there was none.</returns>
+    public bool RemoveImportedSong(int song)
+    {
+        if (!HasImportedSong(song))
+        {
+            return false;
+        }
+
+        File.Delete(ImportedSongPath(song));
+        return true;
+    }
+
     /// <summary>
     /// A file name for build output, derived from the hack name: letters, digits, '-' and '_' only.
     /// </summary>

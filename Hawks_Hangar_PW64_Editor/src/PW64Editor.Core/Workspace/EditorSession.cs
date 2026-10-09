@@ -325,19 +325,78 @@ public sealed class EditorSession
     private AudioLayout AudioLayout => Layout.Audio ?? throw new ProjectException(CoreText.T("This game version has no known music data."));
 
     /// <summary>All songs with their channels and the project's changes.</summary>
+    /// <exception cref="InvalidDataException">An imported song of the project is damaged.</exception>
     public IReadOnlyList<SongInfo> LoadSongs()
     {
         var songs = new List<SongInfo>();
         for (int i = 0; i < OriginalSequences.Sequences.Count; i++)
         {
-            IReadOnlyList<SequenceChannel> channels = CompactSequence.Parse(OriginalSequences.Sequences[i]).GetChannels();
+            IReadOnlyList<SequenceChannel> channels = CompactSequence.Parse(SongBase(i)).GetChannels();
             SongSettings settings = Project.Settings.Music.FirstOrDefault(m => m.Song == i) ?? new SongSettings { Song = i };
             string name = i < MusicCatalog.SongNames.Count ? MusicCatalog.SongNames[i] : CoreText.F("Song {0}", i);
-            songs.Add(new SongInfo(i, name, channels, settings));
+            songs.Add(new SongInfo(i, name, channels, settings) { IsImported = Project.HasImportedSong(i) });
         }
 
         return songs;
     }
+
+    /// <summary>
+    /// Largest size of a song: the longest original song. The game reserves a buffer of exactly
+    /// this size in its audio memory when it starts; larger songs would need more of that memory.
+    /// </summary>
+    public int MaxSongSize => OriginalSequences.Sequences.Max(s => s.Length);
+
+    /// <summary>A song as MIDI file: the imported or original song with the project's changes.</summary>
+    /// <param name="song">The song number.</param>
+    /// <param name="trackName">Optional name of each channel's track, by channel.</param>
+    /// <exception cref="ProjectException">The song cannot be built.</exception>
+    public byte[] ExportSongAsMidi(int song, Func<int, string?>? trackName = null)
+    {
+        SongSettings settings = Project.Settings.Music.FirstOrDefault(m => m.Song == song) ?? new SongSettings { Song = song };
+        try
+        {
+            return StandardMidi.Export(CompactSequence.Parse(SequenceEditor.Apply(SongBase(song), settings)), trackName);
+        }
+        catch (InvalidDataException ex)
+        {
+            throw new ProjectException(ex.Message, ex);
+        }
+    }
+
+    /// <summary>
+    /// Replaces a song with a MIDI file. The song is stored in the project (files/music); the
+    /// song's instrument changes and silenced voices are removed, because its voices are new.
+    /// </summary>
+    /// <returns>What was changed or left out during the conversion.</returns>
+    /// <exception cref="ProjectException">The file cannot be used.</exception>
+    public IReadOnlyList<string> ImportSongFromMidi(int song, byte[] midi)
+    {
+        if (song < 0 || song >= OriginalSequences.Sequences.Count)
+        {
+            throw new ProjectException(CoreText.F("The game has no song {0}.", song));
+        }
+
+        MidiImportResult result;
+        try
+        {
+            result = StandardMidi.Import(midi, InstrumentBank.Instruments.ContainsKey, DefaultProgram, MaxSongSize);
+        }
+        catch (InvalidDataException ex)
+        {
+            throw new ProjectException(ex.Message, ex);
+        }
+
+        Project.WriteImportedSong(song, result.Sequence);
+        if (Project.Settings.Music.RemoveAll(m => m.Song == song) > 0)
+        {
+            Project.Save();
+        }
+
+        return result.Warnings;
+    }
+
+    /// <summary>The song the project's changes apply to: an imported one, or the original.</summary>
+    private byte[] SongBase(int song) => Project.ReadImportedSong(song) ?? OriginalSequences.Sequences[song];
 
     /// <summary>The instrument a channel has before the song selects one.</summary>
     public int DefaultProgram(int channel) =>
@@ -367,7 +426,12 @@ public sealed class EditorSession
         settings.Instruments.RemoveAll(c => c.Instrument == (c.Original >= 0 ? c.Original : DefaultProgram(c.Channel)));
         try
         {
-            SequenceEditor.Apply(OriginalSequences.Sequences[settings.Song], settings);
+            byte[] changed = SequenceEditor.Apply(SongBase(settings.Song), settings);
+            if (changed.Length > MaxSongSize)
+            {
+                throw new ProjectException(CoreText.F("Song {0:D2} needs {1:N0} bytes, but the game has room for at most {2:N0}.",
+                    settings.Song, changed.Length, MaxSongSize));
+            }
         }
         catch (InvalidDataException ex)
         {
@@ -384,13 +448,14 @@ public sealed class EditorSession
         Project.Save();
     }
 
-    /// <summary>Removes all changes of a song.</summary>
+    /// <summary>Removes all changes of a song, also an imported version.</summary>
     /// <returns>False if the song had no changes.</returns>
     public bool RestoreSong(int song)
     {
+        bool imported = Project.RemoveImportedSong(song);
         if (Project.Settings.Music.RemoveAll(m => m.Song == song) == 0)
         {
-            return false;
+            return imported;
         }
 
         Project.Save();

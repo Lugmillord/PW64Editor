@@ -38,7 +38,8 @@ public enum SequenceEventKind
 /// <param name="Duration">Length of a note in ticks.</param>
 /// <param name="ValuePosition">Where in the data the program number (program change) or the
 /// controller value (control change) is stored; -1 for other events.</param>
-public sealed record SequenceEvent(int Track, long Tick, SequenceEventKind Kind, int Channel, int Data1, int Data2, int Duration, int ValuePosition);
+/// <param name="Status">The MIDI status kind of <see cref="SequenceEventKind.Other"/> events (0xA0, 0xD0 or 0xE0).</param>
+public sealed record SequenceEvent(int Track, long Tick, SequenceEventKind Kind, int Channel, int Data1, int Data2, int Duration, int ValuePosition, int Status = 0);
 
 /// <summary>A repetition of earlier bytes: "FE hi lo length" in the data, see <see cref="CompactSequence"/>.</summary>
 /// <param name="Position">Position of the 0xFE that starts it.</param>
@@ -236,7 +237,7 @@ public sealed class CompactSequence
                             events.Add(new(track, tick, SequenceEventKind.Program, channel, data1, 0, 0, data1Position));
                             break;
                         case 0xD0:
-                            events.Add(new(track, tick, SequenceEventKind.Other, channel, data1, 0, 0, -1));
+                            events.Add(new(track, tick, SequenceEventKind.Other, channel, data1, 0, 0, -1, kind));
                             break;
                         default:
                             (int data2, int data2Position) = reader.Next();
@@ -251,7 +252,7 @@ public sealed class CompactSequence
                             }
                             else
                             {
-                                events.Add(new(track, tick, SequenceEventKind.Other, channel, data1, data2, 0, -1));
+                                events.Add(new(track, tick, SequenceEventKind.Other, channel, data1, data2, 0, -1, kind));
                             }
 
                             break;
