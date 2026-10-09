@@ -696,6 +696,98 @@ public partial class TextTab : UserControl
         UpdatePreview(row);
     }
 
+    // ----------------------------------------------------------------- CSV export and import
+
+    private void OnExportCsv(object sender, RoutedEventArgs e)
+    {
+        if (_library is null)
+        {
+            return;
+        }
+
+        Window owner = Window.GetWindow(this)!;
+        var dialog = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "Export texts as CSV",
+            Filter = CsvFilter,
+            FileName = $"{_session?.Project.Settings.Name ?? "Pilotwings 64"} texts.csv",
+            OverwritePrompt = true,
+        };
+        if (dialog.ShowDialog(owner) != true)
+        {
+            return;
+        }
+
+        try
+        {
+            // The texts as shown now, including edits that are not saved yet.
+            File.WriteAllBytes(dialog.FileName, TextCsv.ToFileBytes(TextCsv.Export(_rows.Select(r => (r.Index, r.Markup)))));
+            Ui.ShowInfo(owner, $"{_rows.Count} texts exported to {dialog.FileName}.");
+        }
+        catch (Exception ex) when (Ui.IsExpectedError(ex))
+        {
+            Ui.ShowError(owner, $"The file could not be written.\n\n{ex.Message}");
+        }
+    }
+
+    private void OnImportCsv(object sender, RoutedEventArgs e)
+    {
+        if (_library is null)
+        {
+            return;
+        }
+
+        Window owner = Window.GetWindow(this)!;
+        var dialog = new Microsoft.Win32.OpenFileDialog { Title = "Import texts from CSV", Filter = CsvFilter };
+        if (dialog.ShowDialog(owner) != true)
+        {
+            return;
+        }
+
+        TextImportResult result;
+        try
+        {
+            string content = TextCsv.Decode(File.ReadAllBytes(dialog.FileName));
+            Dictionary<int, TextImportTarget> targets = _rows.ToDictionary(
+                r => r.Index, r => new TextImportTarget(r.Index, r.Name, r.OriginalMarkup, r.Markup, MaxLines(r)));
+            result = TextCsv.Import(content, _library.Codec, targets);
+        }
+        catch (Exception ex) when (Ui.IsExpectedError(ex))
+        {
+            Ui.ShowError(owner, $"The file could not be read.\n\n{ex.Message}");
+            return;
+        }
+
+        bool wasUnsaved = HasUnsavedChanges;
+        foreach ((int index, string markup) in result.Changes)
+        {
+            if (_rows.FirstOrDefault(r => r.Index == index) is { } row)
+            {
+                row.Markup = markup;
+            }
+        }
+
+        _view?.Refresh();
+        ShowDetails(SelectedRow);
+        if (wasUnsaved != HasUnsavedChanges)
+        {
+            UnsavedChangesChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        string summary = $"{result.Changes.Count} text(s) changed, {result.Unchanged} unchanged" +
+            (result.Changes.Count > 0 ? ". The changes are not saved yet: save and build as usual (Ctrl+S)." : ".");
+        if (result.Rejected.Count == 0)
+        {
+            Ui.ShowInfo(owner, summary);
+        }
+        else
+        {
+            new TextImportReportDialog($"{summary} {result.Rejected.Count} row(s) were not imported.", result.Rejected) { Owner = owner }.ShowDialog();
+        }
+    }
+
+    private const string CsvFilter = "CSV files (*.csv)|*.csv|All files (*.*)|*.*";
+
     // ----------------------------------------------------------------- adding and removing texts
 
     private void UpdateAddTextButton()

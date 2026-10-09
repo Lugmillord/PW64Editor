@@ -74,6 +74,10 @@
             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                 <Button x:Name="AddTextButton" Content="Add text…" Click="OnAddText" Style="{StaticResource DialogButton}"
                         ToolTipService.ShowOnDisabled="True" />
+                <Button Content="Export CSV…" Click="OnExportCsv" Style="{StaticResource DialogButton}"
+                        ToolTip="Saves all texts as a table (ID;Text, line breaks as [enter]) to edit them in a spreadsheet program" />
+                <Button Content="Import CSV…" Click="OnImportCsv" Style="{StaticResource DialogButton}"
+                        ToolTip="Takes the texts from such a table; texts that break the rules are not taken" />
                 <Button Content="Codes…" Click="OnShowCodes" Style="{StaticResource DialogButton}"
                         ToolTip="What the codes in square brackets mean, and which characters the font has" />
                 <Button Content="Expand all" Click="OnExpandAll" Style="{StaticResource DialogButton}" />
