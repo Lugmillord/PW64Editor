@@ -80,7 +80,7 @@
                 <views:SaveFileTab x:Name="SaveEditor" />
             </TabItem>
             <TabItem Header="Textures">
-                <TextBlock Style="{StaticResource PlaceholderText}" Text="Editing textures will be added here in a later version." />
+                <views:TexturesTab x:Name="TextureEditor" />
             </TabItem>
             <TabItem Header="Music">
                 <TextBlock Style="{StaticResource PlaceholderText}" Text="Editing music will be added here in a later version." />

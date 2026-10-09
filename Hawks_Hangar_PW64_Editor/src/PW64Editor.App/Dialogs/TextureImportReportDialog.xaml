@@ -1,0 +1,32 @@
+<Window x:Class="PW64Editor.App.Dialogs.TextureImportReportDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Texture import"
+        Width="620" Height="460" MinWidth="400" MinHeight="260"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner">
+    <DockPanel Margin="16">
+        <TextBlock x:Name="SummaryText" DockPanel.Dock="Top" TextWrapping="Wrap" />
+        <TextBlock DockPanel.Dock="Top" Margin="0,12,0,6" FontWeight="SemiBold"
+                   Text="The following files were not imported. Their textures were kept:" />
+
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button Content="OK" IsDefault="True" IsCancel="True" Style="{StaticResource DialogButton}" />
+        </StackPanel>
+
+        <Border BorderBrush="#D5DCE3" BorderThickness="1">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <ItemsControl x:Name="ProblemList" Margin="8,4">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Margin="0,4">
+                                <TextBlock Text="{Binding File}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Text="{Binding Reason}" TextWrapping="Wrap" Margin="12,0,0,0" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </Border>
+    </DockPanel>
+</Window>

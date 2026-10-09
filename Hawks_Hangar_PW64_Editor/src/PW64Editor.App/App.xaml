@@ -8,6 +8,29 @@
         <SolidColorBrush x:Key="AccentBrush" Color="#1E4F7A" />
         <SolidColorBrush x:Key="AccentTextBrush" Color="#FFFFFF" />
         <SolidColorBrush x:Key="MutedTextBrush" Color="#5A6573" />
+        <!-- Marks things the project has changed (e.g. replaced textures). -->
+        <SolidColorBrush x:Key="ChangedBrush" Color="#D9822B" />
+
+        <!-- Light checkerboard behind images, so transparent parts can be seen. -->
+        <DrawingBrush x:Key="CheckerBrush" TileMode="Tile" Viewport="0,0,16,16" ViewportUnits="Absolute">
+            <DrawingBrush.Drawing>
+                <DrawingGroup>
+                    <GeometryDrawing Brush="#FFFFFF">
+                        <GeometryDrawing.Geometry>
+                            <RectangleGeometry Rect="0,0,16,16" />
+                        </GeometryDrawing.Geometry>
+                    </GeometryDrawing>
+                    <GeometryDrawing Brush="#DDE2E8">
+                        <GeometryDrawing.Geometry>
+                            <GeometryGroup>
+                                <RectangleGeometry Rect="0,0,8,8" />
+                                <RectangleGeometry Rect="8,8,8,8" />
+                            </GeometryGroup>
+                        </GeometryDrawing.Geometry>
+                    </GeometryDrawing>
+                </DrawingGroup>
+            </DrawingBrush.Drawing>
+        </DrawingBrush>
 
         <Style x:Key="DialogButton" TargetType="Button">
             <Setter Property="MinWidth" Value="88" />

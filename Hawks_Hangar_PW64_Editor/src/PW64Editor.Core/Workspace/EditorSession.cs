@@ -4,6 +4,7 @@ using PW64Editor.Core.Localization;
 using PW64Editor.Core.Project;
 using PW64Editor.Core.Rom;
 using PW64Editor.Core.Text;
+using PW64Editor.Core.Textures;
 
 namespace PW64Editor.Core.Workspace;
 
@@ -306,6 +307,132 @@ public sealed class EditorSession
         }
 
         return TextCodec.ToChunkData(result.Codes, minimumSize);
+    }
+
+    // ----------------------------------------------------------------- textures
+
+    /// <summary>
+    /// Loads all textures of the game, each with its current version in the project. Textures
+    /// whose original cannot be read are left out (does not happen with the supported ROM).
+    /// </summary>
+    public IReadOnlyList<TextureEntry> LoadTextures()
+    {
+        Dictionary<int, FileOverride> overrides = Project.GetOverrides().ToDictionary(o => o.TableIndex);
+        var textures = new List<TextureEntry>();
+        foreach (GameFile file in TextureFiles)
+        {
+            if (LoadTexture(file, overrides.GetValueOrDefault(file.TableIndex)) is { } texture)
+            {
+                textures.Add(texture);
+            }
+        }
+
+        return textures;
+    }
+
+    /// <summary>Loads one texture with its current version in the project (null if its original cannot be read).</summary>
+    /// <exception cref="ProjectException">Unknown number.</exception>
+    public TextureEntry? LoadTexture(int number)
+    {
+        GameFile file = FindTextureFile(number);
+        return LoadTexture(file, Project.GetOverrides().FirstOrDefault(o => o.TableIndex == file.TableIndex));
+    }
+
+    /// <summary>
+    /// Replaces a texture's image. The image is converted to the texture's format, and the smaller
+    /// copies (mipmaps) are computed from it. An image that looks like the original (see
+    /// <see cref="RgbaImage.LooksLike"/>) removes the project's replacement, so the file stays
+    /// exactly the original.
+    /// </summary>
+    /// <param name="number">The texture number.</param>
+    /// <param name="image">The new image; it must have the texture's size.</param>
+    /// <exception cref="ProjectException">Unknown number, wrong size, or the texture cannot be edited.</exception>
+    public TextureSaveResult SaveTexture(int number, RgbaImage image)
+    {
+        GameFile file = FindTextureFile(number);
+        TextureEntry texture = LoadTexture(number)
+            ?? throw new ProjectException(CoreText.T("The editor cannot read the format of this texture."));
+        if (texture.Problem is not null)
+        {
+            throw new ProjectException(texture.Problem);
+        }
+
+        GameTexture original = texture.Original;
+        if (image.Width != original.Width || image.Height != original.Height)
+        {
+            throw new ProjectException(CoreText.F("Wrong size: {0} × {1} instead of {2} × {3}",
+                image.Width, image.Height, original.Width, original.Height));
+        }
+
+        RgbaImage stored = original.Quantize(image);
+        if (stored.LooksLike(original.DecodeImage()))
+        {
+            return texture.IsChanged && Project.RemoveOverride(file.TableIndex) ? TextureSaveResult.RestoredOriginal : TextureSaveResult.Unchanged;
+        }
+
+        if (texture.IsChanged && stored.LooksLike(texture.Current.DecodeImage()))
+        {
+            return TextureSaveResult.Unchanged;
+        }
+
+        byte[] data = TextureFile.Parse(file.Data).Build(original.WithImage(image));
+        Project.WriteOverride(file, data);
+        return TextureSaveResult.Changed;
+    }
+
+    /// <summary>Removes the project's replacement of a texture, so the original is used again.</summary>
+    /// <returns>False if the project did not replace the texture.</returns>
+    /// <exception cref="ProjectException">Unknown number.</exception>
+    public bool RestoreTexture(int number) => Project.RemoveOverride(FindTextureFile(number).TableIndex);
+
+    private IEnumerable<GameFile> TextureFiles => CleanFileSystem.Files.Where(f => f.FileType == TextureFile.FormType);
+
+    private GameFile FindTextureFile(int number) =>
+        TextureFiles.FirstOrDefault(f => f.GroupIndex == number)
+        ?? throw new ProjectException(CoreText.F("There is no texture with the number {0}", number));
+
+    private static TextureEntry? LoadTexture(GameFile file, FileOverride? replacement)
+    {
+        GameTexture original;
+        try
+        {
+            original = TextureFile.Parse(file.Data).Texture;
+        }
+        catch (InvalidDataException)
+        {
+            return null;
+        }
+
+        if (!original.IsSupported)
+        {
+            return new TextureEntry(file.GroupIndex, file.TableIndex, original, original, false,
+                CoreText.T("The editor cannot read the format of this texture."));
+        }
+
+        if (replacement is null)
+        {
+            return new TextureEntry(file.GroupIndex, file.TableIndex, original, original, false, null);
+        }
+
+        try
+        {
+            byte[] data = File.ReadAllBytes(replacement.Path);
+            if (data.AsSpan().SequenceEqual(file.Data))
+            {
+                return new TextureEntry(file.GroupIndex, file.TableIndex, original, original, false, null);
+            }
+
+            GameTexture current = TextureFile.Parse(data).Texture;
+            string? problem = current.Format != original.Format || current.Width != original.Width || current.Height != original.Height
+                ? CoreText.T("The project's file of this texture has another size or format than the original. Restore the original to edit it here.")
+                : null;
+            return new TextureEntry(file.GroupIndex, file.TableIndex, original, current, true, problem);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException)
+        {
+            return new TextureEntry(file.GroupIndex, file.TableIndex, original, original, true,
+                CoreText.F("The project's file of this texture cannot be read: {0}", ex.Message));
+        }
     }
 
     /// <summary>Lists the restore points, newest first.</summary>
