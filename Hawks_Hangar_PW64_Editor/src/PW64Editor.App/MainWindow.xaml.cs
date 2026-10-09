@@ -110,13 +110,20 @@ public partial class MainWindow : Window
     /// </summary>
     private async void OnClosing(object? sender, CancelEventArgs e)
     {
-        if (_closeConfirmed || !TextEditor.HasUnsavedChanges)
+        bool texts = TextEditor.HasUnsavedChanges;
+        bool saveFile = SaveEditor.HasUnsavedChanges;
+        if (_closeConfirmed || (!texts && !saveFile))
         {
             return;
         }
 
         // Cancel for now; close again once the user has decided (and saving is done).
         e.Cancel = true;
+        if (saveFile && !Ui.Confirm(this, "The open save file (tab \"Save File\") has unsaved changes. Close without saving them?"))
+        {
+            return;
+        }
+
         if (await ConfirmUnsavedChangesAsync("closing"))
         {
             _closeConfirmed = true;
@@ -552,6 +559,7 @@ public partial class MainWindow : Window
     private void ReloadProject()
     {
         TextEditor.Load(_session);
+        SaveEditor.Load(_session);
         UpdateProjectInfo();
     }
 

@@ -58,11 +58,45 @@
 
         <!-- One tab per editing feature. -->
         <TabControl x:Name="FeatureTabs" Margin="6,6,6,0" Padding="0">
-            <TabItem Header="Text">
+            <TabControl.Resources>
+                <Style x:Key="PlaceholderText" TargetType="TextBlock">
+                    <Setter Property="HorizontalAlignment" Value="Center" />
+                    <Setter Property="VerticalAlignment" Value="Center" />
+                    <Setter Property="MaxWidth" Value="420" />
+                    <Setter Property="TextWrapping" Value="Wrap" />
+                    <Setter Property="TextAlignment" Value="Center" />
+                    <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+                </Style>
+            </TabControl.Resources>
+            <TabItem Header="Instructions">
+                <TextBlock Style="{StaticResource PlaceholderText}" Text="Instructions for using the editor will be added here in a later version." />
+            </TabItem>
+            <TabItem Header="Text" IsSelected="True">
                 <views:TextTab x:Name="TextEditor" UnsavedChangesChanged="OnUnsavedChangesChanged" />
             </TabItem>
             <TabItem Header="Save File">
-                <views:SaveFileTab />
+                <views:SaveFileTab x:Name="SaveEditor" />
+            </TabItem>
+            <TabItem Header="Textures">
+                <TextBlock Style="{StaticResource PlaceholderText}" Text="Editing textures will be added here in a later version." />
+            </TabItem>
+            <TabItem Header="Music">
+                <TextBlock Style="{StaticResource PlaceholderText}" Text="Editing music will be added here in a later version." />
+            </TabItem>
+            <TabItem Header="Map">
+                <TextBlock Style="{StaticResource PlaceholderText}" Text="Editing maps will be added here in a later version." />
+            </TabItem>
+            <TabItem Header="Model">
+                <TextBlock Style="{StaticResource PlaceholderText}" Text="Editing models will be added here in a later version." />
+            </TabItem>
+            <TabItem Header="Objects">
+                <TextBlock Style="{StaticResource PlaceholderText}" Text="Editing objects will be added here in a later version." />
+            </TabItem>
+            <TabItem Header="Features">
+                <TextBlock Style="{StaticResource PlaceholderText}" Text="Editing features will be added here in a later version." />
+            </TabItem>
+            <TabItem Header="Code">
+                <TextBlock Style="{StaticResource PlaceholderText}" Text="Editing the game code will be added here in a later version." />
             </TabItem>
         </TabControl>
     </DockPanel>

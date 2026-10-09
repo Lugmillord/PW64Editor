@@ -7,7 +7,7 @@
         WindowStartupLocation="CenterOwner">
     <StackPanel Margin="20">
         <TextBlock TextWrapping="Wrap"
-                   Text="This project does not contain the following corrections of bugs in the game's code yet. They are recommended for every hack: without them, changed texts can make the game crash." />
+                   Text="This project does not contain the following corrections of bugs in the game's code yet. They are recommended for every hack, because the bugs can crash the game or damage data." />
 
         <ItemsControl x:Name="FixList" Margin="0,12,0,0">
             <ItemsControl.ItemTemplate>
