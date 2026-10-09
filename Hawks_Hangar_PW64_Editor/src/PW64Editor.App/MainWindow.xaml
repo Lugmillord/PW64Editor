@@ -83,7 +83,7 @@
                 <views:TexturesTab x:Name="TextureEditor" />
             </TabItem>
             <TabItem Header="Music">
-                <TextBlock Style="{StaticResource PlaceholderText}" Text="Editing music will be added here in a later version." />
+                <views:MusicTab x:Name="MusicEditor" />
             </TabItem>
             <TabItem Header="Map">
                 <TextBlock Style="{StaticResource PlaceholderText}" Text="Editing maps will be added here in a later version." />

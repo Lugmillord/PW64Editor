@@ -1,3 +1,4 @@
+using PW64Editor.Core.Audio;
 using PW64Editor.Core.Code;
 using PW64Editor.Core.FileSystem;
 using PW64Editor.Core.Localization;
@@ -307,6 +308,101 @@ public sealed class EditorSession
         }
 
         return TextCodec.ToChunkData(result.Codes, minimumSize);
+    }
+
+    // ----------------------------------------------------------------- music
+
+    private InstrumentBank? _instrumentBank;
+    private SequenceBank? _sequenceBank;
+
+    /// <summary>The game's instrument bank (read once).</summary>
+    /// <exception cref="InvalidDataException">The bank cannot be read.</exception>
+    public InstrumentBank InstrumentBank => _instrumentBank ??= ReadInstrumentBank();
+
+    private SequenceBank OriginalSequences => _sequenceBank ??= SequenceBank.Parse(
+        CleanRom.Data.AsSpan(AudioLayout.SequenceOffset, AudioLayout.SequenceSize));
+
+    private AudioLayout AudioLayout => Layout.Audio ?? throw new ProjectException(CoreText.T("This game version has no known music data."));
+
+    /// <summary>All songs with their channels and the project's changes.</summary>
+    public IReadOnlyList<SongInfo> LoadSongs()
+    {
+        var songs = new List<SongInfo>();
+        for (int i = 0; i < OriginalSequences.Sequences.Count; i++)
+        {
+            IReadOnlyList<SequenceChannel> channels = CompactSequence.Parse(OriginalSequences.Sequences[i]).GetChannels();
+            SongSettings settings = Project.Settings.Music.FirstOrDefault(m => m.Song == i) ?? new SongSettings { Song = i };
+            string name = i < MusicCatalog.SongNames.Count ? MusicCatalog.SongNames[i] : CoreText.F("Song {0}", i);
+            songs.Add(new SongInfo(i, name, channels, settings));
+        }
+
+        return songs;
+    }
+
+    /// <summary>The instrument a channel has before the song selects one.</summary>
+    public int DefaultProgram(int channel) =>
+        CompactSequence.DefaultProgram(channel, InstrumentBank.PercussionProgram, InstrumentBank.FirstProgram);
+
+    /// <summary>
+    /// Stores the changes of a song in the project (project.json). They are checked first: every
+    /// instrument must exist, and the song must be changeable that way.
+    /// </summary>
+    /// <exception cref="ProjectException">A change is not possible.</exception>
+    public void SaveSong(SongSettings settings)
+    {
+        if (settings.Song < 0 || settings.Song >= OriginalSequences.Sequences.Count)
+        {
+            throw new ProjectException(CoreText.F("The game has no song {0}.", settings.Song));
+        }
+
+        foreach (InstrumentChange change in settings.Instruments)
+        {
+            if (!InstrumentBank.Instruments.ContainsKey(change.Instrument))
+            {
+                throw new ProjectException(CoreText.F("Instrument {0} does not exist.", change.Instrument));
+            }
+        }
+
+        // Changes back to the original instrument are no changes.
+        settings.Instruments.RemoveAll(c => c.Instrument == (c.Original >= 0 ? c.Original : DefaultProgram(c.Channel)));
+        try
+        {
+            SequenceEditor.Apply(OriginalSequences.Sequences[settings.Song], settings);
+        }
+        catch (InvalidDataException ex)
+        {
+            throw new ProjectException(ex.Message, ex);
+        }
+
+        Project.Settings.Music.RemoveAll(m => m.Song == settings.Song);
+        if (!settings.IsEmpty)
+        {
+            Project.Settings.Music.Add(settings);
+            Project.Settings.Music.Sort((a, b) => a.Song.CompareTo(b.Song));
+        }
+
+        Project.Save();
+    }
+
+    /// <summary>Removes all changes of a song.</summary>
+    /// <returns>False if the song had no changes.</returns>
+    public bool RestoreSong(int song)
+    {
+        if (Project.Settings.Music.RemoveAll(m => m.Song == song) == 0)
+        {
+            return false;
+        }
+
+        Project.Save();
+        return true;
+    }
+
+    private InstrumentBank ReadInstrumentBank()
+    {
+        AudioLayout audio = AudioLayout;
+        return Audio.InstrumentBank.Parse(
+            CleanRom.Data.AsSpan(audio.BankOffset, audio.TableOffset - audio.BankOffset).ToArray(),
+            CleanRom.Data.AsSpan(audio.TableOffset, audio.EndOffset - audio.TableOffset).ToArray());
     }
 
     // ----------------------------------------------------------------- textures

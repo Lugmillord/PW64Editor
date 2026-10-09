@@ -46,6 +46,9 @@ public sealed class ProjectSettings
     /// removed again (only by returning to a restore point).
     /// </summary>
     public List<string> AppliedCodeFixes { get; set; } = [];
+
+    /// <summary>Changed instruments and silenced channels of songs (only songs with changes).</summary>
+    public List<Audio.SongSettings> Music { get; set; } = [];
 }
 
 /// <summary>

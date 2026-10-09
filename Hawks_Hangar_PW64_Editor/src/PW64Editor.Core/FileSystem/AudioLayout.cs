@@ -74,6 +74,9 @@ public sealed record AudioLayout(
             new(0x5550, 0x5554, "sample table base address"),
         ]);
 
+    /// <summary>Size of the music file (sequences) including its padding up to the instrument bank.</summary>
+    public int SequenceSize => BankOffset - SequenceOffset;
+
     /// <summary>
     /// All references together with the original address each one must contain.
     /// </summary>

@@ -659,6 +659,7 @@ public partial class MainWindow : Window
         TextEditor.Load(_session);
         SaveEditor.Load(_session);
         TextureEditor.Load(_session);
+        MusicEditor.Load(_session);
         UpdateProjectInfo();
     }
 

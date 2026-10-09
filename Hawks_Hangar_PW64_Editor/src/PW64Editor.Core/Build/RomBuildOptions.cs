@@ -14,6 +14,12 @@ namespace PW64Editor.Core.Build;
 /// None by default, so a plain rebuild stays byte-identical to the base ROM.</param>
 public sealed record RomBuildOptions(bool AlwaysRelocateAudio = false, bool AllowExpansion = false, IReadOnlyList<CodeFix>? CodeFixes = null)
 {
+    /// <summary>
+    /// A new music file (all sequences, see <see cref="Audio.SequenceBank"/>), or null to keep the
+    /// original. If it is larger than the original, the instrument bank behind it moves.
+    /// </summary>
+    public byte[]? SequenceFile { get; init; }
+
     /// <summary>The default settings.</summary>
     public static readonly RomBuildOptions Default = new();
 }

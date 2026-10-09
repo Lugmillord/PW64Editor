@@ -92,14 +92,11 @@ public static class RomBuilder
             WriteFileTable(output, newEntries, layout);
         }
 
-        // 2. Audio data (only if it moves). Copied from the base ROM, so it does not matter
-        //    that the files written below may overlap its original location.
-        if (placement.Relocated)
+        // 2. Audio data (only if it moves or the music changed). Copied from the base ROM, so it
+        //    does not matter that the files written below may overlap its original location.
+        if (placement.Relocated || options.SequenceFile is not null)
         {
-            AudioLayout audio = layout.Audio!;
-            output.AsSpan(audio.SequenceOffset, audio.Size).Fill(RomPadding);
-            baseRom.Data.AsSpan(audio.SequenceOffset, audio.Size).CopyTo(output.AsSpan(placement.AudioOffset));
-            PatchAudioReferences(output, audio, placement.AudioOffset);
+            WriteAudio(output, baseRom, layout.Audio!, placement, options.SequenceFile);
         }
 
         // 3. Game files, back to back.
@@ -144,13 +141,44 @@ public static class RomBuilder
         };
     }
 
-    /// <summary>Where the audio block goes and how large the ROM must be.</summary>
-    private readonly record struct AudioPlacement(int AudioOffset, bool Relocated, int RomSize);
+    /// <summary>Where the audio block goes, how much the music file grew and how large the ROM must be.</summary>
+    private readonly record struct AudioPlacement(int AudioOffset, bool Relocated, int RomSize, int SequenceGrowth = 0);
+
+    /// <summary>
+    /// Writes the audio block at its new place: the music file (new or original) and behind it the
+    /// instrument bank and the samples from the base ROM. Then the code references are updated.
+    /// </summary>
+    private static void WriteAudio(byte[] output, N64Rom baseRom, AudioLayout audio, AudioPlacement placement, byte[]? sequenceFile)
+    {
+        if (placement.Relocated)
+        {
+            output.AsSpan(audio.SequenceOffset, audio.Size).Fill(RomPadding);
+        }
+
+        int sequenceRegion = audio.SequenceSize + placement.SequenceGrowth;
+        Span<byte> sequences = output.AsSpan(placement.AudioOffset, sequenceRegion);
+        if (sequenceFile is null)
+        {
+            baseRom.Data.AsSpan(audio.SequenceOffset, audio.SequenceSize).CopyTo(sequences);
+        }
+        else
+        {
+            sequences.Clear();
+            sequenceFile.CopyTo(sequences);
+        }
+
+        int bankOffset = placement.AudioOffset + sequenceRegion;
+        baseRom.Data.AsSpan(audio.BankOffset, audio.EndOffset - audio.BankOffset).CopyTo(output.AsSpan(bankOffset));
+        PatchAudioReferences(output, audio, placement.AudioOffset, bankOffset);
+    }
 
     private static AudioPlacement PlanAudio(N64Rom baseRom, RomLayout layout, int fileSystemEnd, RomBuildOptions options)
     {
         AudioLayout? audio = layout.Audio;
         bool fitsInPlace = fileSystemEnd <= layout.FileSystemLimit;
+        int growth = audio is null || options.SequenceFile is null
+            ? 0
+            : Math.Max(0, AlignUp(options.SequenceFile.Length, AudioLayout.Alignment) - audio.SequenceSize);
 
         if (audio is null)
         {
@@ -169,13 +197,14 @@ public static class RomBuilder
             throw new InvalidOperationException("Inconsistent layout: the audio data must start at the file system limit.");
         }
 
-        if (fitsInPlace && !options.AlwaysRelocateAudio)
+        bool inPlace = fitsInPlace && !options.AlwaysRelocateAudio;
+        if (inPlace && growth == 0)
         {
             return new AudioPlacement(audio.SequenceOffset, false, baseRom.Size);
         }
 
-        int audioOffset = AlignUp(fileSystemEnd, AudioLayout.Alignment);
-        int requiredSize = audioOffset + audio.Size;
+        int audioOffset = inPlace ? audio.SequenceOffset : AlignUp(fileSystemEnd, AudioLayout.Alignment);
+        int requiredSize = audioOffset + audio.Size + growth;
         int romSize = baseRom.Size;
 
         if (requiredSize > romSize)
@@ -196,15 +225,16 @@ public static class RomBuilder
             }
         }
 
-        return new AudioPlacement(audioOffset, audioOffset != audio.SequenceOffset, romSize);
+        return new AudioPlacement(audioOffset, audioOffset != audio.SequenceOffset, romSize, growth);
     }
 
-    private static void PatchAudioReferences(byte[] output, AudioLayout audio, int newAudioOffset)
+    private static void PatchAudioReferences(byte[] output, AudioLayout audio, int newAudioOffset, int newBankOffset)
     {
-        int delta = newAudioOffset - audio.SequenceOffset;
-
         foreach ((MipsAddressReference reference, int originalAddress) in audio.AllReferences)
         {
+            int delta = originalAddress == audio.SequenceOffset
+                ? newAudioOffset - audio.SequenceOffset
+                : newBankOffset - audio.BankOffset;
             // Make sure the base ROM really contains the expected values before changing them.
             uint current = MipsAddressPatcher.ReadValue(output, reference);
             if (current != (uint)originalAddress)

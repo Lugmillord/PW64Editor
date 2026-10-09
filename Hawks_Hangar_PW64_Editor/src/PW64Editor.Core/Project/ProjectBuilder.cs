@@ -60,7 +60,8 @@ public static class ProjectBuilder
         RomBuildResult romBuild;
         try
         {
-            romBuild = RomBuilder.Build(cleanRom, files, layout, project.BuildOptions);
+            romBuild = RomBuilder.Build(cleanRom, files, layout,
+                project.BuildOptions with { SequenceFile = BuildMusic(project, cleanRom, layout) });
         }
         catch (InvalidDataException ex)
         {
@@ -114,6 +115,41 @@ public static class ProjectBuilder
     /// <summary>
     /// A text file with more texts than the game's tables hold would crash the game: refuse to build it.
     /// </summary>
+    /// <summary>
+    /// The music file with the project's changes of songs, or null if the project changes no song.
+    /// </summary>
+    /// <exception cref="ProjectException">A change cannot be made.</exception>
+    public static byte[]? BuildMusic(HackProject project, N64Rom cleanRom, RomLayout layout)
+    {
+        List<Audio.SongSettings> songs = project.Settings.Music.Where(s => !s.IsEmpty).ToList();
+        if (songs.Count == 0 || layout.Audio is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            Audio.SequenceBank bank = Audio.SequenceBank.Parse(
+                cleanRom.Data.AsSpan(layout.Audio.SequenceOffset, layout.Audio.SequenceSize));
+            var sequences = bank.Sequences.ToList();
+            foreach (Audio.SongSettings song in songs)
+            {
+                if (song.Song < 0 || song.Song >= sequences.Count)
+                {
+                    throw new ProjectException(CoreText.F("The project changes song {0}, which the game does not have.", song.Song));
+                }
+
+                sequences[song.Song] = Audio.SequenceEditor.Apply(sequences[song.Song], song);
+            }
+
+            return bank.With(sequences).Build();
+        }
+        catch (InvalidDataException ex)
+        {
+            throw new ProjectException(CoreText.F("The music could not be changed: {0}", ex.Message), ex);
+        }
+    }
+
     private static void CheckTextFile(HackProject project, GameFileSystem cleanFileSystem, List<GameFile> files)
     {
         GameFile originalText;
