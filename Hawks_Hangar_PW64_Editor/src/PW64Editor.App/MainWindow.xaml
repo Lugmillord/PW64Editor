@@ -85,6 +85,9 @@
             <TabItem Header="Music">
                 <views:MusicTab x:Name="MusicEditor" />
             </TabItem>
+            <TabItem Header="Missions">
+                <views:MissionsTab x:Name="MissionEditor" />
+            </TabItem>
             <TabItem Header="Map">
                 <TextBlock Style="{StaticResource PlaceholderText}" Text="Editing maps will be added here in a later version." />
             </TabItem>

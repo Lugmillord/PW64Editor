@@ -1,0 +1,92 @@
+<UserControl x:Class="PW64Editor.App.Views.MissionsTab"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:PW64Editor.App.Views">
+    <UserControl.Resources>
+        <Style x:Key="SectionTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,16,0,6" />
+        </Style>
+        <Style x:Key="Note" TargetType="TextBlock">
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+            <Setter Property="Margin" Value="0,2,0,2" />
+        </Style>
+    </UserControl.Resources>
+
+    <DockPanel Margin="10">
+        <!-- Mission selection, in the order of the game's menus. -->
+        <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+            <TextBlock Text="Vehicle:" VerticalAlignment="Center" Margin="0,0,6,0" />
+            <ComboBox x:Name="VehicleBox" Width="170" DisplayMemberPath="Text" SelectionChanged="OnVehicleChanged" />
+            <TextBlock Text="Test:" VerticalAlignment="Center" Margin="16,0,6,0" />
+            <ComboBox x:Name="TestBox" Width="380" DisplayMemberPath="Text" SelectionChanged="OnTestChanged" />
+        </WrapPanel>
+        <TextBlock x:Name="InfoText" DockPanel.Dock="Top" TextWrapping="Wrap" Foreground="{StaticResource MutedTextBrush}" />
+        <Border x:Name="WarningBox" DockPanel.Dock="Top" Background="#FFF4E0" BorderBrush="#E8B04B" BorderThickness="1"
+                Padding="8,5" Margin="0,6,0,0" Visibility="Collapsed">
+            <TextBlock x:Name="WarningText" TextWrapping="Wrap" Foreground="#6B4500" />
+        </Border>
+        <TextBlock x:Name="SourceText" DockPanel.Dock="Bottom" TextWrapping="Wrap" Margin="0,8,0,0"
+                   Foreground="{StaticResource MutedTextBrush}" />
+
+        <TabControl x:Name="SubTabs" Margin="0,8,0,0">
+            <!-- Title, task and hint: a second place to edit these texts, the same as in the Text tab. -->
+            <TabItem Header="Mission Statement">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Margin="10,6,16,6" MaxWidth="900" HorizontalAlignment="Left">
+                        <TextBlock Style="{StaticResource Note}"
+                                   Text="These are the same texts as in the Text tab: an edit here shows up there, and the other way round. They are saved together with the other texts (Ctrl+S)." />
+                        <TextBlock x:Name="StatementNote" Style="{StaticResource Note}" Visibility="Collapsed" />
+                        <local:TextEditorPanel x:Name="TitleEditor" ShowHeader="False" TextBoxHeight="44" Margin="0,4,0,0" />
+                        <local:TextEditorPanel x:Name="TaskEditor" ShowHeader="False" TextBoxHeight="110" />
+                        <local:TextEditorPanel x:Name="HintEditor" ShowHeader="False" TextBoxHeight="130" />
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- The points of the mission and the text of the mission screen ("…_S1"). -->
+            <TabItem Header="Point Distribution">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Margin="10,0,16,6" MaxWidth="900" HorizontalAlignment="Left">
+                        <TextBlock Text="Points" Style="{StaticResource SectionTitle}" />
+                        <TextBlock x:Name="PointsNote" Style="{StaticResource Note}" />
+                        <!-- One row per point row of the result sheet; filled in code. -->
+                        <Grid x:Name="PointsGrid" Margin="0,6,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" MinWidth="50" />
+                                <ColumnDefinition Width="Auto" MinWidth="170" />
+                                <ColumnDefinition Width="Auto" MinWidth="70" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                        </Grid>
+                        <TextBlock x:Name="SumText" FontWeight="SemiBold" Margin="0,6,0,0" />
+
+                        <TextBlock Text="Conditions and time limit" Style="{StaticResource SectionTitle}" />
+                        <TextBlock x:Name="ConditionText" TextWrapping="Wrap" />
+                        <TextBlock x:Name="TimeCurveText" TextWrapping="Wrap" Margin="0,6,0,0" />
+                        <TextBlock x:Name="TimeEventsText" TextWrapping="Wrap" Margin="0,6,0,0" />
+                        <TextBlock x:Name="DeductionText" TextWrapping="Wrap" Margin="0,6,0,0" />
+
+                        <TextBlock Text="Text on the mission screen" Style="{StaticResource SectionTitle}" />
+                        <TextBlock x:Name="ScreenTextNote" Style="{StaticResource Note}" />
+                        <local:TextEditorPanel x:Name="ScreenTextView" ShowHeader="False" IsReadOnly="True" TextBoxHeight="150" />
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+
+            <!-- The result sheet after the mission ("…_S2"). -->
+            <TabItem Header="Results">
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <StackPanel Margin="10,0,16,6" MaxWidth="900" HorizontalAlignment="Left">
+                        <TextBlock Text="Result sheet" Style="{StaticResource SectionTitle}" />
+                        <TextBlock x:Name="ResultRowsText" TextWrapping="Wrap" />
+                        <TextBlock x:Name="ResultTextNote" Style="{StaticResource Note}" Margin="0,8,0,0" />
+                        <local:TextEditorPanel x:Name="ResultTextView" ShowHeader="False" IsReadOnly="True" TextBoxHeight="150" />
+                    </StackPanel>
+                </ScrollViewer>
+            </TabItem>
+        </TabControl>
+    </DockPanel>
+</UserControl>

@@ -16,7 +16,9 @@ namespace PW64Editor.Core.FileSystem;
 /// <param name="Audio">Location of the audio data and its code references, or <c>null</c> if
 /// the audio cannot be moved (then the file system can never grow past
 /// <paramref name="FileSystemLimit"/>).</param>
-public sealed record RomLayout(int FileTableOffset, int FileSystemOffset, int FileSystemLimit, AudioLayout? Audio = null)
+/// <param name="Missions">Location of the mission tables in the game code, or <c>null</c> if unknown.</param>
+public sealed record RomLayout(int FileTableOffset, int FileSystemOffset, int FileSystemLimit, AudioLayout? Audio = null,
+    Missions.MissionLayout? Missions = null)
 {
     /// <summary>
     /// Layout of Pilotwings 64 (USA).
@@ -27,7 +29,8 @@ public sealed record RomLayout(int FileTableOffset, int FileSystemOffset, int Fi
         FileTableOffset: 0xDE720,
         FileSystemOffset: 0xDF5B0,
         FileSystemLimit: 0x618B70,
-        Audio: AudioLayout.PilotwingsUsa);
+        Audio: AudioLayout.PilotwingsUsa,
+        Missions: Core.Missions.MissionLayout.PilotwingsUsa);
 
     /// <summary>Bytes available for game files in the original layout, without moving the audio data.</summary>
     public int FileSystemCapacity => FileSystemLimit - FileSystemOffset;

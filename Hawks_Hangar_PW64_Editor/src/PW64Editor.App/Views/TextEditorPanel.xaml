@@ -1,0 +1,122 @@
+<UserControl x:Class="PW64Editor.App.Views.TextEditorPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:converters="clr-namespace:PW64Editor.App.Converters">
+    <UserControl.Resources>
+        <converters:LocalizedFormatConverter x:Key="Format" />
+
+        <!-- A warning or error line (TextIssue). -->
+        <DataTemplate x:Key="IssueTemplate">
+            <TextBlock TextWrapping="Wrap" Margin="0,2,0,0">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                        <Setter Property="Foreground" Value="#8A5A00" />
+                        <Setter Property="Text" Value="{Binding Message, Converter={StaticResource Format}, ConverterParameter='Warning: {0}'}" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsError}" Value="True">
+                                <Setter Property="Foreground" Value="#B3261E" />
+                                <Setter Property="Text" Value="{Binding Message, Converter={StaticResource Format}, ConverterParameter='Error: {0}'}" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <!-- The editor of one text: text box with the game's input rules, formatting buttons, checks and
+         the in-game preview. Used by the Text tab and the Missions tab; both edit the same TextRow. -->
+    <StackPanel>
+        <StackPanel x:Name="HeaderPanel">
+            <TextBlock x:Name="DetailName" FontSize="18" FontWeight="SemiBold" />
+            <TextBlock x:Name="DetailCategory" Margin="0,4,0,0" TextWrapping="Wrap" />
+            <TextBlock x:Name="DetailUsage" Margin="0,4,0,0" TextWrapping="Wrap"
+                       Foreground="{StaticResource MutedTextBrush}" />
+        </StackPanel>
+        <TextBlock x:Name="TextLabel" Text="Text" FontWeight="SemiBold" Margin="0,14,0,4" />
+
+        <!-- The text box, with a layer on top that briefly shows rejected characters in red.
+             The bar below it can be dragged to make the box taller or smaller. -->
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition x:Name="TextBoxRow" Height="190" MinHeight="40" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <TextBox x:Name="DetailText" FontFamily="Consolas" FontSize="13"
+                     TextWrapping="NoWrap" AcceptsReturn="True" AllowDrop="False"
+                     TextChanged="OnDetailTextChanged"
+                     PreviewTextInput="OnDetailPreviewTextInput"
+                     PreviewKeyDown="OnDetailPreviewKeyDown"
+                     HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" />
+            <Canvas x:Name="FlashLayer" IsHitTestVisible="False" />
+            <GridSplitter Grid.Row="1" Height="7" HorizontalAlignment="Stretch" ResizeDirection="Rows"
+                          ResizeBehavior="PreviousAndCurrent" Background="#E3E8ED"
+                          ToolTip="Drag to make the text box taller or smaller" />
+        </Grid>
+
+        <!-- Formatting and undo. -->
+        <WrapPanel x:Name="ButtonPanel" Margin="0,8,0,0">
+            <Button Content="Bold" Click="OnInsertBold" Padding="10,3" Margin="0,0,6,6"
+                    ToolTip="Makes the selected text bold (or inserts [b][/b])" />
+            <Button Content="Column position…" Click="OnInsertPosition" Padding="10,3" Margin="0,0,6,6"
+                    ToolTip="Inserts [x=…]: the rest of the line starts at this horizontal position" />
+            <Button Content="Code…" Click="OnInsertCode" Padding="10,3" Margin="0,0,6,6"
+                    ToolTip="Inserts a single code by its number, see the Codes list" />
+            <Button x:Name="UndoButton" Content="Undo changes" Click="OnUndoChanges" Padding="10,3" Margin="12,0,6,6"
+                    ToolTip="Back to the last saved version of this text" />
+            <Button x:Name="OriginalButton" Content="Restore original" Click="OnRestoreOriginal" Padding="10,3" Margin="0,0,6,6"
+                    ToolTip="Back to the text of the original game" />
+            <Button x:Name="RemoveButton" Content="Remove text" Click="OnRemoveText" Padding="10,3" Margin="12,0,6,6"
+                    ToolTip="Removes this added text. Its number becomes free for the next new text." />
+        </WrapPanel>
+
+        <!-- Only for added texts: the game does not check their length where they are used later. -->
+        <Border x:Name="CustomWarning" Background="#FFF4E0" BorderBrush="#E8B04B" BorderThickness="1"
+                Padding="8,5" Margin="0,4,0,0" Visibility="Collapsed">
+            <TextBlock TextWrapping="Wrap" Foreground="#6B4500"
+                       Text="Added text: it may have up to 10 lines, but the game does not check this. Make sure yourself that the text is not too long for the place where you will use it. The game does not show the text anywhere yet." />
+        </Border>
+
+        <!-- Short message about rejected input; disappears after a few seconds. -->
+        <TextBlock x:Name="InputMessage" Foreground="#B3261E" TextWrapping="Wrap" Margin="0,2,0,0"
+                   Visibility="Collapsed" />
+
+        <!-- Size information and problems. -->
+        <TextBlock x:Name="LayoutText" TextWrapping="Wrap" Margin="0,4,0,0"
+                   Foreground="{StaticResource MutedTextBrush}" />
+        <ItemsControl x:Name="IssueList" Margin="0,4,0,0" ItemTemplate="{StaticResource IssueTemplate}" />
+
+        <!-- In-game preview: the text drawn with the game's font on a rebuilt screen. -->
+        <DockPanel Margin="0,16,0,4">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                <CheckBox x:Name="PreviewAreaCheck" Content="Show room" IsChecked="True" VerticalAlignment="Center"
+                          Margin="0,0,10,0" Checked="OnPreviewOptionChanged" Unchecked="OnPreviewOptionChanged"
+                          ToolTip="Dashed yellow frame: the room the text has on this screen. Parts outside are drawn in red." />
+                <ComboBox x:Name="PreviewZoom" Width="70" SelectedIndex="0" SelectionChanged="OnPreviewOptionChanged"
+                          ToolTip="Size of the preview. Fit = as wide as the panel; 1× is the game's own resolution (320 × 240).">
+                    <ComboBoxItem Content="Fit" />
+                    <ComboBoxItem Content="1×" />
+                    <ComboBoxItem Content="2×" />
+                    <ComboBoxItem Content="3×" />
+                </ComboBox>
+            </StackPanel>
+            <TextBlock Text="In-game preview" FontWeight="SemiBold" VerticalAlignment="Center" />
+            <TextBlock x:Name="PreviewTitle" Margin="8,0,0,0" VerticalAlignment="Center"
+                       Foreground="{StaticResource MutedTextBrush}" TextTrimming="CharacterEllipsis" />
+        </DockPanel>
+
+        <!-- Scrolls sideways only, when a fixed zoom is wider than the panel.
+             Mouse wheel turns are passed on to the outer scroller (OnPreviewMouseWheel). -->
+        <ScrollViewer x:Name="PreviewScroller" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Disabled"
+                      Background="Black" PreviewMouseWheel="OnPreviewMouseWheel">
+            <!-- Nearest neighbor keeps the game's pixels sharp when enlarged. -->
+            <Image x:Name="PreviewImage" Stretch="Uniform" RenderOptions.BitmapScalingMode="NearestNeighbor"
+                   HorizontalAlignment="Center" />
+        </ScrollViewer>
+
+        <TextBlock x:Name="PreviewInfo" TextWrapping="Wrap" Margin="0,4,0,0" />
+        <ItemsControl x:Name="PreviewIssueList" Margin="0,2,0,0" ItemTemplate="{StaticResource IssueTemplate}" />
+        <TextBlock x:Name="PreviewNote" TextWrapping="Wrap" Margin="0,4,0,8" FontSize="11"
+                   Foreground="{StaticResource MutedTextBrush}" />
+    </StackPanel>
+</UserControl>

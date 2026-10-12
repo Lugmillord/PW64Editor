@@ -2,6 +2,7 @@ using PW64Editor.Core.Audio;
 using PW64Editor.Core.Code;
 using PW64Editor.Core.FileSystem;
 using PW64Editor.Core.Localization;
+using PW64Editor.Core.Missions;
 using PW64Editor.Core.Project;
 using PW64Editor.Core.Rom;
 using PW64Editor.Core.Text;
@@ -595,6 +596,47 @@ public sealed class EditorSession
                 CoreText.F("The project's file of this texture cannot be read: {0}", ex.Message));
         }
     }
+
+    // ----------------------------------------------------------------- missions
+
+    /// <summary>
+    /// Reads all missions (their current version in the project) with their texts and point rows.
+    /// The tables of the game code come from the clean ROM, because the editor does not change
+    /// them yet.
+    /// </summary>
+    public MissionCatalogResult LoadMissions()
+    {
+        Dictionary<int, FileOverride> overrides = Project.GetOverrides().ToDictionary(o => o.TableIndex);
+        var sources = new List<MissionSource>();
+        var problems = new List<string>();
+        foreach (GameFile file in CleanFileSystem.Files.Where(f => f.FileType == MissionFile.FormType))
+        {
+            byte[] data = file.Data;
+            bool fromProject = false;
+            if (overrides.TryGetValue(file.TableIndex, out FileOverride? replacement))
+            {
+                try
+                {
+                    data = File.ReadAllBytes(replacement.Path);
+                    fromProject = true;
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    problems.Add(CoreText.F("Mission file {0}: {1}", file.GroupIndex, ex.Message));
+                }
+            }
+
+            sources.Add(new MissionSource(file.TableIndex, file.GroupIndex, data, fromProject));
+        }
+
+        MissionTables? tables = Layout.Missions is { } layout ? new MissionTables(CleanRom.Data, layout) : null;
+        MissionCatalogResult result = MissionCatalog.Build(sources, tables);
+        return problems.Count == 0 ? result : result with { Problems = [.. problems, .. result.Problems] };
+    }
+
+    /// <summary>The medal limits of the game (from the clean ROM), or empty if unknown.</summary>
+    public IReadOnlyList<MedalLimits> LoadMedalLimits() =>
+        Layout.Missions is { } layout ? new MissionTables(CleanRom.Data, layout).MedalLimits() : [];
 
     /// <summary>Lists the restore points, newest first.</summary>
     public IReadOnlyList<BackupInfo> GetRestorePoints() => ProjectBackups.List(Project);

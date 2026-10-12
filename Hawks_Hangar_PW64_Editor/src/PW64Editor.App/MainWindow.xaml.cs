@@ -36,6 +36,7 @@ public partial class MainWindow : Window
     {
         InitializeComponent();
         _session = session;
+        MissionEditor.Connect(TextEditor);
         BuildLanguageMenu();
         ReloadProject();
 
@@ -242,6 +243,7 @@ public partial class MainWindow : Window
         if (dialog.CodeFixesApplied)
         {
             TextEditor.RefreshPreview(); // the preview takes the fixes into account
+            MissionEditor.RefreshPreview();
         }
 
         if (saved)
@@ -645,6 +647,7 @@ public partial class MainWindow : Window
         }, point =>
         {
             TextEditor.RefreshPreview();
+            MissionEditor.RefreshPreview();
             string backup = point is not null ? " " + L.F("Restore point {0} created before.", point.Name) : string.Empty;
             SetStatus(L.F("{0} code fix(es) applied, hack ROM rebuilt.", missing.Count) + backup);
         });
@@ -657,6 +660,7 @@ public partial class MainWindow : Window
     private void ReloadProject()
     {
         TextEditor.Load(_session);
+        MissionEditor.Load(_session);
         SaveEditor.Load(_session);
         TextureEditor.Load(_session);
         MusicEditor.Load(_session);

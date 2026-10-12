@@ -1,13 +1,9 @@
 using System.ComponentModel;
-using System.Globalization;
 using System.IO;
-using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
-using System.Windows.Input;
 using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using PW64Editor.App.Dialogs;
 using PW64Editor.App.Services;
@@ -25,7 +21,7 @@ namespace PW64Editor.App.Views;
 /// Edits are kept in memory until the main window saves them (see <see cref="SaveChanges"/>).
 /// The tab reports unsaved changes through <see cref="UnsavedChangesChanged"/>.
 /// </remarks>
-public partial class TextTab : UserControl
+public partial class TextTab : UserControl, ITextEditorHost
 {
     private ListCollectionView? _view;
     private GameTextLibrary? _library;
@@ -39,26 +35,43 @@ public partial class TextTab : UserControl
     /// <summary>Why there is no preview, if <see cref="_previewRenderer"/> is null.</summary>
     private string? _previewProblem;
 
-    /// <summary>Name of the text the preview picture currently shows.</summary>
-    private string? _previewName;
-
     /// <summary>The open project, to know which code fixes the preview has to take into account.</summary>
     private EditorSession? _session;
-
-    /// <summary>Set while the text box is filled by code, so that does not count as an edit.</summary>
-    private bool _updatingTextBox;
-
-    /// <summary>Removes the message about rejected input (and the red character) after a few seconds.</summary>
-    private readonly DispatcherTimer _flashTimer = new() { Interval = TimeSpan.FromSeconds(4) };
 
     public TextTab()
     {
         InitializeComponent();
-        _flashTimer.Tick += (_, _) => ClearFlash();
-
-        // Pasting goes through our own check, like typing.
-        DataObject.AddPastingHandler(DetailText, OnDetailPasting);
+        Editor.Attach(this);
     }
+
+    /// <summary>Raised after the texts were (re)loaded: the rows are new objects then.</summary>
+    public event EventHandler? TextsReloaded;
+
+    // ----------------------------------------------------------------- for the text editor panels
+
+    /// <inheritdoc />
+    public GameTextLibrary? Library => _library;
+
+    /// <inheritdoc />
+    public TextPreviewRenderer? PreviewRenderer => _previewRenderer;
+
+    /// <inheritdoc />
+    public string? PreviewProblem => _previewProblem;
+
+    /// <inheritdoc />
+    public EditorSession? Session => _session;
+
+    /// <inheritdoc />
+    public void OnTextEdited(TextRow row, bool wasUnsaved)
+    {
+        if (wasUnsaved != row.IsUnsaved)
+        {
+            UnsavedChangesChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    /// <summary>The text with this name, or null. Other tabs edit texts through these rows.</summary>
+    public TextRow? FindRow(string name) => _rowsByName.GetValueOrDefault(name);
 
     /// <summary>Raised when texts become unsaved or saved.</summary>
     public event EventHandler? UnsavedChangesChanged;
@@ -68,102 +81,6 @@ public partial class TextTab : UserControl
 
     /// <summary>Saved custom texts the user removed; they disappear from the file when saving.</summary>
     private readonly List<TextRow> _removedRows = [];
-
-    /// <summary>One line of the table. Public properties, because WPF data binding reads them.</summary>
-    public sealed partial class TextRow : INotifyPropertyChanged
-    {
-        private string _markup;
-        private string _savedMarkup;
-
-        public TextRow(GameText text, string originalMarkup)
-        {
-            Text = text;
-            _markup = text.Markup;
-            _savedMarkup = text.Markup;
-            OriginalMarkup = originalMarkup;
-        }
-
-        public event PropertyChangedEventHandler? PropertyChanged;
-
-        public GameText Text { get; }
-
-        public int Index => Text.Index;
-
-        public string Name => Text.Name;
-
-        public string Area => L.T(Text.Category.Area);
-
-        public int AreaOrder => Text.Category.AreaOrder;
-
-        public string Section => L.T(Text.Category.Section);
-
-        public int SectionOrder => Text.Category.SectionOrder;
-
-        public string SortKey => Text.Category.SortKey;
-
-        /// <summary>The text of the original game.</summary>
-        public string OriginalMarkup { get; }
-
-        /// <summary>The text as currently shown and edited.</summary>
-        public string Markup
-        {
-            get => _markup;
-            set
-            {
-                _markup = value;
-                NotifyAll();
-            }
-        }
-
-        /// <summary>The text as last saved in the project (or loaded from the game).</summary>
-        public string SavedMarkup
-        {
-            get => _savedMarkup;
-            set
-            {
-                _savedMarkup = value;
-                NotifyAll();
-            }
-        }
-
-        /// <summary>True for a text added in this session and not saved yet.</summary>
-        public bool IsNew { get; init; }
-
-        /// <summary>True for texts added by the user (they come after the original texts).</summary>
-        public bool IsCustom => Text.IsCustom;
-
-        public bool IsUnsaved => IsNew || _markup != _savedMarkup;
-
-        public bool DiffersFromOriginal => _markup != OriginalMarkup;
-
-        /// <summary>The text on one line, without markup, for the table.</summary>
-        public string Preview => ToPreview(_markup);
-
-        /// <summary>● for unsaved edits, ✎ for saved changes compared to the original game.</summary>
-        public string StatusMark => IsUnsaved ? "●" : IsCustom ? "+" : DiffersFromOriginal ? "✎" : string.Empty;
-
-        public string? StatusText => IsNew ? L.T("Added, not saved yet") : IsUnsaved ? L.T("Changed, not saved yet")
-            : IsCustom ? L.T("Added text") : DiffersFromOriginal ? L.T("Changed compared to the original game") : null;
-
-        private void NotifyAll()
-        {
-            foreach (string name in new[] { nameof(Markup), nameof(SavedMarkup), nameof(Preview), nameof(StatusMark), nameof(StatusText), nameof(IsUnsaved) })
-            {
-                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
-            }
-        }
-
-        /// <summary>Turns markup into a single readable line: no tags, line breaks shown as ⏎.</summary>
-        private static string ToPreview(string markup)
-        {
-            string text = markup.Replace("[b]", string.Empty).Replace("[/b]", string.Empty).Replace("[nonl]", string.Empty);
-            text = PositionTag().Replace(text, "  ");
-            return text.Trim('\n').Replace("\n", "  ⏎  ");
-        }
-
-        [GeneratedRegex(@"\[x=\d+(,y=\d+)?\]")]
-        private static partial Regex PositionTag();
-    }
 
     /// <summary>
     /// Loads the texts of a project (its own copy of the text file, or the original).
@@ -190,6 +107,7 @@ public partial class TextTab : UserControl
             ShowDetails(null);
             SourceText.Text = L.F("The texts could not be read: {0}", ex.Message);
             UnsavedChangesChanged?.Invoke(this, EventArgs.Empty);
+            TextsReloaded?.Invoke(this, EventArgs.Empty);
             return;
         }
 
@@ -227,6 +145,7 @@ public partial class TextTab : UserControl
             ? L.F("{0} texts from the project, {1} changed compared to the original game (marked ✎){2}. Unsaved edits are marked ●.", _rows.Count, changed, added)
             : L.F("{0} texts from the original game. Edited texts are marked ● until saved.", _rows.Count);
         UnsavedChangesChanged?.Invoke(this, EventArgs.Empty);
+        TextsReloaded?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>
@@ -242,7 +161,7 @@ public partial class TextTab : UserControl
 
         foreach (TextRow row in _rows.Where(r => r.IsUnsaved))
         {
-            if (TextValidator.Validate(_library.Codec, row.Markup, row.OriginalMarkup, MaxLines(row), row.Name).HasErrors)
+            if (TextValidator.Validate(_library.Codec, row.Markup, row.OriginalMarkup, row.MaxLines, row.Name).HasErrors)
             {
                 SearchBox.Text = string.Empty;
                 TextGrid.SelectedItem = row;
@@ -307,12 +226,6 @@ public partial class TextTab : UserControl
         UnsavedChangesChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    /// <summary>The description of a text's category in the editor's language.</summary>
-    private static string DescriptionOf(TextCategory category) =>
-        category.DescriptionPattern.Length > 0
-            ? L.F(category.DescriptionPattern, category.DescriptionArgs.Select(a => (object?)L.T(a)).ToArray())
-            : L.T(category.Description);
-
     private static string OriginalMarkupOf(GameTextLibrary original, GameText text) =>
         text.Index < original.Texts.Count && original.Texts[text.Index].Name == text.Name
             ? original.Texts[text.Index].Markup
@@ -351,7 +264,7 @@ public partial class TextTab : UserControl
             || row.Area.Contains(_search, StringComparison.OrdinalIgnoreCase)
             || row.Section.Contains(_search, StringComparison.OrdinalIgnoreCase)
             || row.Text.Category.Description.Contains(_search, StringComparison.OrdinalIgnoreCase)
-            || DescriptionOf(row.Text.Category).Contains(_search, StringComparison.OrdinalIgnoreCase);
+            || TextEditorPanel.DescriptionOf(row.Text.Category).Contains(_search, StringComparison.OrdinalIgnoreCase);
     }
 
     private void OnShowCodes(object sender, RoutedEventArgs e)
@@ -435,271 +348,7 @@ public partial class TextTab : UserControl
     {
         DetailPanel.Visibility = row is null ? Visibility.Collapsed : Visibility.Visible;
         NoSelectionText.Visibility = row is null ? Visibility.Visible : Visibility.Collapsed;
-        if (row is null)
-        {
-            return;
-        }
-
-        TextCategory category = row.Text.Category;
-        DetailName.Text = row.Name;
-        DetailCategory.Text = category.Description.Length > 0
-            ? L.F("Text {0}: {1} › {2} › {3}", row.Index, L.T(category.Area), L.T(category.Section), DescriptionOf(category))
-            : L.F("Text {0}: {1} › {2}", row.Index, L.T(category.Area), L.T(category.Section));
-        DetailUsage.Text = row.IsCustom
-            ? L.T("Added text. The game finds it by its number or its name, but does not use it anywhere yet.")
-            : category.SourceFiles.Count > 0
-                ? L.F("Used in the game code: {0}", string.Join(", ", category.SourceFiles.Select(Path.GetFileName)))
-                : L.T("Looked up by a name the game builds while running.");
-        if (TextNumberSlots.Find(row.Name) is { } slot)
-        {
-            DetailUsage.Text += " " + L.F("The game writes a number into {0} of this text.", TextNumberSlots.Describe(slot));
-        }
-
-        CustomWarning.Visibility = row.IsCustom ? Visibility.Visible : Visibility.Collapsed;
-        RemoveButton.Visibility = row.IsCustom ? Visibility.Visible : Visibility.Collapsed;
-
-        ClearFlash();
-        _updatingTextBox = true;
-        DetailText.Text = row.Markup;
-        _updatingTextBox = false;
-
-        UpdateValidation(row);
-    }
-
-    // ----------------------------------------------------------------- input rules
-    //
-    // The text box only accepts what the game can show:
-    // - characters the font does not have are rejected (shown in red for a few seconds),
-    // - a line never gets longer than the game can draw: a line break is inserted automatically,
-    // - a text never gets more lines than its screen has room for (TextLimits).
-    // Everything else (selecting, copying, cutting, undo, keyboard navigation) is the
-    // normal behavior of the WPF TextBox. Changes are made through SelectedText, so they
-    // stay part of the TextBox's undo history.
-
-    /// <summary>Characters that may be typed besides the font's own: the brackets and '=' of tags.</summary>
-    private const string TagCharacters = "[]=";
-
-    /// <summary>
-    /// Most lines this text may have: the room the game's screen offers (see TextLimits),
-    /// or more if the saved text already has more lines (so it can still be shortened).
-    /// </summary>
-    private static int MaxLines(TextRow row) =>
-        Math.Max(row.IsCustom ? CustomTexts.MaxLines : TextLimits.GetMaxLines(row.Name, row.OriginalMarkup),
-            TextWrapper.CountLines(row.SavedMarkup));
-
-    private bool IsAllowed(char c) =>
-        _library is not null
-        && (c == '\n' || TagCharacters.Contains(c) || _library.Font.TryGetGlyph(c, false, out _) || _library.Font.TryGetGlyph(c, true, out _));
-
-    private void OnDetailPreviewTextInput(object sender, TextCompositionEventArgs e)
-    {
-        if (SelectedRow is null || e.Text.Length == 0)
-        {
-            return;
-        }
-
-        // Let the TextBox handle normal typing itself (it then wraps in OnDetailTextChanged),
-        // and only step in when something has to be rejected.
-        if (e.Text.All(IsAllowed) && FitsLineLimit(e.Text))
-        {
-            return;
-        }
-
-        e.Handled = true;
-        InsertChecked(e.Text);
-    }
-
-    private void OnDetailPreviewKeyDown(object sender, KeyEventArgs e)
-    {
-        // Enter is not text input in WPF; insert our own "\n" so the text never contains "\r\n".
-        if (e.Key == Key.Enter && SelectedRow is not null)
-        {
-            e.Handled = true;
-            InsertChecked("\n");
-        }
-    }
-
-    private void OnDetailPasting(object sender, DataObjectPastingEventArgs e)
-    {
-        e.CancelCommand();
-        if (e.DataObject.GetData(DataFormats.UnicodeText) is string pasted)
-        {
-            InsertChecked(pasted.Replace("\r\n", "\n").Replace('\r', '\n').Replace('\t', ' '));
-        }
-    }
-
-    /// <summary>
-    /// Inserts text at the cursor (replacing the selection), leaving out characters the font does
-    /// not have, and refusing it completely if the text would get too many lines.
-    /// </summary>
-    private void InsertChecked(string input)
-    {
-        if (SelectedRow is not { } row)
-        {
-            return;
-        }
-
-        int position = DetailText.SelectionStart;
-        string allowed = new(input.Where(IsAllowed).ToArray());
-        char? rejected = input.FirstOrDefault(c => !IsAllowed(c)) is char r and not '\0' ? r : null;
-
-        if (!FitsLineLimit(allowed))
-        {
-            Flash(L.F("This text can have at most {0} line(s); the game's screen has no room for more.", MaxLines(row)), null, position);
-            return;
-        }
-
-        if (allowed.Length > 0)
-        {
-            DetailText.SelectedText = allowed;
-            DetailText.SelectionLength = 0;
-            DetailText.CaretIndex = position + allowed.Length;
-        }
-
-        if (rejected is { } c)
-        {
-            int count = input.Count(ch => !IsAllowed(ch));
-            Flash(count == 1
-                    ? L.F("'{0}' is not in the game's font.", c)
-                    : L.F("{0} characters are not in the game's font and were left out.", count),
-                c,
-                position + allowed.Length);
-        }
-
-        DetailText.Focus();
-    }
-
-    /// <summary>True if inserting the text at the cursor keeps the line count within the limit (after wrapping).</summary>
-    private bool FitsLineLimit(string insert)
-    {
-        if (SelectedRow is not { } row)
-        {
-            return true;
-        }
-
-        string current = DetailText.Text.Replace("\r\n", "\n");
-        int start = Math.Min(DetailText.SelectionStart, current.Length);
-        int length = Math.Min(DetailText.SelectionLength, current.Length - start);
-        string candidate = current.Remove(start, length).Insert(start, new string(insert.Where(IsAllowed).ToArray()));
-        return TextWrapper.CountLines(TextWrapper.Wrap(candidate).Text) <= MaxLines(row);
-    }
-
-    private void OnDetailTextChanged(object sender, TextChangedEventArgs e)
-    {
-        if (_updatingTextBox || SelectedRow is not { } row)
-        {
-            return;
-        }
-
-        // Break lines that got too long (typing, deleting a line break, inserting a code).
-        (_, IReadOnlyList<WrapOperation> operations) = TextWrapper.Wrap(DetailText.Text);
-        if (operations.Count > 0)
-        {
-            ApplyWraps(operations);
-        }
-
-        bool wasUnsaved = row.IsUnsaved;
-        row.Markup = DetailText.Text.Replace("\r\n", "\n");
-        UpdateValidation(row);
-
-        if (wasUnsaved != row.IsUnsaved)
-        {
-            UnsavedChangesChanged?.Invoke(this, EventArgs.Empty);
-        }
-    }
-
-    /// <summary>Applies automatic line breaks while keeping the cursor at the same character.</summary>
-    private void ApplyWraps(IReadOnlyList<WrapOperation> operations)
-    {
-        int caret = DetailText.CaretIndex;
-        _updatingTextBox = true;
-        try
-        {
-            foreach (WrapOperation op in operations)
-            {
-                DetailText.Select(op.Index, op.ReplacesSpace ? 1 : 0);
-                DetailText.SelectedText = "\n";
-                if (!op.ReplacesSpace && op.Index < caret)
-                {
-                    caret++;
-                }
-            }
-
-            DetailText.SelectionLength = 0;
-            DetailText.CaretIndex = Math.Min(caret, DetailText.Text.Length);
-        }
-        finally
-        {
-            _updatingTextBox = false;
-        }
-    }
-
-    /// <summary>
-    /// Shows a short message, and optionally the rejected character in red where it would have
-    /// appeared. Both disappear after a few seconds.
-    /// </summary>
-    private void Flash(string message, char? character, int index)
-    {
-        ClearFlash();
-        InputMessage.Text = message;
-        InputMessage.Visibility = Visibility.Visible;
-
-        if (character is { } c)
-        {
-            Rect place = DetailText.GetRectFromCharacterIndex(Math.Min(index, DetailText.Text.Length));
-            if (!place.IsEmpty)
-            {
-                var glyph = new TextBlock
-                {
-                    Text = c.ToString(),
-                    Foreground = Brushes.White,
-                    Background = new SolidColorBrush(Color.FromRgb(0xB3, 0x26, 0x1E)),
-                    FontFamily = DetailText.FontFamily,
-                    FontSize = DetailText.FontSize,
-                    FontWeight = FontWeights.Bold,
-                };
-                Canvas.SetLeft(glyph, place.X);
-                Canvas.SetTop(glyph, place.Y);
-                FlashLayer.Children.Add(glyph);
-            }
-        }
-
-        _flashTimer.Start();
-    }
-
-    private void ClearFlash()
-    {
-        _flashTimer.Stop();
-        FlashLayer.Children.Clear();
-        InputMessage.Visibility = Visibility.Collapsed;
-    }
-
-    private void UpdateValidation(TextRow row)
-    {
-        UndoButton.IsEnabled = row.IsUnsaved && !row.IsNew;
-        OriginalButton.IsEnabled = row.DiffersFromOriginal && !row.IsCustom;
-
-        if (_library is null)
-        {
-            return;
-        }
-
-        int maxLines = MaxLines(row);
-        TextValidation result = TextValidator.Validate(_library.Codec, row.Markup, row.OriginalMarkup, maxLines, row.Name);
-        IssueList.ItemsSource = result.Issues;
-
-        if (result.Layout is { } layout && result.OriginalLayout is { } original)
-        {
-            LayoutText.Text =
-                L.F("{0} of {1} possible line(s), original {2}. Longest line {3} characters, original {4}, allowed maximum {5}.",
-                    layout.Lines, maxLines, original.Lines, layout.LongestPiece, original.LongestPiece, TextValidator.MaxCharactersPerPiece);
-        }
-        else
-        {
-            LayoutText.Text = string.Empty;
-        }
-
-        UpdatePreview(row);
+        Editor.Show(row);
     }
 
     // ----------------------------------------------------------------- CSV export and import
@@ -755,7 +404,7 @@ public partial class TextTab : UserControl
         {
             string content = TextCsv.Decode(File.ReadAllBytes(dialog.FileName));
             Dictionary<int, TextImportTarget> targets = _rows.ToDictionary(
-                r => r.Index, r => new TextImportTarget(r.Index, r.Name, r.OriginalMarkup, r.Markup, MaxLines(r)));
+                r => r.Index, r => new TextImportTarget(r.Index, r.Name, r.OriginalMarkup, r.Markup, r.MaxLines));
             result = TextCsv.Import(content, _library.Codec, targets);
         }
         catch (Exception ex) when (Ui.IsExpectedError(ex))
@@ -849,14 +498,15 @@ public partial class TextTab : UserControl
             SetAllExpanded(true);
             TextGrid.SelectedItem = row;
             TextGrid.ScrollIntoView(row);
-            DetailText.Focus();
+            Editor.FocusText();
         }, DispatcherPriority.Loaded);
         UnsavedChangesChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    private void OnRemoveText(object sender, RoutedEventArgs e)
+    /// <inheritdoc />
+    public void RemoveText(TextRow row)
     {
-        if (SelectedRow is not { IsCustom: true } row)
+        if (!row.IsCustom)
         {
             return;
         }
@@ -908,109 +558,11 @@ public partial class TextTab : UserControl
     public void RefreshPreview()
     {
         UpdateAddTextButton();
-        if (SelectedRow is { } row && DetailPanel.Visibility == Visibility.Visible)
-        {
-            UpdatePreview(row);
-        }
-    }
-
-    /// <summary>Draws the selected text the way the game shows it.</summary>
-    private void UpdatePreview(TextRow row)
-    {
-        if (_library is null || _previewRenderer is null)
-        {
-            PreviewImage.Source = null;
-            PreviewTitle.Text = string.Empty;
-            PreviewInfo.Text = _previewProblem ?? string.Empty;
-            PreviewIssueList.ItemsSource = null;
-            PreviewNote.Text = string.Empty;
-            return;
-        }
-
-        TextEncodeResult encoded = _library.Codec.Encode(row.Markup);
-        if (!encoded.Success)
-        {
-            // Keep the last picture of this text, so it does not flicker while typing a tag.
-            if (_previewName != row.Name)
-            {
-                PreviewImage.Source = null;
-            }
-
-            PreviewInfo.Text = L.T("The text has errors (see above). The preview shows the last version without errors.");
-            PreviewIssueList.ItemsSource = null;
-            return;
-        }
-
-        bool safeText = _session?.Project.Settings.AppliedCodeFixes.Contains(CodeFixes.SafeText.Id) == true;
-        var options = new TextPreviewOptions(ShowTextArea: PreviewAreaCheck.IsChecked == true, SafeTextFix: safeText);
-        TextPreview preview;
-        try
-        {
-            preview = _previewRenderer.Render(row.Name, row.Text.Category, encoded.Codes, OtherTextCodes, options);
-        }
-        catch (Exception ex)
-        {
-            // The preview is only a help; a problem in it must never stop the user from editing.
-            PreviewImage.Source = null;
-            PreviewInfo.Text = L.F("The preview could not be drawn: {0}", ex.Message);
-            PreviewIssueList.ItemsSource = null;
-            return;
-        }
-
-        BitmapSource bitmap = BitmapSource.Create(TextPreview.Width, TextPreview.Height, 96, 96,
-            PixelFormats.Bgra32, null, preview.Pixels, TextPreview.Width * 4);
-        bitmap.Freeze();
-        PreviewImage.Source = bitmap;
-        _previewName = row.Name;
-
-        PreviewTitle.Text = preview.ScreenTitle;
-        PreviewNote.Text = preview.ScreenNote;
-        PreviewIssueList.ItemsSource = preview.Issues;
-        PreviewInfo.Text = DescribeRoom(preview);
-    }
-
-    /// <summary>A sentence about the widest line and the room on the screen.</summary>
-    private static string DescribeRoom(TextPreview preview)
-    {
-        string pieces = L.F("Pieces on this screen: {0} of {1}.", preview.PiecesOnScreen, TextValidator.MaxPiecesPerFrame);
-        if (preview.WidestLine is not { } widest || widest.Width == 0)
-        {
-            return pieces;
-        }
-
-        string text = L.F("Widest line: line {0}, {1} pixels (ends at x = {2}).", widest.Line, widest.Width, widest.Right);
-        if (preview.TextArea is { } area)
-        {
-            int left = area.Right - widest.Right;
-            text += left >= 0
-                ? " " + L.F("Room up to x = {0}: {1} pixel(s) left.", area.Right, left)
-                : " " + L.F("Room up to x = {0}: {1} pixel(s) too wide.", area.Right, -left);
-        }
-
-        return $"{text} {pieces}";
-    }
-
-    /// <summary>
-    /// Passes mouse wheel turns over the preview on to the scroller of the whole panel. The
-    /// preview's own scroller only scrolls sideways, but would otherwise swallow the wheel.
-    /// </summary>
-    private void OnPreviewMouseWheel(object sender, MouseWheelEventArgs e)
-    {
-        if (e.Handled)
-        {
-            return;
-        }
-
-        e.Handled = true;
-        DetailPanel.RaiseEvent(new MouseWheelEventArgs(e.MouseDevice, e.Timestamp, e.Delta)
-        {
-            RoutedEvent = MouseWheelEvent,
-            Source = sender,
-        });
+        Editor.RefreshPreview();
     }
 
     /// <summary>The current version of another text, encoded, for screens that show several texts.</summary>
-    private IReadOnlyList<ushort>? OtherTextCodes(string name)
+    public IReadOnlyList<ushort>? OtherTextCodes(string name)
     {
         if (_library is null || !_rowsByName.TryGetValue(name, out TextRow? row))
         {
@@ -1019,112 +571,6 @@ public partial class TextTab : UserControl
 
         TextEncodeResult encoded = _library.Codec.Encode(row.Markup);
         return encoded.Success ? encoded.Codes : null;
-    }
-
-    private void OnPreviewOptionChanged(object sender, RoutedEventArgs e)
-    {
-        // Also raised while the XAML is loaded, before all elements exist.
-        if (PreviewImage is null || PreviewScroller is null || PreviewZoom is null)
-        {
-            return;
-        }
-
-        int zoom = PreviewZoom.SelectedIndex;
-        if (zoom <= 0)
-        {
-            // Fit: as wide as the panel, keeping the 4:3 shape (the height follows the width).
-            PreviewScroller.HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled;
-            PreviewImage.Stretch = Stretch.Uniform;
-            PreviewImage.Width = double.NaN;
-            PreviewImage.Height = double.NaN;
-        }
-        else
-        {
-            // Fixed size; if it is wider than the panel, the preview scrolls sideways.
-            PreviewScroller.HorizontalScrollBarVisibility = ScrollBarVisibility.Auto;
-            PreviewImage.Stretch = Stretch.Fill;
-            PreviewImage.Width = TextPreview.Width * zoom;
-            PreviewImage.Height = TextPreview.Height * zoom;
-        }
-
-        if (SelectedRow is { } row && DetailPanel.Visibility == Visibility.Visible)
-        {
-            UpdatePreview(row);
-        }
-    }
-
-    private void OnInsertBold(object sender, RoutedEventArgs e)
-    {
-        string selected = DetailText.SelectedText;
-        int start = DetailText.SelectionStart;
-        DetailText.SelectedText = $"[b]{selected}[/b]";
-
-        // Put the cursor inside the tags when nothing was selected, behind them otherwise.
-        DetailText.SelectionLength = 0;
-        DetailText.CaretIndex = selected.Length == 0 ? start + 3 : start + selected.Length + 7;
-        DetailText.Focus();
-    }
-
-    private void OnInsertPosition(object sender, RoutedEventArgs e)
-    {
-        string? input = InputDialog.Ask(Window.GetWindow(this), L.T("Column position"),
-            L.T("Horizontal position where the rest of the line starts (0 = left edge, the screen is 320 wide):"), "212");
-        if (input is null)
-        {
-            return;
-        }
-
-        if (!int.TryParse(input.Trim(), NumberStyles.None, CultureInfo.InvariantCulture, out int x) || x > 320)
-        {
-            Ui.ShowError(Window.GetWindow(this), L.F("\"{0}\" is not a position between 0 and 320.", input));
-            return;
-        }
-
-        if (x is TextCodec.CodeLineBreak or TextCodec.CodeEnd)
-        {
-            Ui.ShowError(Window.GetWindow(this),
-                L.F("The game cannot use position {0}: while loading, it turns 254 and 255 into its line break and end codes. Use {1} or {2}.", x, x - 2, x + 2));
-            return;
-        }
-
-        InsertAtCursor($"[x={x}]");
-    }
-
-    private void OnInsertCode(object sender, RoutedEventArgs e)
-    {
-        string? input = InputDialog.Ask(Window.GetWindow(this), L.T("Insert code"),
-            L.T("Code number in hex, for example 5C (see the Codes list):"), string.Empty);
-        if (input is null)
-        {
-            return;
-        }
-
-        string hex = input.Trim().Replace("0x", string.Empty, StringComparison.OrdinalIgnoreCase).TrimStart('#');
-        if (!int.TryParse(hex, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out int code) || code > 0xFC)
-        {
-            Ui.ShowError(Window.GetWindow(this), L.F("\"{0}\" is not a code between 00 and FC. Line breaks are entered with Enter.", input));
-            return;
-        }
-
-        InsertAtCursor($"[#{code:X2}]");
-    }
-
-    private void InsertAtCursor(string text) => InsertChecked(text);
-
-    private void OnUndoChanges(object sender, RoutedEventArgs e)
-    {
-        if (SelectedRow is { } row)
-        {
-            DetailText.Text = row.SavedMarkup; // triggers OnDetailTextChanged
-        }
-    }
-
-    private void OnRestoreOriginal(object sender, RoutedEventArgs e)
-    {
-        if (SelectedRow is { } row)
-        {
-            DetailText.Text = row.OriginalMarkup;
-        }
     }
 
     private static IEnumerable<T> FindChildren<T>(DependencyObject parent)
