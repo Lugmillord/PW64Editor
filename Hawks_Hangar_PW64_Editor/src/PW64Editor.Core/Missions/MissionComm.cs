@@ -76,7 +76,7 @@ public enum MissionObjectKind
     HoverPad = 8,       // HPAD
     BallTarget = 9,     // BTGT
     Photo = 10,         // PHTS
-    MechaHawk = 11,     // FALC
+    MecaHawk = 11,     // FALC
     Formation = 12,     // SDFM
     CannonTarget = 13,  // CNTG
     HopperGoal = 14,    // HOPD

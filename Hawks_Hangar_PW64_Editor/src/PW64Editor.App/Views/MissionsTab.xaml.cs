@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using PW64Editor.App.Services;
 using PW64Editor.Core.Missions;
 using PW64Editor.Core.SaveGame;
@@ -10,16 +11,42 @@ using PW64Editor.Core.Workspace;
 namespace PW64Editor.App.Views;
 
 /// <summary>
-/// The tab "Missions": one test of the game at a time. Title, task and hint can be edited (they are
-/// the same texts as in the Text tab); points, conditions, time limit and the point texts are shown
-/// as stored in the mission. Editing them follows in later steps.
+/// The tab "Missions": one test of the game at a time. Title, task and hint are the same texts as
+/// in the Text tab. Points, rows of the result sheet, time limit, conditions and footnote are
+/// edited here; as soon as the points of a mission change, the editor writes its point texts
+/// ("…_S1" and "…_S2"). Changes are kept until the user saves (Ctrl+S), together with the texts.
 /// </summary>
 public partial class MissionsTab : UserControl
 {
     private TextTab? _texts;
+    private EditorSession? _session;
     private IReadOnlyList<MissionInfo> _missions = [];
     private IReadOnlyList<string> _problems = [];
+    private readonly Dictionary<TestId, MissionDraft> _drafts = [];
     private bool _filling;
+
+    /// <summary>Set while the controls are filled by code, so that does not count as an edit.</summary>
+    private bool _showing;
+
+    /// <summary>Tag of the box of the points table that should get the focus after the table was rebuilt.</summary>
+    private string? _focusAfterRefresh;
+
+    /// <summary>Missions whose time curve is edited point by point (also when it has a simple shape).</summary>
+    private readonly HashSet<TestId> _customTime = [];
+
+    /// <summary>The background of each line of the points table (marks where a dragged row lands).</summary>
+    private readonly List<Border> _rowBackgrounds = [];
+
+    /// <summary>Data format of a dragged row of the points table.</summary>
+    private const string RowDragFormat = "HawksHangar.MissionPointRow";
+
+    /// <summary>How the time curve is edited.</summary>
+    private enum TimeMode
+    {
+        Plateau,
+        Target,
+        Custom,
+    }
 
     public MissionsTab()
     {
@@ -29,19 +56,63 @@ public partial class MissionsTab : UserControl
         HintEditor.Caption = L.T("Hint");
         ScreenTextView.Caption = L.T("Text");
         ResultTextView.Caption = L.T("Text");
+
+        foreach (TextBox box in ValueBoxes)
+        {
+            box.LostKeyboardFocus += (_, _) => OnValueCommitted(box);
+            box.KeyDown += (_, e) =>
+            {
+                if (e.Key == Key.Enter)
+                {
+                    OnValueCommitted(box);
+                }
+            };
+        }
+
+        TimeShapeBox.ItemsSource = new[]
+        {
+            new ChoiceItem<TimeMode>(TimeMode.Plateau, L.T("Full points, then fewer and fewer")),
+            new ChoiceItem<TimeMode>(TimeMode.Target, L.T("As close as possible to a target time")),
+            new ChoiceItem<TimeMode>(TimeMode.Custom, L.T("Custom points")),
+        };
+        TimeShapeBox.DisplayMemberPath = nameof(ChoiceItem<int>.Text);
+        ConditionBox.ItemsSource = new[]
+        {
+            new ChoiceItem<MissionCondition>(MissionCondition.None, L.T("No condition (objects also count after a crash)")),
+            new ChoiceItem<MissionCondition>(MissionCondition.CrashGivesZero, L.T("A crash gives 0 points in total")),
+            new ChoiceItem<MissionCondition>(MissionCondition.AllObjects, L.T("Time points only if all objects are cleared")),
+            new ChoiceItem<MissionCondition>(MissionCondition.SomeObjects, L.T("Time points only if at least this many objects are cleared:")),
+            new ChoiceItem<MissionCondition>(MissionCondition.MinimumAltitude, L.T("Time points only if this altitude was reached:")),
+        };
+        ConditionBox.DisplayMemberPath = nameof(ChoiceItem<int>.Text);
     }
 
+    /// <summary>Raised when changes become unsaved or saved.</summary>
+    public event EventHandler? UnsavedChangesChanged;
+
+    /// <summary>True if a mission was changed and not saved yet.</summary>
+    public bool HasUnsavedChanges => _drafts.Values.Any(d => d.IsChanged);
+
     /// <summary>A vehicle of the first list.</summary>
-    /// <param name="Vehicle">The vehicle.</param>
-    /// <param name="Text">Its name.</param>
     public sealed record VehicleItem(Vehicle Vehicle, string Text);
 
     /// <summary>A test of the second list.</summary>
-    /// <param name="Mission">The mission.</param>
-    /// <param name="Text">Class, test and title, e.g. "Beginner · Test 1 – Novice Rings".</param>
     public sealed record TestItem(MissionInfo Mission, string Text);
 
+    /// <summary>An entry of a choice list.</summary>
+    public sealed record ChoiceItem<T>(T Value, string Text);
+
+    /// <summary>A source of the row lists.</summary>
+    public sealed record SourceItem(PointSource Source, string Text);
+
     private MissionInfo? SelectedMission => (TestBox.SelectedItem as TestItem)?.Mission;
+
+    private MissionDraft? SelectedDraft => SelectedMission is { } mission ? Draft(mission) : null;
+
+    private IEnumerable<TextBox> ValueBoxes =>
+        [FullUntilBox, ZeroAtBox, TargetTimeBox, WindowBox, ZeroDistanceBox, LandNowBox, ConditionValueBox, HitCostBox, OutOfAreaBox, ReactionBox];
+
+    private IEnumerable<TextEditorPanel> Panels => [TitleEditor, TaskEditor, HintEditor, ScreenTextView, ResultTextView];
 
     /// <summary>
     /// Connects the tab to the Text tab, which owns the texts. The editors of this tab edit the
@@ -54,6 +125,11 @@ public partial class MissionsTab : UserControl
         {
             panel.Attach(texts);
         }
+
+        // Point texts are written by this tab from the points; they cannot be edited in the Text tab.
+        texts.LockReason = name => PointTextNames().Contains(name)
+            ? L.T("The Missions tab writes this text from the points of the mission. Change the points there.")
+            : null;
 
         // After saving or reloading, the Text tab has new row objects (and maybe new titles).
         texts.TextsReloaded += (_, _) => RefreshTexts();
@@ -68,12 +144,13 @@ public partial class MissionsTab : UserControl
         }
     }
 
-    private IEnumerable<TextEditorPanel> Panels => [TitleEditor, TaskEditor, HintEditor, ScreenTextView, ResultTextView];
-
-    /// <summary>Reads the missions of a project. Errors are shown inside the tab.</summary>
+    /// <summary>Reads the missions of a project. Unsaved changes are dropped (the main window asks first).</summary>
     public void Load(EditorSession session)
     {
+        _session = session;
         TestId? selected = SelectedMission?.Id;
+        _drafts.Clear();
+        _customTime.Clear();
         try
         {
             MissionCatalogResult result = session.LoadMissions();
@@ -86,6 +163,13 @@ public partial class MissionsTab : UserControl
             _problems = [L.F("The missions could not be read: {0}", ex.Message)];
         }
 
+        // The point texts of changed missions follow their points, also if the texts were
+        // discarded or changed elsewhere in the meantime.
+        foreach (MissionInfo mission in _missions.Where(m => m.Settings?.GenerateTexts == true))
+        {
+            WriteTexts(Draft(mission));
+        }
+
         _filling = true;
         VehicleBox.ItemsSource = MissionCatalog.VehicleOrder
             .Where(v => _missions.Any(m => m.Id.Vehicle == v))
@@ -93,7 +177,7 @@ public partial class MissionsTab : UserControl
             .ToList();
         _filling = false;
 
-        SourceText.Text = L.F("{0} missions. Title, task and hint can be edited now; editing the points, conditions and point texts follows in a later version.", _missions.Count);
+        SourceText.Text = L.F("{0} missions. Changes are saved together with the texts (Ctrl+S).", _missions.Count);
 
         Vehicle vehicle = selected?.Vehicle ?? Vehicle.HangGlider;
         VehicleBox.SelectedItem = ((IEnumerable<VehicleItem>)VehicleBox.ItemsSource).FirstOrDefault(v => v.Vehicle == vehicle)
@@ -107,7 +191,39 @@ public partial class MissionsTab : UserControl
         {
             ShowMission(null);
         }
+
+        UnsavedChangesChanged?.Invoke(this, EventArgs.Empty);
     }
+
+    /// <summary>Saves all changed missions into the project.</summary>
+    /// <returns>Number of saved missions.</returns>
+    /// <exception cref="PW64Editor.Core.Project.ProjectException">A mission cannot be saved.</exception>
+    public int SaveChanges(EditorSession session)
+    {
+        List<MissionDraft> changed = _drafts.Values.Where(d => d.IsChanged).ToList();
+        foreach (MissionDraft draft in changed)
+        {
+            session.SaveMission(draft.Mission, draft.Comm, draft.SettingsToSave());
+        }
+
+        if (changed.Count > 0)
+        {
+            Load(session);
+        }
+
+        return changed.Count;
+    }
+
+    /// <summary>Drops all unsaved changes of missions.</summary>
+    public void DiscardChanges()
+    {
+        if (_session is not null)
+        {
+            Load(_session);
+        }
+    }
+
+    // ----------------------------------------------------------------- selection
 
     /// <summary>Shows the current texts again: new titles in the list, new rows in the editors.</summary>
     private void RefreshTexts()
@@ -155,39 +271,216 @@ public partial class MissionsTab : UserControl
     private string TestText(MissionInfo mission)
     {
         string title = mission.TitleTextName is { } name && _texts?.FindRow(name) is { } row ? PlainText(row.Markup) : mission.File.Name;
-        return $"{MissionCatalog.ClassName(mission.Id.Vehicle, mission.Id.Class)} · {MissionCatalog.TestName(mission.Id.Vehicle, mission.Id.Test)} – {title}";
+        string changed = _drafts.TryGetValue(mission.Id, out MissionDraft? draft) && draft.IsChanged ? " ●" : string.Empty;
+        return $"{MissionCatalog.ClassName(mission.Id.Vehicle, mission.Id.Class)} · {MissionCatalog.TestName(mission.Id.Vehicle, mission.Id.Test)} – {title}{changed}";
     }
 
     /// <summary>A text without tags, on one line.</summary>
     private static string PlainText(string markup) =>
         Regex.Replace(markup.Replace("[b]", string.Empty).Replace("[/b]", string.Empty), @"\[[^\]]*\]", " ").Replace('\n', ' ').Trim();
 
+    // ----------------------------------------------------------------- drafts and texts
+
+    private MissionDraft Draft(MissionInfo mission)
+    {
+        if (!_drafts.TryGetValue(mission.Id, out MissionDraft? draft))
+        {
+            draft = new MissionDraft(mission, Row(mission.MissionScreenTextName)?.Markup);
+            _drafts[mission.Id] = draft;
+        }
+
+        return draft;
+    }
+
+    /// <summary>The current COMM block of another mission (its draft, or as loaded).</summary>
+    private MissionComm? OtherComm(TestId id) =>
+        _drafts.TryGetValue(id, out MissionDraft? draft) ? draft.Comm : _missions.FirstOrDefault(m => m.Id == id)?.File.Comm;
+
+    /// <summary>Names of the point texts of all missions that the editor can write (not Birdman).</summary>
+    private HashSet<string> PointTextNames()
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (MissionInfo mission in _missions.Where(m => !m.IsBirdman))
+        {
+            foreach (string? name in new[] { mission.MissionScreenTextName, mission.ResultSheetTextName })
+            {
+                if (name is not null)
+                {
+                    names.Add(name);
+                }
+            }
+        }
+
+        return names;
+    }
+
+    /// <summary>Names of the point texts the editor writes (missions whose points were changed).</summary>
+    private HashSet<string> GeneratedTextNames()
+    {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        foreach (MissionInfo mission in _missions)
+        {
+            bool generated = _drafts.TryGetValue(mission.Id, out MissionDraft? draft)
+                ? draft.Settings.GenerateTexts
+                : mission.Settings?.GenerateTexts == true;
+            if (generated)
+            {
+                if (mission.MissionScreenTextName is { } screen)
+                {
+                    names.Add(screen);
+                }
+
+                if (mission.ResultSheetTextName is { } sheet)
+                {
+                    names.Add(sheet);
+                }
+            }
+        }
+
+        return names;
+    }
+
+    /// <summary>Writes the point texts of a mission from its points into the Text tab's texts (not saved yet).</summary>
+    private void WriteTexts(MissionDraft draft)
+    {
+        if (!draft.Settings.GenerateTexts || draft.Rows.Count == 0)
+        {
+            return;
+        }
+
+        SetText(draft.Mission.MissionScreenTextName, draft.MissionScreenText(OtherComm));
+        SetText(draft.Mission.ResultSheetTextName, draft.ResultSheetText(OtherComm));
+    }
+
+    private void SetText(string? name, string markup)
+    {
+        if (Row(name) is { } row && row.Markup != markup)
+        {
+            bool wasUnsaved = row.IsUnsaved;
+            row.Markup = markup;
+            _texts!.OnTextEdited(row, wasUnsaved);
+        }
+    }
+
+    /// <summary>After a change: texts, display and the unsaved state.</summary>
+    private void Changed(MissionDraft draft)
+    {
+        WriteTexts(draft);
+        if (TestBox.SelectedItem is TestItem item && VehicleBox.SelectedItem is VehicleItem vehicle)
+        {
+            // The list shows ● for changed missions.
+            FillTests(vehicle.Vehicle);
+            _filling = true;
+            TestBox.SelectedItem = ((IEnumerable<TestItem>)TestBox.ItemsSource).First(t => t.Mission.Id == item.Mission.Id);
+            _filling = false;
+        }
+
+        ShowMission(draft.Mission);
+        UnsavedChangesChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnRestoreOriginal(object sender, RoutedEventArgs e)
+    {
+        if (SelectedDraft is not { } draft || _session is null)
+        {
+            return;
+        }
+
+        if (!Ui.Confirm(Window.GetWindow(this)!, L.F("Set points, conditions, time limit and point texts of {0} back to the original game?",
+                MissionCatalog.Label(draft.Mission.Id))))
+        {
+            return;
+        }
+
+        try
+        {
+            draft.RestoreOriginal(_session.OriginalMissionComm(draft.Mission));
+            _customTime.Remove(draft.Mission.Id);
+        }
+        catch (Exception ex) when (Ui.IsExpectedError(ex))
+        {
+            Ui.ShowError(Window.GetWindow(this)!, ex.Message);
+            return;
+        }
+
+        // The point texts go back to the original too (unless another changed mission shares them).
+        foreach (string? name in new[] { draft.Mission.MissionScreenTextName, draft.Mission.ResultSheetTextName })
+        {
+            if (Row(name) is { } row && !GeneratedTextNames().Contains(row.Name))
+            {
+                SetText(name, row.OriginalMarkup);
+            }
+        }
+
+        Changed(draft);
+    }
+
     // ----------------------------------------------------------------- one mission
 
     private void ShowMission(MissionInfo? mission)
     {
-        ShowWarnings(mission);
-        if (mission is null)
+        _showing = true;
+        try
         {
-            InfoText.Text = _missions.Count == 0 ? L.T("No missions.") : string.Empty;
-            foreach (TextEditorPanel panel in Panels)
+            ShowWarnings(mission);
+            if (mission is null)
             {
-                panel.Show(null);
+                InfoText.Text = _missions.Count == 0 ? L.T("No missions.") : string.Empty;
+                foreach (TextEditorPanel panel in Panels)
+                {
+                    panel.Show(null);
+                }
+
+                PointsGrid.Children.Clear();
+                PointsGrid.RowDefinitions.Clear();
+                RestoreButton.IsEnabled = false;
+                return;
             }
 
-            PointsGrid.Children.Clear();
-            PointsGrid.RowDefinitions.Clear();
+            MissionDraft draft = Draft(mission);
+            RestoreButton.IsEnabled = !mission.IsBirdman;
+            InfoText.Text = L.F("Mission file {0} · island: {1} · texts: {2}", mission.FileNumber, MissionCatalog.IslandName(mission.Island),
+                mission.File.TextBase.Length > 0 ? mission.File.TextBase : L.T("none"))
+                + (mission.FromProject ? " · " + L.T("changed in the project") : string.Empty)
+                + (draft.IsChanged ? " · " + L.T("changes not saved yet") : string.Empty);
+
+            ShowStatement(mission);
+            ShowPoints(draft);
+            ShowTime(draft);
+            ShowAltitude(draft);
+            ShowConditions(draft);
+            ShowResults(draft);
+        }
+        finally
+        {
+            _showing = false;
+        }
+
+        RestoreFocus();
+    }
+
+    /// <summary>The points table is rebuilt after a change: give the focus back to the box the user went to.</summary>
+    private void RestoreFocus()
+    {
+        if (_focusAfterRefresh is not { } tag)
+        {
             return;
         }
 
-        InfoText.Text = L.F("Mission file {0} · island: {1} · texts: {2}", mission.FileNumber, MissionCatalog.IslandName(mission.Island),
-            mission.File.TextBase.Length > 0 ? mission.File.TextBase : L.T("none"))
-            + (mission.FromProject ? " · " + L.T("changed in the project") : string.Empty);
-
-        ShowStatement(mission);
-        ShowPoints(mission);
-        ShowResults(mission);
+        _focusAfterRefresh = null;
+        IEnumerable<TextBox> boxes = PointsGrid.Children.OfType<TextBox>()
+            .Concat(RingTypes.Children.OfType<TextBox>())
+            .Concat(CurveBoxes(TimeCurvePanel))
+            .Concat(CurveBoxes(AltitudeCurvePanel));
+        if (boxes.FirstOrDefault(b => Equals(b.Tag, tag)) is { } target)
+        {
+            Dispatcher.BeginInvoke(new Action(() => target.Focus()));
+        }
     }
+
+    /// <summary>The boxes of a curve table (see <see cref="CurveEditor"/>).</summary>
+    private static IEnumerable<TextBox> CurveBoxes(Panel host) =>
+        host.Children.OfType<StackPanel>().SelectMany(p => p.Children.OfType<Grid>()).SelectMany(g => g.Children.OfType<TextBox>());
 
     private void ShowWarnings(MissionInfo? mission)
     {
@@ -234,142 +527,317 @@ public partial class MissionsTab : UserControl
         panel.Show(row);
     }
 
-    private void ShowPoints(MissionInfo mission)
+    // ----------------------------------------------------------------- points
+
+    private void ShowPoints(MissionDraft draft)
     {
         PointsGrid.Children.Clear();
         PointsGrid.RowDefinitions.Clear();
-        MissionComm comm = mission.File.Comm;
+        _rowBackgrounds.Clear();
+        MissionInfo mission = draft.Mission;
+        RingPanel.Visibility = Visibility.Collapsed;
 
         if (mission.IsBirdman)
         {
             PointsNote.Text = L.T("Birdman has no score sheet in the original game: its missions are free flights and show the text BD_ALL_S1 (\"There's no score\"). The points it computes are saved, but never shown.");
             SumText.Text = string.Empty;
+            SumWarning.Visibility = Visibility.Collapsed;
+            return;
         }
-        else
+
+        PointsNote.Text = draft.CanChangeSources
+            ? L.T("The rows of the result sheet, from top to bottom (at most 4). Drag a row by its handle (⠿) to move it. For points from a curve, the number changes the curve; for points from objects, it is the number the texts show (the game counts the objects).")
+            : L.T("The four targets of the level. Each target has its own test; here you can change the points of this target.");
+
+        IReadOnlyList<MissionPointRow> rows = draft.EvaluateRows(OtherComm);
+        AddHeader();
+        for (int i = 0; i < rows.Count; i++)
         {
-            PointsNote.Text = L.T("The rows of the result sheet, from top to bottom, with the most points the mission data gives for each. \"Text\" is the number the mission screen text shows.");
-            List<int> textNumbers = TextNumbers(mission.MissionScreenTextName);
-            AddPointRow(0, L.T("Row"), L.T("Source"), L.T("Points"), L.T("Text"), L.T("Where the points come from"), header: true);
-            for (int i = 0; i < mission.Rows.Count; i++)
+            AddRow(draft, i, rows[i]);
+        }
+
+        if (draft.CanChangeSources && rows.Count < MissionTextGenerator.MaxRows)
+        {
+            AddRow(draft, rows.Count, null);
+        }
+
+        int sum = rows.Select(draft.TextPoints).Sum();
+        SumText.Text = L.F("Total: {0} points.", sum);
+        var warnings = new List<string>();
+        if (sum != 100)
+        {
+            warnings.Add(sum > 100
+                ? L.F("The total is {0}; the game counts at most 100 points.", sum)
+                : L.F("The total is {0}, not 100: a perfect run gives fewer than 100 points.", sum));
+        }
+
+        for (int i = 0; i < rows.Count; i++)
+        {
+            if (rows[i].Kind == PointValueKind.AllObjects && rows[i].Value is { } objects && objects != draft.TextPoints(rows[i]))
             {
-                MissionPointRow row = mission.Rows[i];
-                string text = i < textNumbers.Count ? textNumbers[i].ToString(CultureInfo.CurrentCulture) : "–";
-                AddPointRow(i + 1, (i + 1).ToString(CultureInfo.CurrentCulture), PointSources.Name(row.Source),
-                    row.Value?.ToString(CultureInfo.CurrentCulture) ?? "?", text, Origin(mission, row), header: false,
-                    differs: row.Value is { } v && i < textNumbers.Count && v != textNumbers[i]);
+                warnings.Add(L.F("{0}: the texts show {1}, all objects together give {2}. This is right if not all of them can be reached (linked rings, a required count).",
+                    PointSources.Name(rows[i].Source), draft.TextPoints(rows[i]), objects));
             }
-
-            SumText.Text = mission.AllRowsKnown
-                ? L.F("Sum: {0} points (the game counts at most 100).", mission.KnownRowSum)
-                : L.F("Sum of the known rows: {0} points; the game computes the others while playing.", mission.KnownRowSum);
         }
 
-        ConditionText.Text = comm.Condition switch
-        {
-            MissionCondition.None => L.T("Condition: none. Objects also count after a crash."),
-            MissionCondition.CrashGivesZero => L.T("Condition: a crash gives 0 points in total."),
-            MissionCondition.AllObjects => L.T("Condition: time points only if all objects are cleared."),
-            MissionCondition.SomeObjects => L.F("Condition: time points only if at least {0} objects are cleared.", comm.RequiredObjects),
-            MissionCondition.MinimumAltitude => L.F("Condition: time points only if an altitude of {0} was reached.", comm.MinimumAltitude),
-            _ => L.F("Condition: unknown value {0}.", (int)comm.Condition),
-        };
+        SumWarning.Text = string.Join("\n", warnings);
+        SumWarning.Visibility = warnings.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
 
-        ScoreCurve time = comm.GetCurve(ScoreCurveKind.Time);
-        TimeCurveText.Text = time.GivesPoints
-            ? L.F("Time points: {0}.", string.Join(" · ", time.Points.Select(p => L.F("{0} → {1}", FormatTime(p.X), FormatNumber(p.Y)))))
-            : L.T("Time points: none.");
-
-        var events = new List<string>();
-        if (comm.LandNowTime > 0)
-        {
-            events.Add(L.F("After {0}, \"Land now\" is shown and the mission objects are removed.", FormatTime(comm.LandNowTime)));
-        }
-
-        if (comm.HardEndTime > 0)
-        {
-            events.Add(L.F("After {0}, the mission ends at once.", FormatTime(comm.HardEndTime)));
-        }
-
-        TimeEventsText.Text = events.Count > 0 ? string.Join("\n", events) : L.T("No \"Land now\" time and no hard end time.");
-
-        var deductions = new List<string>();
-        if (comm.HitDeduction != 0)
-        {
-            deductions.Add(L.F("Each hit costs {0} point(s).", -comm.HitDeduction));
-        }
-
-        if (mission.Id.Vehicle == Vehicle.JumbleHopper && comm.OutOfAreaDeduction != 0)
-        {
-            deductions.Add(L.F("Each time the hopper leaves the area costs {0} point(s).", FormatNumber(comm.OutOfAreaDeduction)));
-        }
-
-        if (!mission.IsBirdman)
-        {
-            deductions.Add(L.F("Above {0} points the pilot cheers at the end.", comm.ReactionThreshold));
-        }
-
-        DeductionText.Text = string.Join("\n", deductions);
-
+        ShowRingTypes(draft);
         ShowPointText(ScreenTextView, ScreenTextNote, mission.MissionScreenTextName, mission.SharesMissionScreenTextWith,
-            L.T("The game has no mission screen text for this mission."));
+            L.T("The game has no mission screen text for this mission."), draft);
     }
 
-    private void ShowResults(MissionInfo mission)
+    private void AddHeader()
     {
-        if (mission.IsBirdman)
+        PointsGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        string[] headers = [L.T("Row"), L.T("Source"), L.T("Points"), L.T("Where the points come from")];
+        for (int c = 0; c < headers.Length; c++)
         {
-            ResultRowsText.Text = L.T("Birdman has no result sheet in the original game.");
+            var block = new TextBlock { Text = headers[c], FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 2, 14, 4) };
+            Grid.SetColumn(block, c);
+            PointsGrid.Children.Add(block);
+        }
+    }
+
+    /// <summary>A line of the points table; <paramref name="row"/> null is the line that adds a row.</summary>
+    private void AddRow(MissionDraft draft, int index, MissionPointRow? row)
+    {
+        int gridRow = PointsGrid.RowDefinitions.Count;
+        PointsGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+
+        // Background of the whole line; it marks the place where a dragged row would land.
+        var background = new Border { Background = System.Windows.Media.Brushes.Transparent };
+        Grid.SetColumnSpan(background, 4);
+        Place(background, gridRow, 0);
+        _rowBackgrounds.Add(background);
+
+        var numberPanel = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 2, 14, 2) };
+        if (row is not null && draft.CanChangeSources && draft.Rows.Count > 1)
+        {
+            // The handle to drag the row to another place.
+            var grip = new TextBlock
+            {
+                Text = "⠿",
+                FontSize = 16,
+                Cursor = Cursors.SizeNS,
+                Background = System.Windows.Media.Brushes.Transparent,
+                Foreground = (System.Windows.Media.Brush)FindResource("MutedTextBrush"),
+                Margin = new Thickness(0, 0, 6, 0),
+                VerticalAlignment = VerticalAlignment.Center,
+                ToolTip = L.T("Drag to move this row up or down"),
+            };
+            int from = index;
+            grip.MouseLeftButtonDown += (_, e) =>
+            {
+                e.Handled = true;
+                DragDrop.DoDragDrop(grip, new DataObject(RowDragFormat, from), DragDropEffects.Move);
+                MarkDropTarget(null);
+            };
+            numberPanel.Children.Add(grip);
+        }
+
+        numberPanel.Children.Add(new TextBlock
+        {
+            Text = row is null ? "+" : (index + 1).ToString(CultureInfo.CurrentCulture),
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        Place(numberPanel, gridRow, 0);
+
+        if (draft.CanChangeSources)
+        {
+            var sources = new List<SourceItem> { new(PointSource.None, row is null ? L.T("(add a row)") : PointSources.Name(PointSource.None)) };
+            sources.AddRange(MissionCatalog.AvailableSources(draft.Vehicle)
+                .Where(s => s == row?.Source || !draft.Rows.Contains(s))
+                .Select(s => new SourceItem(s, PointSources.Name(s))));
+            var box = new ComboBox
+            {
+                ItemsSource = sources,
+                DisplayMemberPath = nameof(SourceItem.Text),
+                Width = 180,
+                Margin = new Thickness(0, 2, 14, 2),
+            };
+            box.SelectedItem = sources.FirstOrDefault(s => s.Source == (row?.Source ?? PointSource.None));
+            box.SelectionChanged += (_, _) =>
+            {
+                if (!_showing && box.SelectedItem is SourceItem item)
+                {
+                    // The table is rebuilt afterwards, which removes this list; do that after its event.
+                    Dispatcher.BeginInvoke(new Action(() => OnSourceChosen(draft, index, item.Source)));
+                }
+            };
+            Place(box, gridRow, 1);
         }
         else
         {
-            bool deductionRow = mission.Id.Vehicle is not (Vehicle.HangGlider or Vehicle.Cannonball or Vehicle.SkyDiving);
-            ResultRowsText.Text = L.F("The result sheet shows these rows, from top to bottom: {0}.", string.Join(", ", mission.Rows.Select(r => PointSources.Name(r.Source))))
-                + " " + (deductionRow
-                    ? L.T("Below them come \"Points Deducted\" and the total.")
-                    : L.T("Below them comes the total (this vehicle has no \"Points Deducted\" row)."));
+            Place(new TextBlock { Text = PointSources.Name(row!.Source), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 2, 14, 2) }, gridRow, 1);
         }
 
-        ShowPointText(ResultTextView, ResultTextNote, mission.ResultSheetTextName, mission.SharesResultSheetTextWith,
-            L.T("The game has no result sheet text for this mission."));
-    }
-
-    private void ShowPointText(TextEditorPanel panel, TextBlock note, string? name, IReadOnlyList<TestId> sharedWith, string missing)
-    {
-        TextRow? row = Row(name);
-        panel.Caption = name is null ? L.T("Text") : L.F("Text ({0})", name);
-        panel.Show(row);
-        panel.Visibility = row is null ? Visibility.Collapsed : Visibility.Visible;
-
-        var lines = new List<string>
-        {
-            L.T("Shown here as it is; in a later version the editor writes this text from the points."),
-        };
         if (row is null)
         {
-            lines.Add(name is null ? missing : L.F("The game has no text {0}.", name));
+            return;
         }
 
-        if (sharedWith.Count > 0)
+        int points = draft.TextPoints(row);
+        var pointsBox = new TextBox
         {
-            lines.Add(L.F("{0} other mission(s) use the same text: {1}.", sharedWith.Count, string.Join(", ", sharedWith.Select(TestLabel))));
+            Text = points.ToString(CultureInfo.CurrentCulture),
+            Width = 60,
+            Margin = new Thickness(0, 2, 14, 2),
+            IsEnabled = draft.CanSetRowPoints(index),
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Tag = $"points{index}",
+        };
+        void Commit()
+        {
+            if (_showing || !pointsBox.IsEnabled)
+            {
+                return;
+            }
+
+            if (!int.TryParse(pointsBox.Text.Trim(), NumberStyles.Integer, CultureInfo.CurrentCulture, out int value) || value is < 0 or > 126)
+            {
+                pointsBox.Text = points.ToString(CultureInfo.CurrentCulture);
+                Ui.ShowError(Window.GetWindow(this)!, L.T("Points are whole numbers from 0 to 126 (the game stores at most 126 per test)."));
+                return;
+            }
+
+            if (value != points)
+            {
+                draft.SetRowPoints(index, value, OtherComm);
+                Changed(draft);
+            }
         }
 
-        note.Text = string.Join("\n", lines);
+        pointsBox.LostKeyboardFocus += (_, e) =>
+        {
+            _focusAfterRefresh = (e.NewFocus as FrameworkElement)?.Tag as string;
+            Commit();
+        };
+        pointsBox.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Enter)
+            {
+                Commit();
+            }
+        };
+        Place(pointsBox, gridRow, 2);
+
+        var origin = new TextBlock
+        {
+            Text = Origin(draft, row),
+            TextWrapping = TextWrapping.Wrap,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = (System.Windows.Media.Brush)FindResource("MutedTextBrush"),
+            Margin = new Thickness(0, 2, 0, 2),
+        };
+        Place(origin, gridRow, 3);
     }
 
-    private static string TestLabel(TestId id) =>
-        $"{Vehicles.Name(id.Vehicle)} {MissionCatalog.ClassName(id.Vehicle, id.Class)} {MissionCatalog.TestName(id.Vehicle, id.Test)}";
+    private void Place(UIElement element, int row, int column)
+    {
+        Grid.SetRow(element, row);
+        Grid.SetColumn(element, column);
+        PointsGrid.Children.Add(element);
+    }
+
+    // ----------------------------------------------------------------- moving rows
+
+    /// <summary>The row a dragged row would land on, from the mouse position; null if no row is dragged.</summary>
+    private int? DropIndex(DragEventArgs e)
+    {
+        if (!e.Data.GetDataPresent(RowDragFormat) || SelectedDraft is not { } draft || draft.Rows.Count == 0)
+        {
+            return null;
+        }
+
+        // Line 0 of the grid is the header; line i + 1 is row i.
+        double y = e.GetPosition(PointsGrid).Y;
+        double top = 0;
+        int line = 0;
+        for (; line < PointsGrid.RowDefinitions.Count; line++)
+        {
+            top += PointsGrid.RowDefinitions[line].ActualHeight;
+            if (y < top)
+            {
+                break;
+            }
+        }
+
+        return Math.Clamp(line - 1, 0, draft.Rows.Count - 1);
+    }
+
+    /// <summary>Marks the line where a dragged row lands (null: no mark).</summary>
+    private void MarkDropTarget(int? index)
+    {
+        for (int i = 0; i < _rowBackgrounds.Count; i++)
+        {
+            _rowBackgrounds[i].Background = i == index
+                ? (System.Windows.Media.Brush)FindResource("AccentBrush")
+                : System.Windows.Media.Brushes.Transparent;
+            _rowBackgrounds[i].Opacity = i == index ? 0.18 : 1;
+        }
+    }
+
+    private void OnRowDragOver(object sender, DragEventArgs e)
+    {
+        int? index = DropIndex(e);
+        e.Effects = index is null ? DragDropEffects.None : DragDropEffects.Move;
+        MarkDropTarget(index);
+        e.Handled = true;
+    }
+
+    private void OnRowDragLeave(object sender, DragEventArgs e) => MarkDropTarget(null);
+
+    private void OnRowDrop(object sender, DragEventArgs e)
+    {
+        MarkDropTarget(null);
+        if (DropIndex(e) is not { } to || e.Data.GetData(RowDragFormat) is not int from || SelectedDraft is not { } draft)
+        {
+            return;
+        }
+
+        e.Handled = true;
+        if (from == to)
+        {
+            return;
+        }
+
+        // The table is rebuilt afterwards, which removes the dragged handle; do that after the drag.
+        Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (draft.MoveRow(from, to) is { } problem)
+            {
+                Ui.ShowError(Window.GetWindow(this)!, problem);
+                return;
+            }
+
+            Changed(draft);
+        }));
+    }
+
+    private void OnSourceChosen(MissionDraft draft, int index, PointSource source)
+    {
+        // A new curve source starts with 10 points (or what is left up to 100).
+        int rest = 100 - draft.EvaluateRows(OtherComm).Select((r, i) => i == index ? 0 : draft.TextPoints(r)).Sum();
+        string? problem = draft.SetRowSource(index, source, Math.Clamp(rest, 1, 100));
+        if (problem is not null)
+        {
+            Ui.ShowError(Window.GetWindow(this)!, problem);
+        }
+
+        Changed(draft);
+    }
 
     /// <summary>Explanation of where the points of a row come from.</summary>
-    private static string Origin(MissionInfo mission, MissionPointRow row) => row.Kind switch
+    private static string Origin(MissionDraft draft, MissionPointRow row) => row.Kind switch
     {
-        PointValueKind.Curve when row.Source == PointSource.LandingAccuracy && mission.Id.Vehicle == Vehicle.Gyrocopter =>
+        PointValueKind.Curve when row.Source == PointSource.LandingAccuracy && draft.Vehicle == Vehicle.Gyrocopter =>
             L.T("Score curve; the Gyrocopter multiplies two landing measurements (touchdown point and resting position)."),
         PointValueKind.Curve => L.T("Highest value of the score curve."),
-        PointValueKind.AllObjects => L.F("Sum over all {0} objects. Linked rings (only one of a group counts) or a required count can make it less.",
-            ObjectCount(mission, row.Source)),
+        PointValueKind.AllObjects => L.F("Objects: all {0} together give {1}.", ObjectCount(draft.Mission, row.Source), row.Value ?? 0),
         PointValueKind.OtherMission => L.T("The best shot at this target (the target's own test)."),
-        PointValueKind.ComputedByGame => L.T("Computed by the game while playing."),
+        PointValueKind.ComputedByGame => L.T("Computed by the game while playing; the number is only shown in the texts."),
         _ => string.Empty,
     };
 
@@ -382,41 +850,578 @@ public partial class MissionsTab : UserControl
         _ => 0,
     };
 
-    /// <summary>Adds a line to the points table: row number, source, "points / text", origin.</summary>
-    private void AddPointRow(int index, string number, string source, string points, string text, string origin, bool header, bool differs = false)
+    /// <summary>The points of each ring type that the mission's rings use.</summary>
+    private void ShowRingTypes(MissionDraft draft)
     {
-        PointsGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        string[] cells = [number, source, $"{points} / {text}", origin];
-        for (int column = 0; column < cells.Length; column++)
+        RingTypes.Children.Clear();
+        int[] counts = MissionCatalog.RingTypeCounts(draft.Mission.File);
+        if (counts.Sum() == 0)
         {
-            var block = new TextBlock
+            return;
+        }
+
+        RingPanel.Visibility = Visibility.Visible;
+        for (int type = 0; type < counts.Length; type++)
+        {
+            if (counts[type] == 0)
             {
-                Text = cells[column],
-                Margin = new Thickness(0, 2, 14, 2),
-                TextWrapping = column == 3 ? TextWrapping.Wrap : TextWrapping.NoWrap,
-                FontWeight = header ? FontWeights.SemiBold : FontWeights.Normal,
-            };
-            if (column == 2 && differs)
-            {
-                block.Foreground = (System.Windows.Media.Brush)FindResource("ChangedBrush");
-                block.ToolTip = L.T("The mission data and the text do not agree.");
-            }
-            else if (column == 3 && !header)
-            {
-                block.Foreground = (System.Windows.Media.Brush)FindResource("MutedTextBrush");
+                continue;
             }
 
-            Grid.SetRow(block, index);
-            Grid.SetColumn(block, column);
-            PointsGrid.Children.Add(block);
+            int ringType = type;
+            string label = type == MissionComm.RingTypeCount - 1
+                ? L.F("Goal ring ({0}×):", counts[type])
+                : L.F("Type {0} ({1}×):", type + 1, counts[type]);
+            RingTypes.Children.Add(new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
+            int current = draft.Comm.GetRingPoints(type);
+            var box = new TextBox { Text = current.ToString(CultureInfo.CurrentCulture), Width = 50, Margin = new Thickness(0, 0, 18, 0), Tag = $"ring{type}" };
+            void Commit()
+            {
+                if (_showing)
+                {
+                    return;
+                }
+
+                if (!int.TryParse(box.Text.Trim(), NumberStyles.Integer, CultureInfo.CurrentCulture, out int value) || value is < 0 or > 126)
+                {
+                    box.Text = current.ToString(CultureInfo.CurrentCulture);
+                    Ui.ShowError(Window.GetWindow(this)!, L.T("Points are whole numbers from 0 to 126 (the game stores at most 126 per test)."));
+                    return;
+                }
+
+                if (value != current)
+                {
+                    draft.SetRingPoints(ringType, value);
+                    Changed(draft);
+                }
+            }
+
+            box.LostKeyboardFocus += (_, e) =>
+            {
+                _focusAfterRefresh = (e.NewFocus as FrameworkElement)?.Tag as string;
+                Commit();
+            };
+            box.KeyDown += (_, e) =>
+            {
+                if (e.Key == Key.Enter)
+                {
+                    Commit();
+                }
+            };
+            RingTypes.Children.Add(box);
         }
     }
 
-    /// <summary>The numbers of a mission screen text ("[b]30[/b] pts."), in order.</summary>
-    private List<int> TextNumbers(string? name) =>
-        Row(name) is { } row
-            ? Regex.Matches(row.Markup, @"\[b\](\d+)\[/b\] pts").Select(m => int.Parse(m.Groups[1].Value, CultureInfo.InvariantCulture)).ToList()
-            : [];
+    // ----------------------------------------------------------------- time, conditions, footnote
+
+    private void ShowTime(MissionDraft draft)
+    {
+        MissionComm comm = draft.Comm;
+        bool hasTime = draft.Rows.Contains(PointSource.Time);
+        ScoreCurve curve = comm.GetCurve(ScoreCurveKind.Time);
+        TimeCurveSettings time = MissionCurves.Describe(curve);
+        TimeMode mode = TimeModeOf(draft);
+        TimePanel.Visibility = hasTime && (time.Shape != TimeCurveShape.None || mode == TimeMode.Custom) ? Visibility.Visible : Visibility.Collapsed;
+        TimeNote.Text = !hasTime
+            ? L.T("This mission has no time points. Choose \"Time\" as a row to add them.")
+            : mode == TimeMode.Custom
+                ? L.T("Each point gives the points for a time (in seconds since the start). Between two points the points fall or rise evenly; before the first point the first one counts, after the last point the last one. Two points at the same time make a step.")
+                : string.Empty;
+
+        TimeShapeBox.SelectedItem = ((IEnumerable<ChoiceItem<TimeMode>>)TimeShapeBox.ItemsSource).FirstOrDefault(i => i.Value == mode);
+        PlateauPanel.Visibility = mode == TimeMode.Plateau ? Visibility.Visible : Visibility.Collapsed;
+        TargetPanel.Visibility = mode == TimeMode.Target ? Visibility.Visible : Visibility.Collapsed;
+        FullUntilBox.Text = FormatNumber(time.FullUntil);
+        ZeroAtBox.Text = FormatNumber(time.ZeroAt);
+        TargetTimeBox.Text = FormatNumber(time.TargetTime);
+        WindowBox.Text = FormatNumber(time.Window);
+        ZeroDistanceBox.Text = FormatNumber(time.ZeroDistance);
+
+        TimeCurvePanel.Children.Clear();
+        if (mode == TimeMode.Custom && hasTime)
+        {
+            TimeCurvePanel.Children.Add(CurveEditor(draft, ScoreCurveKind.Time, L.T("Time (seconds)"), 30, "time"));
+            TimeCurveText.Text = string.Empty;
+        }
+        else
+        {
+            TimeCurveText.Text = time.Shape switch
+            {
+                TimeCurveShape.Plateau => L.F("Full points up to {0}, no points from {1} on.", FormatTime(time.FullUntil), FormatTime(time.ZeroAt)),
+                TimeCurveShape.Target => L.F("Full points from {0} to {1}.", FormatTime(time.TargetTime - time.Window), FormatTime(time.TargetTime + time.Window)),
+                _ => string.Empty,
+            } + " " + L.F("Curve: {0}.", string.Join(" · ", curve.Points.Select(p => L.F("{0} → {1}", FormatTime(p.X), FormatNumber(p.Y)))));
+        }
+
+        LandNowBox.Text = FormatNumber(comm.LandNowTime);
+        HardEndText.Text = comm.HardEndTime > 0
+            ? L.F("Hard end time: after {0} the mission ends at once.", FormatTime(comm.HardEndTime))
+            : L.T("Hard end time: off.");
+    }
+
+    /// <summary>How the time curve is shown: point by point if chosen so or if it has no simple shape.</summary>
+    private TimeMode TimeModeOf(MissionDraft draft)
+    {
+        TimeCurveSettings time = MissionCurves.Describe(draft.Comm.GetCurve(ScoreCurveKind.Time));
+        if (_customTime.Contains(draft.Mission.Id) || !time.IsExact)
+        {
+            return TimeMode.Custom;
+        }
+
+        return time.Shape == TimeCurveShape.Target ? TimeMode.Target : TimeMode.Plateau;
+    }
+
+    private void ShowAltitude(MissionDraft draft)
+    {
+        AltitudeCurvePanel.Children.Clear();
+        bool hasAltitude = draft.Rows.Contains(PointSource.Altitude);
+        AltitudePanel.Visibility = hasAltitude ? Visibility.Visible : Visibility.Collapsed;
+        if (hasAltitude)
+        {
+            AltitudeCurvePanel.Children.Add(CurveEditor(draft, ScoreCurveKind.Altitude, L.T("Altitude"), 100, "altitude"));
+        }
+    }
+
+    // ----------------------------------------------------------------- curve points
+
+    /// <summary>
+    /// A table with every point of a score curve (measured value and points), buttons to add and
+    /// remove points, and a small drawing of the curve.
+    /// </summary>
+    /// <param name="draft">The mission.</param>
+    /// <param name="kind">The curve.</param>
+    /// <param name="valueHeader">Header of the measured value (time, altitude).</param>
+    /// <param name="step">Distance of a new point behind the last one.</param>
+    /// <param name="tagPrefix">Prefix of the boxes' tags (to keep the focus after rebuilding).</param>
+    private UIElement CurveEditor(MissionDraft draft, ScoreCurveKind kind, string valueHeader, float step, string tagPrefix)
+    {
+        List<CurvePoint> points = [.. draft.Comm.GetCurve(kind).Points];
+        var panel = new StackPanel();
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto, MinWidth = 40 });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto, MinWidth = 110 });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto, MinWidth = 90 });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+        void Add(UIElement element, int row, int column)
+        {
+            Grid.SetRow(element, row);
+            Grid.SetColumn(element, column);
+            grid.Children.Add(element);
+        }
+
+        grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        string[] headers = [L.T("Point"), valueHeader, L.T("Points"), string.Empty];
+        for (int c = 0; c < headers.Length; c++)
+        {
+            Add(new TextBlock { Text = headers[c], FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 2, 14, 4) }, 0, c);
+        }
+
+        var valueBoxes = new List<TextBox>();
+        var pointBoxes = new List<TextBox>();
+
+        // Takes all boxes; on a mistake the table shows the curve as it was.
+        void Commit()
+        {
+            if (_showing)
+            {
+                return;
+            }
+
+            var typed = new List<CurvePoint>();
+            for (int i = 0; i < valueBoxes.Count; i++)
+            {
+                if (!TryParseNumber(valueBoxes[i].Text, out double x) || !TryParseNumber(pointBoxes[i].Text, out double y))
+                {
+                    Ui.ShowError(Window.GetWindow(this)!, L.F("Point {0}: please enter numbers.", i + 1));
+                    ShowMission(draft.Mission);
+                    return;
+                }
+
+                typed.Add(new CurvePoint((float)x, (float)y));
+            }
+
+            if (!typed.SequenceEqual(points))
+            {
+                Apply(typed);
+            }
+        }
+
+        void Apply(List<CurvePoint> changed)
+        {
+            if (draft.SetCurvePoints(kind, changed) is { } problem)
+            {
+                Ui.ShowError(Window.GetWindow(this)!, problem);
+                ShowMission(draft.Mission);
+                return;
+            }
+
+            Changed(draft);
+        }
+
+        void Hook(TextBox box)
+        {
+            box.LostKeyboardFocus += (_, e) =>
+            {
+                _focusAfterRefresh = (e.NewFocus as FrameworkElement)?.Tag as string;
+                Commit();
+            };
+            box.KeyDown += (_, e) =>
+            {
+                if (e.Key == Key.Enter)
+                {
+                    Commit();
+                }
+            };
+        }
+
+        for (int i = 0; i < points.Count; i++)
+        {
+            int row = i + 1;
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            Add(new TextBlock { Text = (i + 1).ToString(CultureInfo.CurrentCulture), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 2, 14, 2) }, row, 0);
+
+            var valueBox = new TextBox { Text = FormatNumber(points[i].X), Width = 80, Margin = new Thickness(0, 2, 14, 2), Tag = $"{tagPrefix}x{i}" };
+            var pointBox = new TextBox { Text = FormatNumber(points[i].Y), Width = 60, Margin = new Thickness(0, 2, 14, 2), Tag = $"{tagPrefix}y{i}" };
+            Hook(valueBox);
+            Hook(pointBox);
+            valueBoxes.Add(valueBox);
+            pointBoxes.Add(pointBox);
+            Add(valueBox, row, 1);
+            Add(pointBox, row, 2);
+
+            int at = i;
+            var remove = new Button
+            {
+                Content = "✕",
+                Padding = new Thickness(6, 0, 6, 0),
+                Margin = new Thickness(0, 2, 0, 2),
+                IsEnabled = points.Count > 1,
+                ToolTip = L.T("Remove this point"),
+            };
+            remove.Click += (_, _) => Apply(points.Where((_, j) => j != at).ToList());
+            Add(remove, row, 3);
+        }
+
+        panel.Children.Add(grid);
+
+        var addButton = new Button
+        {
+            Content = L.T("Add point"),
+            Style = (Style)FindResource("DialogButton"),
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Margin = new Thickness(0, 6, 0, 0),
+            IsEnabled = points.Count < ScoreCurve.MaxPoints,
+            ToolTip = L.F("A curve has at most {0} points.", ScoreCurve.MaxPoints),
+        };
+        addButton.Click += (_, _) =>
+        {
+            CurvePoint last = points.Count > 0 ? points[^1] : new CurvePoint(0, 0);
+            Apply([.. points, new CurvePoint(last.X + step, last.Y)]);
+        };
+        panel.Children.Add(addButton);
+        panel.Children.Add(CurveDrawing(points));
+        return panel;
+    }
+
+    /// <summary>A small drawing of a curve: measured value to the right, points upwards.</summary>
+    private UIElement CurveDrawing(IReadOnlyList<CurvePoint> points)
+    {
+        const double width = 360;
+        const double height = 90;
+        var canvas = new Canvas { Width = width, Height = height, Margin = new Thickness(0, 8, 0, 0), HorizontalAlignment = HorizontalAlignment.Left };
+        canvas.Children.Add(new System.Windows.Shapes.Rectangle
+        {
+            Width = width,
+            Height = height,
+            Stroke = (System.Windows.Media.Brush)FindResource("MutedTextBrush"),
+            StrokeThickness = 0.5,
+        });
+        if (points.Count == 0)
+        {
+            return canvas;
+        }
+
+        // A bit of room behind the last point shows that its points stay.
+        float maxX = Math.Max(1, points[^1].X * 1.15f);
+        float maxY = Math.Max(1, points.Max(p => p.Y));
+        var line = new System.Windows.Shapes.Polyline
+        {
+            Stroke = (System.Windows.Media.Brush)FindResource("AccentBrush"),
+            StrokeThickness = 2,
+        };
+        double X(float x) => x / maxX * width;
+        double Y(float y) => height - 4 - (y / maxY * (height - 8));
+        line.Points.Add(new Point(0, Y(points[0].Y)));
+        foreach (CurvePoint p in points)
+        {
+            line.Points.Add(new Point(X(p.X), Y(p.Y)));
+        }
+
+        line.Points.Add(new Point(width, Y(points[^1].Y)));
+        canvas.Children.Add(line);
+        canvas.ToolTip = L.F("Highest points: {0}", FormatNumber(maxY));
+        return canvas;
+    }
+
+    private void ShowConditions(MissionDraft draft)
+    {
+        MissionComm comm = draft.Comm;
+        ConditionBox.SelectedItem = ((IEnumerable<ChoiceItem<MissionCondition>>)ConditionBox.ItemsSource).FirstOrDefault(i => i.Value == comm.Condition);
+        ConditionValueBox.Visibility = comm.Condition is MissionCondition.SomeObjects or MissionCondition.MinimumAltitude ? Visibility.Visible : Visibility.Collapsed;
+        ConditionValueBox.Text = comm.Condition switch
+        {
+            MissionCondition.SomeObjects => FormatNumber(comm.RequiredObjects),
+            MissionCondition.MinimumAltitude => FormatNumber(comm.MinimumAltitude),
+            _ => string.Empty,
+        };
+
+        bool birdman = draft.Mission.IsBirdman;
+        HitPanel.Visibility = draft.Vehicle is Vehicle.Gyrocopter or Vehicle.RocketBelt || comm.HitDeduction != 0 ? Visibility.Visible : Visibility.Collapsed;
+        HitCostBox.Text = (-comm.HitDeduction).ToString(CultureInfo.CurrentCulture);
+        OutOfAreaPanel.Visibility = draft.Vehicle == Vehicle.JumbleHopper ? Visibility.Visible : Visibility.Collapsed;
+        OutOfAreaBox.Text = FormatNumber(comm.OutOfAreaDeduction);
+        ReactionPanel.Visibility = birdman ? Visibility.Collapsed : Visibility.Visible;
+        ReactionBox.Text = comm.ReactionThreshold.ToString(CultureInfo.CurrentCulture);
+
+        FootnoteBox.Text = string.Join("\n", draft.Settings.GenerateTexts
+            ? draft.Settings.Footnote
+            : draft.CurrentScreenText is { } screen ? MissionTextGenerator.ExtractFootnote(screen) : []);
+        FootnoteBox.IsEnabled = !birdman && draft.Mission.MissionScreenTextName is not null;
+    }
+
+    private void OnTimeShapeChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_showing || SelectedDraft is not { } draft || TimeShapeBox.SelectedItem is not ChoiceItem<TimeMode> item)
+        {
+            return;
+        }
+
+        TimeMode old = TimeModeOf(draft);
+        if (item.Value == old)
+        {
+            return;
+        }
+
+        if (item.Value == TimeMode.Custom)
+        {
+            // The curve stays as it is; only the way to edit it changes.
+            _customTime.Add(draft.Mission.Id);
+            ShowMission(draft.Mission);
+            return;
+        }
+
+        _customTime.Remove(draft.Mission.Id);
+        TimeCurveSettings time = MissionCurves.Describe(draft.Comm.GetCurve(ScoreCurveKind.Time));
+        if (time.Points <= 0)
+        {
+            ShowMission(draft.Mission);
+            return;
+        }
+
+        // Start the new kind around the old times.
+        draft.SetTimeCurve(item.Value == TimeMode.Target
+            ? time.Shape == TimeCurveShape.Target
+                ? time with { IsExact = true }
+                : new TimeCurveSettings(TimeCurveShape.Target, time.Points, TargetTime: Math.Max(30, time.FullUntil), Window: 3, ZeroDistance: 60)
+            : time.Shape == TimeCurveShape.Plateau
+                ? time with { IsExact = true }
+                : new TimeCurveSettings(TimeCurveShape.Plateau, time.Points, FullUntil: Math.Max(0, time.TargetTime - time.Window),
+                    ZeroAt: time.TargetTime + time.ZeroDistance));
+        Changed(draft);
+    }
+
+    private void OnConditionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_showing || SelectedDraft is not { } draft || ConditionBox.SelectedItem is not ChoiceItem<MissionCondition> item
+            || item.Value == draft.Comm.Condition)
+        {
+            return;
+        }
+
+        float value = item.Value switch
+        {
+            MissionCondition.SomeObjects => draft.Comm.RequiredObjects > 0 ? draft.Comm.RequiredObjects : 1,
+            MissionCondition.MinimumAltitude => draft.Comm.MinimumAltitude > 0 ? draft.Comm.MinimumAltitude : 400,
+            _ => 0,
+        };
+        draft.SetCondition(item.Value, value);
+        Changed(draft);
+    }
+
+    /// <summary>A value box lost the focus or got Enter: take its value.</summary>
+    private void OnValueCommitted(TextBox box)
+    {
+        if (_showing || SelectedDraft is not { } draft)
+        {
+            return;
+        }
+
+        if (!TryParseNumber(box.Text, out double value) || value < 0 || value > 100000)
+        {
+            Ui.ShowError(Window.GetWindow(this)!, L.F("\"{0}\" is not a number from 0 on.", box.Text.Trim()));
+            ShowMission(draft.Mission);
+            return;
+        }
+
+        float number = (float)value;
+        MissionComm comm = draft.Comm;
+        TimeCurveSettings time = MissionCurves.Describe(comm.GetCurve(ScoreCurveKind.Time));
+        bool changed = true;
+        if (box == FullUntilBox || box == ZeroAtBox || box == TargetTimeBox || box == WindowBox || box == ZeroDistanceBox)
+        {
+            TimeCurveSettings next = box == FullUntilBox ? time with { FullUntil = number }
+                : box == ZeroAtBox ? time with { ZeroAt = number }
+                : box == TargetTimeBox ? time with { TargetTime = number }
+                : box == WindowBox ? time with { Window = number }
+                : time with { ZeroDistance = number };
+            changed = next != time;
+            if (changed)
+            {
+                draft.SetTimeCurve(next with { IsExact = true });
+            }
+        }
+        else if (box == LandNowBox)
+        {
+            changed = number != comm.LandNowTime;
+            if (changed)
+            {
+                draft.SetLandNowTime(number);
+            }
+        }
+        else if (box == ConditionValueBox)
+        {
+            float old = comm.Condition == MissionCondition.SomeObjects ? comm.RequiredObjects : comm.MinimumAltitude;
+            changed = number != old;
+            if (changed)
+            {
+                draft.SetCondition(comm.Condition, comm.Condition == MissionCondition.SomeObjects ? MathF.Round(number) : number);
+            }
+        }
+        else if (box == HitCostBox)
+        {
+            changed = (int)number != -comm.HitDeduction;
+            if (changed)
+            {
+                draft.SetHitCost((int)number);
+            }
+        }
+        else if (box == OutOfAreaBox)
+        {
+            changed = number != comm.OutOfAreaDeduction;
+            if (changed)
+            {
+                draft.SetOutOfAreaCost(number);
+            }
+        }
+        else if (box == ReactionBox)
+        {
+            changed = (int)number != comm.ReactionThreshold;
+            if (changed)
+            {
+                draft.SetReactionThreshold((int)number);
+            }
+        }
+
+        if (changed)
+        {
+            Changed(draft);
+        }
+    }
+
+    private void OnFootnoteCommitted(object sender, KeyboardFocusChangedEventArgs e)
+    {
+        if (_showing || SelectedDraft is not { } draft || !FootnoteBox.IsEnabled)
+        {
+            return;
+        }
+
+        string[] lines = FootnoteBox.Text.Replace("\r\n", "\n").Split('\n');
+
+        // Only characters of the game's font (the text could not be saved otherwise).
+        if (_texts?.Library is { } library
+            && lines.SelectMany(l => l).FirstOrDefault(c => !library.Font.TryGetGlyph(c, false, out _) && !library.Font.TryGetGlyph(c, true, out _)
+                && "[]=/".IndexOf(c) < 0) is var bad and not '\0')
+        {
+            Ui.ShowError(Window.GetWindow(this)!, L.F("'{0}' is not in the game's font.", bad));
+            ShowMission(draft.Mission);
+            return;
+        }
+
+        IReadOnlyList<string> current = draft.Settings.GenerateTexts
+            ? draft.Settings.Footnote
+            : draft.CurrentScreenText is { } screen ? MissionTextGenerator.ExtractFootnote(screen) : [];
+        if (!lines.Select(l => l.Trim()).Where(l => l.Length > 0).SequenceEqual(current.Select(l => l.Trim()).Where(l => l.Length > 0)))
+        {
+            draft.SetFootnote(lines);
+            Changed(draft);
+        }
+    }
+
+    private void OnSuggestFootnote(object sender, RoutedEventArgs e)
+    {
+        if (SelectedDraft is not { } draft || draft.Mission.IsBirdman)
+        {
+            return;
+        }
+
+        draft.SetFootnote(MissionTextGenerator.SuggestFootnote(draft.Comm, draft.TextLines(OtherComm)));
+        Changed(draft);
+    }
+
+    // ----------------------------------------------------------------- results
+
+    private void ShowResults(MissionDraft draft)
+    {
+        MissionInfo mission = draft.Mission;
+        if (mission.IsBirdman)
+        {
+            ResultRowsText.Text = L.T("Birdman has no result sheet in the original game.");
+        }
+        else
+        {
+            ResultRowsText.Text = L.F("The result sheet shows these rows, from top to bottom: {0}.", string.Join(", ", draft.Rows.Select(PointSources.Name)))
+                + " " + (MissionTextGenerator.HasDeductionRow(mission.Id.Vehicle)
+                    ? L.T("Below them come \"Points Deducted\" and the total.")
+                    : L.T("Below them comes the total (this vehicle has no \"Points Deducted\" row)."));
+        }
+
+        ShowPointText(ResultTextView, ResultTextNote, mission.ResultSheetTextName, mission.SharesResultSheetTextWith,
+            L.T("The game has no result sheet text for this mission."), draft);
+    }
+
+    private void ShowPointText(TextEditorPanel panel, TextBlock note, string? name, IReadOnlyList<TestId> sharedWith, string missing, MissionDraft draft)
+    {
+        TextRow? row = Row(name);
+        panel.Caption = name is null ? L.T("Text") : L.F("Text ({0})", name);
+        panel.Show(row);
+        panel.Visibility = row is null ? Visibility.Collapsed : Visibility.Visible;
+
+        var lines = new List<string>
+        {
+            draft.Settings.GenerateTexts
+                ? L.T("The editor writes this text from the points of the mission.")
+                : L.T("The original text. As soon as you change the points, the editor writes this text from them."),
+        };
+        if (row is null)
+        {
+            lines.Add(name is null ? missing : L.F("The game has no text {0}.", name));
+        }
+
+        if (sharedWith.Count > 0)
+        {
+            lines.Add(L.F("{0} other mission(s) use the same text: {1}. The text written for this mission is shown for them too.",
+                sharedWith.Count, string.Join(", ", sharedWith.Select(MissionCatalog.Label))));
+        }
+
+        note.Text = string.Join("\n", lines);
+    }
+
+    // ----------------------------------------------------------------- numbers
+
+    private static bool TryParseNumber(string text, out double value) =>
+        double.TryParse(text.Trim(), NumberStyles.Float, CultureInfo.CurrentCulture, out value)
+        || double.TryParse(text.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out value);
 
     /// <summary>A time like the game's texts: 1'30" (with the seconds as a number when they have a fraction).</summary>
     private static string FormatTime(float seconds)

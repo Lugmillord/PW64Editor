@@ -102,6 +102,17 @@ public partial class TextEditorPanel : UserControl
         set => TextLabel.Text = value;
     }
 
+    /// <summary>A note above the text box (null or empty: none).</summary>
+    public string? Note
+    {
+        get => NoteText.Text;
+        set
+        {
+            NoteText.Text = value ?? string.Empty;
+            NoteText.Visibility = string.IsNullOrEmpty(value) ? Visibility.Collapsed : Visibility.Visible;
+        }
+    }
+
     /// <summary>Starting height of the text box in pixels (it can be dragged).</summary>
     public double TextBoxHeight
     {

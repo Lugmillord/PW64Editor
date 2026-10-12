@@ -20,6 +20,18 @@ public sealed record RomBuildOptions(bool AlwaysRelocateAudio = false, bool Allo
     /// </summary>
     public byte[]? SequenceFile { get; init; }
 
+    /// <summary>
+    /// Changed bytes of tables in the game code (for example the result rows of the missions),
+    /// written after the code fixes. Each patch must lie inside the game code.
+    /// </summary>
+    public IReadOnlyList<DataPatch> DataPatches { get; init; } = [];
+
     /// <summary>The default settings.</summary>
     public static readonly RomBuildOptions Default = new();
 }
+
+/// <summary>Bytes to write at a ROM offset inside the game code.</summary>
+/// <param name="Offset">ROM offset.</param>
+/// <param name="Data">The new bytes.</param>
+/// <param name="Description">What is changed, for error messages.</param>
+public sealed record DataPatch(int Offset, byte[] Data, string Description);

@@ -53,6 +53,10 @@ public sealed class MissionTables
         return _rom.AsSpan(offset, MissionLayout.ResultRows).ToArray().Select(b => (int)b).ToList();
     }
 
+    /// <summary>ROM offset of the 4 result rows of a test (bottom row first), or null outside the table.</summary>
+    public int? ResultRowsOffset(TestId test) =>
+        FlatIndex(test) is { } index ? _layout.ResultRowsOffset + (index * MissionLayout.ResultRows) : null;
+
     /// <summary>The island the class menu shows for a vehicle and class (0-3), or null outside the table.</summary>
     public int? ClassIsland(Vehicle vehicle, int classIndex) =>
         (int)vehicle is >= 0 and < Vehicles.Count && classIndex is >= 0 and < 4

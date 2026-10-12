@@ -70,6 +70,12 @@ public partial class TextTab : UserControl, ITextEditorHost
         }
     }
 
+    /// <summary>
+    /// Tells for a text name why it must not be edited here (for example because the Missions tab
+    /// writes it), or null. Such texts are shown read-only with the reason.
+    /// </summary>
+    public Func<string, string?>? LockReason { get; set; }
+
     /// <summary>The text with this name, or null. Other tabs edit texts through these rows.</summary>
     public TextRow? FindRow(string name) => _rowsByName.GetValueOrDefault(name);
 
@@ -348,6 +354,9 @@ public partial class TextTab : UserControl, ITextEditorHost
     {
         DetailPanel.Visibility = row is null ? Visibility.Collapsed : Visibility.Visible;
         NoSelectionText.Visibility = row is null ? Visibility.Visible : Visibility.Collapsed;
+        string? locked = row is null ? null : LockReason?.Invoke(row.Name);
+        Editor.IsReadOnly = locked is not null;
+        Editor.Note = locked;
         Editor.Show(row);
     }
 
@@ -478,7 +487,8 @@ public partial class TextTab : UserControl, ITextEditorHost
             return;
         }
 
-        string name = input.Trim().ToUpperInvariant();
+        // Not trimmed: a name with spaces is refused with its own message.
+        string name = input.ToUpperInvariant();
         if (CustomTexts.CheckName(name, _rows.Select(r => r.Name)) is { } problem)
         {
             Ui.ShowError(owner, problem);

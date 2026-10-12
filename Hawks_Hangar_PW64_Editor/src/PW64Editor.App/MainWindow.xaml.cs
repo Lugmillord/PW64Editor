@@ -89,7 +89,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (TextEditor.HasUnsavedChanges && !await SaveAndBuildAsync(restorePoint: false))
+        if (HasUnsavedEdits && !await SaveAndBuildAsync(restorePoint: false))
         {
             return; // saving failed; the reason was shown
         }
@@ -210,7 +210,7 @@ public partial class MainWindow : Window
     /// </summary>
     private async void OnClosing(object? sender, CancelEventArgs e)
     {
-        bool texts = TextEditor.HasUnsavedChanges;
+        bool texts = HasUnsavedEdits;
         bool saveFile = SaveEditor.HasUnsavedChanges;
         if (_closeConfirmed || (!texts && !saveFile))
         {
@@ -234,6 +234,9 @@ public partial class MainWindow : Window
     }
 
     private void OnUnsavedChangesChanged(object? sender, EventArgs e) => UpdateTitle();
+
+    /// <summary>True if texts or missions have edits that are saved with Ctrl+S.</summary>
+    private bool HasUnsavedEdits => TextEditor.HasUnsavedChanges || MissionEditor.HasUnsavedChanges;
 
     private void OnProjectSettings(object sender, RoutedEventArgs e)
     {
@@ -316,7 +319,19 @@ public partial class MainWindow : Window
             return false;
         }
 
-        string texts = savedTexts > 0 ? L.F("{0} text(s) saved.", savedTexts) + " " : string.Empty;
+        int savedMissions;
+        try
+        {
+            savedMissions = MissionEditor.SaveChanges(_session);
+        }
+        catch (Exception ex) when (Ui.IsExpectedError(ex))
+        {
+            Ui.ShowError(this, L.F("The missions could not be saved.\n\n{0}", ex.Message));
+            return false;
+        }
+
+        string texts = (savedTexts > 0 ? L.F("{0} text(s) saved.", savedTexts) + " " : string.Empty)
+            + (savedMissions > 0 ? L.F("{0} mission(s) saved.", savedMissions) + " " : string.Empty);
         return await RunAsync(L.T("Building hack ROM…"), () => _session.Build(restorePoint), outcome =>
         {
             RomBuildResult rom = outcome.Result.RomBuild;
@@ -332,14 +347,14 @@ public partial class MainWindow : Window
     /// <returns>True if the action may continue (saved or discarded), false if cancelled or saving failed.</returns>
     private async Task<bool> ConfirmUnsavedChangesAsync(string action)
     {
-        if (!TextEditor.HasUnsavedChanges)
+        if (!HasUnsavedEdits)
         {
             return true;
         }
 
         MessageBoxResult answer = MessageBox.Show(
             this,
-            L.F("You have unsaved text changes. Save them before {0}?", L.T(action)) + "\n\n" +
+            L.F("You have unsaved changes of texts or missions. Save them before {0}?", L.T(action)) + "\n\n" +
             L.T("Yes: save the changes and build the hack ROM.\nNo: discard the changes.\nCancel: go back to editing."),
             Ui.AppName,
             MessageBoxButton.YesNoCancel,
@@ -351,6 +366,7 @@ public partial class MainWindow : Window
                 return await SaveAndBuildAsync(restorePoint: false);
             case MessageBoxResult.No:
                 TextEditor.DiscardChanges();
+                MissionEditor.DiscardChanges();
                 return true;
             default:
                 return false;
@@ -679,7 +695,7 @@ public partial class MainWindow : Window
     private void UpdateTitle()
     {
         ProjectSettings settings = _session.Project.Settings;
-        string unsaved = TextEditor.HasUnsavedChanges ? "*" : string.Empty;
+        string unsaved = HasUnsavedEdits ? "*" : string.Empty;
         Title = $"{unsaved}{settings.Name} {settings.Version} - {Ui.AppName}";
     }
 

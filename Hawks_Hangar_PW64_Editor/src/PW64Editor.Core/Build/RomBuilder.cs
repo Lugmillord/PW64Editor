@@ -117,6 +117,17 @@ public static class RomBuilder
             fix.Apply(output, CodeFixes.CodeStart, CodeFixes.CodeEnd(layout));
         }
 
+        // 5b. Changed tables in the game code (they never move either).
+        foreach (DataPatch patch in options.DataPatches)
+        {
+            if (patch.Offset < CodeFixes.CodeStart || patch.Offset + patch.Data.Length > CodeFixes.CodeEnd(layout))
+            {
+                throw new InvalidDataException($"The change of {patch.Description} lies outside the game code.");
+            }
+
+            patch.Data.CopyTo(output, patch.Offset);
+        }
+
         // 6. Boot checksum. The code, the file table and the first game files all lie inside
         //    the checksummed first MiB. With an unknown CIC (only possible with homebrew or
         //    test data, never with a verified retail ROM) we cannot compute it, so we leave the

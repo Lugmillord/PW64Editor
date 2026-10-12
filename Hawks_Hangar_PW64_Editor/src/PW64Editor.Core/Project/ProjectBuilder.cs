@@ -61,7 +61,11 @@ public static class ProjectBuilder
         try
         {
             romBuild = RomBuilder.Build(cleanRom, files, layout,
-                project.BuildOptions with { SequenceFile = BuildMusic(project, cleanRom, layout) });
+                project.BuildOptions with
+                {
+                    SequenceFile = BuildMusic(project, cleanRom, layout),
+                    DataPatches = MissionPatches(project, cleanRom, layout),
+                });
         }
         catch (InvalidDataException ex)
         {
@@ -175,6 +179,45 @@ public static class ProjectBuilder
         {
             throw new ProjectException(CoreText.F("The music could not be changed: {0}", ex.Message), ex);
         }
+    }
+
+    /// <summary>The changed result rows of the missions, as patches of the table in the game code.</summary>
+    /// <exception cref="ProjectException">A mission's rows cannot be stored.</exception>
+    public static IReadOnlyList<DataPatch> MissionPatches(HackProject project, N64Rom cleanRom, RomLayout layout)
+    {
+        List<Missions.MissionSettings> changed = project.Settings.Missions.Where(m => m.ResultRows is not null).ToList();
+        if (changed.Count == 0)
+        {
+            return [];
+        }
+
+        if (layout.Missions is null)
+        {
+            throw new ProjectException(CoreText.T("The result sheets of this game version are unknown, so changed point rows cannot be built."));
+        }
+
+        var tables = new Missions.MissionTables(cleanRom.Data, layout.Missions);
+        var patches = new List<DataPatch>();
+        foreach (Missions.MissionSettings mission in changed)
+        {
+            List<int> rows = mission.ResultRows!;
+            if (tables.ResultRowsOffset(mission.Id) is not { } offset || rows.Count > Missions.MissionLayout.ResultRows
+                || rows.Any(r => r is < 0 or > 255 || !Missions.PointSources.IsKnown(r)))
+            {
+                throw new ProjectException(CoreText.F("The point rows of {0} cannot be stored.", Missions.MissionCatalog.Label(mission.Id)));
+            }
+
+            // The table lists the bottom row first; empty rows are 0.
+            byte[] data = new byte[Missions.MissionLayout.ResultRows];
+            for (int i = 0; i < rows.Count; i++)
+            {
+                data[i] = (byte)rows[rows.Count - 1 - i];
+            }
+
+            patches.Add(new DataPatch(offset, data, "result rows"));
+        }
+
+        return patches;
     }
 
     private static void CheckTextFile(HackProject project, GameFileSystem cleanFileSystem, List<GameFile> files)

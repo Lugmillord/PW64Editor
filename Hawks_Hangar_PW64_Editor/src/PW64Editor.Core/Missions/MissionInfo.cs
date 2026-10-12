@@ -89,6 +89,12 @@ public sealed class MissionInfo
     /// <summary>The other missions with the same title, task and hint texts (Cannonball targets of a level).</summary>
     public IReadOnlyList<TestId> SharesStatementWith { get; internal set; } = [];
 
+    /// <summary>The point rows of the original game's table, top row first (empty rows left out).</summary>
+    public IReadOnlyList<PointSource> OriginalRowSources { get; internal set; } = [];
+
+    /// <summary>The project's settings of this mission, or null.</summary>
+    public MissionSettings? Settings { get; internal set; }
+
     /// <summary>The point rows of the result sheet, top row first (empty rows left out).</summary>
     public IReadOnlyList<MissionPointRow> Rows { get; internal set; } = [];
 

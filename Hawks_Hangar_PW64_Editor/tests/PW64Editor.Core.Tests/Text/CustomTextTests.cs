@@ -16,6 +16,8 @@ public class CustomTextRuleTests
     [InlineData("", "empty")]
     [InlineData("my_text", "capital")]
     [InlineData("MY-TEXT", "capital")]
+    [InlineData("MY TEXT", "contains spaces")]
+    [InlineData(" MY_TEXT", "contains spaces")]
     [InlineData("ABCDEFGHIJKLMNOPQRSTUVWXY", "at most 24")]
     [InlineData("MINI_USA", "only once")]
     public void CheckName_FollowsTheRules(string name, string? problemPart)

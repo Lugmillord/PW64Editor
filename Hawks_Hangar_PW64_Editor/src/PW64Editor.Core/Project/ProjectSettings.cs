@@ -49,6 +49,9 @@ public sealed class ProjectSettings
 
     /// <summary>Changed instruments and silenced channels of songs (only songs with changes).</summary>
     public List<Audio.SongSettings> Music { get; set; } = [];
+
+    /// <summary>Changed result sheets and generated point texts of missions (only missions with changes).</summary>
+    public List<Missions.MissionSettings> Missions { get; set; } = [];
 }
 
 /// <summary>

@@ -50,6 +50,11 @@ public static partial class CustomTexts
             return CoreText.T("The name must not be empty.");
         }
 
+        if (name.Any(char.IsWhiteSpace))
+        {
+            return CoreText.T("The name contains spaces. Spaces are not allowed; use '_' instead.");
+        }
+
         if (name.Length > MaxNameLength)
         {
             return CoreText.F("The name may have at most {0} characters.", MaxNameLength);

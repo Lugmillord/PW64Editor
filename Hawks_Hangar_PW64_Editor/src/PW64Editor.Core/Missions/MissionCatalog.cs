@@ -46,14 +46,40 @@ public static class MissionCatalog
         ? CoreText.F("Target {0}", test + 1)
         : CoreText.F("Test {0}", test + 1);
 
+    /// <summary>"Gyrocopter Beginner Test 1": vehicle, class and test.</summary>
+    public static string Label(TestId id) => $"{Vehicles.Name(id.Vehicle)} {ClassName(id.Vehicle, id.Class)} {TestName(id.Vehicle, id.Test)}";
+
+    /// <summary>
+    /// The sources that can be chosen for a vehicle: those it can collect in the game (see
+    /// Mission_Scoring.md). Cannonball and Birdman have none: Cannonball shows its four targets,
+    /// Birdman has no score sheet.
+    /// </summary>
+    public static IReadOnlyList<PointSource> AvailableSources(Vehicle vehicle) => vehicle switch
+    {
+        Vehicle.HangGlider => [PointSource.Rings, PointSource.Balloons, PointSource.Photo, PointSource.Altitude, PointSource.Time,
+            PointSource.LandingAccuracy, PointSource.LandingImpact],
+        Vehicle.RocketBelt => [PointSource.Rings, PointSource.Balloons, PointSource.HoverPads, PointSource.Altitude, PointSource.Time,
+            PointSource.LandingAccuracy, PointSource.LandingImpact],
+        Vehicle.Gyrocopter => [PointSource.Rings, PointSource.Balloons, PointSource.Targets, PointSource.MecaHawks, PointSource.Altitude,
+            PointSource.Time, PointSource.LandingAccuracy, PointSource.LandingImpact],
+        Vehicle.SkyDiving => [PointSource.Formation, PointSource.Rings, PointSource.Altitude, PointSource.Time,
+            PointSource.LandingAccuracy, PointSource.LandingImpact],
+
+        // The Jumble Hopper does not measure an impact (it would always give the full points).
+        Vehicle.JumbleHopper => [PointSource.Rings, PointSource.Balloons, PointSource.Altitude, PointSource.Time, PointSource.LandingAccuracy],
+        _ => [],
+    };
+
     /// <summary>
     /// Reads all missions and fills in texts and point rows. Missions that cannot be read are
     /// reported in <see cref="MissionCatalogResult.Problems"/>.
     /// </summary>
     /// <param name="sources">The mission files.</param>
     /// <param name="tables">The tables of the game code, or null if unknown.</param>
-    public static MissionCatalogResult Build(IEnumerable<MissionSource> sources, MissionTables? tables)
+    /// <param name="settings">The project's settings of missions (changed result rows, generated texts), or null.</param>
+    public static MissionCatalogResult Build(IEnumerable<MissionSource> sources, MissionTables? tables, IEnumerable<MissionSettings>? settings = null)
     {
+        Dictionary<TestId, MissionSettings> settingsById = (settings ?? []).GroupBy(s => s.Id).ToDictionary(g => g.Key, g => g.Last());
         var missions = new List<MissionInfo>();
         var problems = new List<string>();
         foreach (MissionSource source in sources)
@@ -78,12 +104,16 @@ public static class MissionCatalog
                 mission.MissionScreenTextName = tables.MissionScreenTextName(mission.Id);
                 mission.ResultSheetTextName = tables.ResultSheetTextName(mission.Id);
                 mission.ClassIsland = tables.ClassIsland(mission.Id.Vehicle, mission.Id.Class);
-                mission.Rows = tables.ResultRows(mission.Id)
+                mission.OriginalRowSources = tables.ResultRows(mission.Id)
                     .Where(r => r != 0)
                     .Reverse() // the table lists the bottom row first
-                    .Select(r => Row((PointSource)r, mission, byId))
+                    .Select(r => (PointSource)r)
                     .ToList();
             }
+
+            mission.Settings = settingsById.GetValueOrDefault(mission.Id);
+            IReadOnlyList<PointSource> rows = mission.Settings?.ResultRows?.Select(r => (PointSource)r).ToList() ?? mission.OriginalRowSources;
+            mission.Rows = rows.Select(r => Evaluate(r, mission.Id, mission.File, mission.File.Comm, id => byId.GetValueOrDefault(id)?.File.Comm)).ToList();
         }
 
         foreach (MissionInfo mission in missions)
@@ -111,32 +141,25 @@ public static class MissionCatalog
             : missions.Where(m => m != mission && name(m) == own).Select(m => m.Id).ToList();
     }
 
-    /// <summary>The most points the mission data gives for a row.</summary>
-    private static MissionPointRow Row(PointSource source, MissionInfo mission, Dictionary<TestId, MissionInfo> byId)
+    /// <summary>
+    /// The most points the mission data gives for a row.
+    /// </summary>
+    /// <param name="source">The kind of points.</param>
+    /// <param name="id">The mission.</param>
+    /// <param name="file">The mission file (for its objects).</param>
+    /// <param name="comm">The COMM block to evaluate (may be an edited copy of the file's).</param>
+    /// <param name="otherComm">The COMM block of another mission (Cannonball: the other targets of the level), or null.</param>
+    public static MissionPointRow Evaluate(PointSource source, TestId id, MissionFile file, MissionComm comm, Func<TestId, MissionComm?> otherComm)
     {
-        MissionFile file = mission.File;
-        MissionComm comm = file.Comm;
+        if (PointSources.Curve(source) is { } kind)
+        {
+            return new MissionPointRow(source, MissionCurves.ShownPoints(kind, id.Vehicle, comm.GetCurve(kind)), PointValueKind.Curve);
+        }
+
         switch (source)
         {
-            case PointSource.LandingAccuracy:
-            {
-                float max = comm.GetCurve(ScoreCurveKind.LandingAccuracy).Maximum;
-
-                // The Gyrocopter multiplies two landing measurements that share this curve.
-                int value = mission.Id.Vehicle == Vehicle.Gyrocopter ? (int)((max * max) + 0.5f) : (int)(max + 0.001f);
-                return new MissionPointRow(source, value, PointValueKind.Curve);
-            }
-
-            case PointSource.LandingImpact:
-            case PointSource.Altitude:
-                return new MissionPointRow(source, (int)(comm.GetCurve(PointSources.Curve(source)!.Value).Maximum + 0.001f), PointValueKind.Curve);
-
-            case PointSource.Time:
-                // The game adds no rounding help to the time points.
-                return new MissionPointRow(source, (int)comm.GetCurve(ScoreCurveKind.Time).Maximum, PointValueKind.Curve);
-
             case PointSource.Rings:
-                return new MissionPointRow(source, RingSum(file), PointValueKind.AllObjects);
+                return new MissionPointRow(source, RingSum(file, comm), PointValueKind.AllObjects);
 
             case PointSource.Balloons:
                 return new MissionPointRow(source, BalloonSum(file.GetObjectData(MissionObjectKind.Balloon)), PointValueKind.AllObjects);
@@ -150,13 +173,15 @@ public static class MissionCatalog
             case >= PointSource.CannonballTarget1 and <= PointSource.CannonballTarget4:
             {
                 // The score of target n is the score of test n of this level (best of its shots).
-                var target = new TestId(mission.Id.Class, mission.Id.Vehicle, source - PointSource.CannonballTarget1);
-                return byId.TryGetValue(target, out MissionInfo? other)
-                    ? new MissionPointRow(source, (int)(other.File.Comm.GetCurve(ScoreCurveKind.LandingAccuracy).Maximum + 0.001f), PointValueKind.OtherMission)
+                var target = new TestId(id.Class, id.Vehicle, source - PointSource.CannonballTarget1);
+                MissionComm? other = target == id ? comm : otherComm(target);
+                return other is not null
+                    ? new MissionPointRow(source, MissionCurves.ShownPoints(ScoreCurveKind.LandingAccuracy, id.Vehicle,
+                        other.GetCurve(ScoreCurveKind.LandingAccuracy)), PointValueKind.OtherMission)
                     : new MissionPointRow(source, null, PointValueKind.None);
             }
 
-            case PointSource.MechaHawks:
+            case PointSource.MecaHawks:
             case PointSource.Photo:
             case PointSource.Formation:
                 return new MissionPointRow(source, null, PointValueKind.ComputedByGame);
@@ -166,21 +191,31 @@ public static class MissionCatalog
         }
     }
 
-    /// <summary>
-    /// Rings (0x84 bytes each): a ring gives the points of its type (subtype at 0x72, 3 = goal ring),
-    /// a timed ring passed in time its own points (0x4C) instead (ringsGetPoints in rings.c).
-    /// </summary>
-    private static int RingSum(MissionFile file)
+    /// <summary>The ring points of all rings for a COMM block (only rings of a type can be changed in the COMM block).</summary>
+    public static int RingSum(MissionFile file, MissionComm comm)
     {
         ReadOnlySpan<byte> data = file.GetObjectData(MissionObjectKind.Ring);
         int sum = 0;
         for (int offset = 0; offset + 0x84 <= data.Length; offset += 0x84)
         {
             int type = Math.Min((int)data[offset + 0x72], MissionComm.RingTypeCount - 1);
-            sum += Math.Max(file.Comm.GetRingPoints(type), data[offset + 0x4C]);
+            sum += Math.Max(comm.GetRingPoints(type), data[offset + 0x4C]);
         }
 
         return sum;
+    }
+
+    /// <summary>How many rings of each type (0-3) the mission has.</summary>
+    public static int[] RingTypeCounts(MissionFile file)
+    {
+        ReadOnlySpan<byte> data = file.GetObjectData(MissionObjectKind.Ring);
+        int[] counts = new int[MissionComm.RingTypeCount];
+        for (int offset = 0; offset + 0x84 <= data.Length; offset += 0x84)
+        {
+            counts[Math.Min((int)data[offset + 0x72], MissionComm.RingTypeCount - 1)]++;
+        }
+
+        return counts;
     }
 
     /// <summary>

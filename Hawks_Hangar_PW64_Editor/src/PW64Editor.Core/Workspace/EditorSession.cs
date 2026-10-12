@@ -630,8 +630,49 @@ public sealed class EditorSession
         }
 
         MissionTables? tables = Layout.Missions is { } layout ? new MissionTables(CleanRom.Data, layout) : null;
-        MissionCatalogResult result = MissionCatalog.Build(sources, tables);
+        MissionCatalogResult result = MissionCatalog.Build(sources, tables, Project.Settings.Missions);
         return problems.Count == 0 ? result : result with { Problems = [.. problems, .. result.Problems] };
+    }
+
+    /// <summary>
+    /// Saves the changes of a mission: its COMM block into the project's copy of the mission file
+    /// (removed again if it equals the original) and its settings into project.json.
+    /// </summary>
+    /// <param name="mission">The mission as loaded (<see cref="LoadMissions"/>).</param>
+    /// <param name="comm">The changed COMM block.</param>
+    /// <param name="settings">The settings (result rows, generated texts), or null for none.</param>
+    /// <exception cref="ProjectException">The mission file cannot be found.</exception>
+    public void SaveMission(MissionInfo mission, MissionComm comm, MissionSettings? settings)
+    {
+        GameFile original = CleanFileSystem.Files.FirstOrDefault(f => f.TableIndex == mission.TableIndex)
+            ?? throw new ProjectException(CoreText.F("The game has no file with table index {0}.", mission.TableIndex));
+        byte[] data = mission.File.WithComm(comm);
+        if (data.AsSpan().SequenceEqual(original.Data))
+        {
+            Project.RemoveOverride(original.TableIndex);
+        }
+        else
+        {
+            Project.WriteOverride(original, data);
+        }
+
+        Project.Settings.Missions.RemoveAll(m => m.Id == mission.Id);
+        if (settings is { IsEmpty: false })
+        {
+            Project.Settings.Missions.Add(settings.Clone());
+            Project.Settings.Missions.Sort((a, b) => (a.Vehicle, a.Class, a.Test).CompareTo((b.Vehicle, b.Class, b.Test)));
+        }
+
+        Project.Save();
+    }
+
+    /// <summary>The COMM block of a mission in the original game.</summary>
+    /// <exception cref="ProjectException">The mission file cannot be found.</exception>
+    public MissionComm OriginalMissionComm(MissionInfo mission)
+    {
+        GameFile original = CleanFileSystem.Files.FirstOrDefault(f => f.TableIndex == mission.TableIndex)
+            ?? throw new ProjectException(CoreText.F("The game has no file with table index {0}.", mission.TableIndex));
+        return MissionFile.Parse(original.Data).Comm;
     }
 
     /// <summary>The medal limits of the game (from the clean ROM), or empty if unknown.</summary>
