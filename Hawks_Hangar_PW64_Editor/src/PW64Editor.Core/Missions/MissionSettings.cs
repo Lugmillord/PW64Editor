@@ -35,6 +35,15 @@ public sealed class MissionSettings
     public List<string> Footnote { get; set; } = [];
 
     /// <summary>
+    /// True: the editor writes the footnote from the settings (time limit, conditions, altitude);
+    /// false: <see cref="Footnote"/> as typed in; null (older projects): as typed in.
+    /// </summary>
+    public bool? AutoFootnote { get; set; }
+
+    /// <summary>The conditions of the mission, or null for the retail condition in its mission file.</summary>
+    public MissionConditions? Conditions { get; set; }
+
+    /// <summary>
     /// Numbers the point texts show for points that are not a curve of this mission (objects, photos,
     /// formations), by PointSource number. Only the texts use them; the game counts the objects.
     /// </summary>
@@ -46,7 +55,8 @@ public sealed class MissionSettings
 
     /// <summary>True if the settings change nothing.</summary>
     [JsonIgnore]
-    public bool IsEmpty => ResultRows is null && !GenerateTexts && Footnote.Count == 0 && TextPoints.Count == 0;
+    public bool IsEmpty => ResultRows is null && !GenerateTexts && Footnote.Count == 0 && TextPoints.Count == 0
+        && AutoFootnote is null && Conditions is null;
 
     /// <summary>Empty settings for a mission.</summary>
     public static MissionSettings For(TestId id) => new() { Vehicle = (int)id.Vehicle, Class = id.Class, Test = id.Test };
@@ -60,6 +70,8 @@ public sealed class MissionSettings
         ResultRows = ResultRows is null ? null : [.. ResultRows],
         GenerateTexts = GenerateTexts,
         Footnote = [.. Footnote],
+        AutoFootnote = AutoFootnote,
+        Conditions = Conditions?.Clone(),
         TextPoints = new Dictionary<int, int>(TextPoints),
     };
 }

@@ -220,7 +220,7 @@ public class MissionEditingTests
 
         // Time curve by its values, and back to the original.
         draft.SetTimeCurve(new TimeCurveSettings(TimeCurveShape.Plateau, 25, FullUntil: 60, ZeroAt: 150));
-        Assert.Contains("when 1'00\"", MissionTextGenerator.SuggestFootnote(draft.Comm, draft.TextLines(None))[1]);
+        Assert.Contains("1'00\" have elapsed.", string.Join(" ", MissionTextGenerator.SuggestFootnote(draft.Comm, draft.TextLines(None), draft.Conditions)));
         draft.RestoreOriginal(gc.File.Comm);
         Assert.False(draft.IsChanged);
         Assert.Null(draft.SettingsToSave());

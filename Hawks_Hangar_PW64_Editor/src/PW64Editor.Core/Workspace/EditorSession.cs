@@ -679,6 +679,21 @@ public sealed class EditorSession
     public IReadOnlyList<MedalLimits> LoadMedalLimits() =>
         Layout.Missions is { } layout ? new MissionTables(CleanRom.Data, layout).MedalLimits() : [];
 
+    // ----------------------------------------------------------------- features
+
+    /// <summary>Saves which additional features are built into the game (Features tab).</summary>
+    public void SaveFeatures(GameFeatureSettings features)
+    {
+        Project.Settings.Features = new GameFeatureSettings
+        {
+            DebugOutput = features.DebugOutput,
+            StartupInfo = features.StartupInfo,
+            GameMessages = features.GameMessages,
+            OnScreen = features.OnScreen,
+        };
+        Project.Save();
+    }
+
     /// <summary>Lists the restore points, newest first.</summary>
     public IReadOnlyList<BackupInfo> GetRestorePoints() => ProjectBackups.List(Project);
 

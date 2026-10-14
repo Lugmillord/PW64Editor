@@ -205,7 +205,26 @@ public static class MissionCatalog
         return sum;
     }
 
-    /// <summary>How many rings of each type (0-3) the mission has.</summary>
+    /// <summary>
+    /// Height of the (first) takeoff pad (TPAD, position at 0x00, height = z at 0x08), or null. The
+    /// highest altitude of a flight is at least this value, so an altitude condition below it is
+    /// always met.
+    /// </summary>
+    public static float? StartAltitude(MissionFile file)
+    {
+        ReadOnlySpan<byte> data = file.GetObjectData(MissionObjectKind.TakeoffPad);
+        return data.Length >= 0x30 ? System.Buffers.Binary.BinaryPrimitives.ReadSingleBigEndian(data[8..]) : null;
+    }
+
+    /// <summary>The ring score type (0-based) of the invisible check rings (shown as type 3).</summary>
+    public const int CheckRingType = 2;
+
+    /// <summary>
+    /// How many rings of each type (0-3, the ring's score type at 0x72) the mission has. Type 2 rings
+    /// (shown as type 3) are invisible check rings: no model, no radar mark, no sound, but flying
+    /// through them still activates their child rings (rings.c). Dark Cavern uses two of them to
+    /// unlock the goal ring. Type 3 is the goal ring.
+    /// </summary>
     public static int[] RingTypeCounts(MissionFile file)
     {
         ReadOnlySpan<byte> data = file.GetObjectData(MissionObjectKind.Ring);
@@ -217,6 +236,14 @@ public static class MissionCatalog
 
         return counts;
     }
+
+    /// <summary>
+    /// How many objects of a type the conditions count: rings without the invisible check rings
+    /// (the game module skips them too), all others as the COMM block counts them.
+    /// </summary>
+    public static int ConditionTotal(MissionFile file, ConditionObject type) => type == ConditionObject.Rings
+        ? RingTypeCounts(file).Where((_, t) => t != CheckRingType).Sum()
+        : file.Comm.GetObjectCount(MissionConditions.Kind(type));
 
     /// <summary>
     /// Balloons (0x68 bytes each): points at 0x34; a balloon that splits (0x21) adds five smaller

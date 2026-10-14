@@ -20,7 +20,8 @@ namespace PW64Editor.Core.Code;
 /// <para>
 /// <b>Code cave</b>: a fix that needs more instructions than it replaces puts them into
 /// <see cref="CodeCaveStart"/> (the body of uvMemScanBlocks, see <see cref="PhotoAlbum"/>). Used so far:
-/// 0x2B4A4–0x2B4D4 (PhotoAlbum). Later fixes continue behind the last used word.
+/// 0x2B4A4–0x2B4D4 (PhotoAlbum), 0x2B4D4–0x2B548 (loader and gate of the code area, see
+/// <see cref="CodeArea"/>). Later fixes continue behind the last used word (up to 0x2B5A4).
 /// </para>
 /// </remarks>
 public static class CodeFixes
@@ -109,7 +110,7 @@ public static class CodeFixes
     /// memory manager only checks whether the start or the end of a new allocation lies inside a
     /// reserved block, so an allocation larger than a small block could cover it completely.</para>
     /// <para>Memory layout rule for future fixes: new data goes further down in front of
-    /// 0x801FE000, new program code behind 0x803805E0.</para>
+    /// 0x801FE000, new program code behind 0x803805E0 (the code area, see <see cref="CodeArea"/>).</para>
     /// <para><b>Missing texts</b> (textGetDataByIdx): for a text number that does not exist, the
     /// game returns NULL, and most callers crash on it. Now it returns an empty text instead. That
     /// text (a line break and the end code) is written over the start of a debug message

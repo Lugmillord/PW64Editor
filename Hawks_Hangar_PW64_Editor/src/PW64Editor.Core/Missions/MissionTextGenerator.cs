@@ -125,31 +125,134 @@ public static class MissionTextGenerator
             .ToList();
     }
 
-    /// <summary>A footnote that fits the mission: the time limit, the altitude, or the photo rule.</summary>
-    public static IReadOnlyList<string> SuggestFootnote(MissionComm comm, IReadOnlyList<PointLine> rows)
+    /// <summary>Longest footnote line the generator writes (the retail footnotes have up to 35 characters).</summary>
+    public const int FootnoteWidth = 34;
+
+    /// <summary>
+    /// Lines the footnote has room for: a mission screen text has 10 lines, and the rows, the total
+    /// and the empty lines above them always take 7.
+    /// </summary>
+    public const int FootnoteLines = 3;
+
+    /// <summary>
+    /// A footnote written from the mission's settings: the time limit, the conditions for the
+    /// time points, the altitude for full altitude points, "a crash gives 0 points" and the photo
+    /// rule. The sentences follow each other, wrapped to <see cref="FootnoteWidth"/> characters; if
+    /// they need more than <see cref="FootnoteLines"/> lines, the short forms are used.
+    /// </summary>
+    public static IReadOnlyList<string> SuggestFootnote(MissionComm comm, IReadOnlyList<PointLine> rows, MissionConditions conditions)
     {
-        if (rows.Any(r => r.Source == PointSource.Time))
+        var parts = new List<(string Long, string Short)>();
+        bool time = rows.Any(r => r.Source == PointSource.Time && r.Points > 0);
+        if (time)
         {
-            TimeCurveSettings time = MissionCurves.Describe(comm.GetCurve(ScoreCurveKind.Time));
-            return time.Shape switch
+            TimeCurveSettings curve = MissionCurves.Describe(comm.GetCurve(ScoreCurveKind.Time));
+            switch (curve.Shape)
             {
-                TimeCurveShape.Plateau => ["Time points will be deducted", $"when {Clock(time.FullUntil)} have elapsed."],
-                TimeCurveShape.Target => ["Time points will depend on how", $"close to {Clock(time.TargetTime)} you are when landing."],
-                _ => [],
-            };
+                case TimeCurveShape.Plateau:
+                    parts.Add(($"Time points will be deducted when {Clock(curve.FullUntil)} have elapsed.",
+                        $"Time points drop after {Clock(curve.FullUntil)}."));
+                    break;
+                case TimeCurveShape.Target:
+                    parts.Add(($"Time points will depend on how close to {Clock(curve.TargetTime)} you are when landing.",
+                        $"Land close to {Clock(curve.TargetTime)}."));
+                    break;
+            }
+
+            var needs = new List<string>();
+            foreach ((ConditionObject type, int count) in conditions.Required.OrderBy(r => r.Key))
+            {
+                needs.Add(count == MissionConditions.All
+                    ? $"all {EnglishName(type, 2)}"
+                    : $"{(count == 1 ? "1" : $"at least {count}")} {EnglishName(type, count)}");
+            }
+
+            if (conditions.MinimumAltitude is { } altitude)
+            {
+                needs.Add($"{Meters(altitude)} altitude");
+            }
+
+            if (needs.Count > 0)
+            {
+                parts.Add(($"Time points only with {JoinEnglish(needs)}.", $"Time only with {JoinEnglish(needs)}."));
+            }
         }
 
-        if (rows.Any(r => r.Source == PointSource.Altitude))
+        if (rows.Any(r => r.Source == PointSource.Altitude && r.Points > 0))
         {
-            return ["The higher the altitude, the more", "altitude points you will receive."];
+            ScoreCurve curve = comm.GetCurve(ScoreCurveKind.Altitude);
+            float full = curve.Points.FirstOrDefault(p => p.Y >= curve.Maximum).X;
+            parts.Add(($"Full altitude points from {Meters(full)} on.", $"Full altitude pts. at {Meters(full)}."));
+        }
+
+        if (conditions.CrashGivesZero)
+        {
+            parts.Add(("A crash gives 0 points.", "Crash: 0 pts."));
         }
 
         if (rows.Any(r => r.Source == PointSource.Photo))
         {
-            return ["The photo with the best score", "will be counted as the best shot."];
+            parts.Add(("The photo with the best score will be counted as the best shot.", "The best photo counts."));
         }
 
-        return [];
+        List<string> lines = Wrap(string.Join(" ", parts.Select(p => p.Long))).ToList();
+        if (lines.Count > FootnoteLines)
+        {
+            lines = Wrap(string.Join(" ", parts.Select(p => p.Short))).ToList();
+        }
+
+        return lines;
+    }
+
+    /// <summary>Breaks text into lines of at most <see cref="FootnoteWidth"/> characters.</summary>
+    private static IEnumerable<string> Wrap(string sentence)
+    {
+        var line = new System.Text.StringBuilder();
+        foreach (string word in sentence.Split(' ', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (line.Length > 0 && line.Length + 1 + word.Length > FootnoteWidth)
+            {
+                yield return line.ToString();
+                line.Clear();
+            }
+
+            if (line.Length > 0)
+            {
+                line.Append(' ');
+            }
+
+            line.Append(word);
+        }
+
+        if (line.Length > 0)
+        {
+            yield return line.ToString();
+        }
+    }
+
+    /// <summary>A height in game units, written in the meters the game shows.</summary>
+    private static string Meters(float units) => $"{MathF.Round(GameUnits.ToMeters(units)).ToString("0", CultureInfo.InvariantCulture)} m";
+
+    private static string JoinEnglish(IReadOnlyList<string> parts) => parts.Count switch
+    {
+        1 => parts[0],
+        _ => string.Join(", ", parts.Take(parts.Count - 1)) + " and " + parts[^1],
+    };
+
+    /// <summary>The game's (English) name of an object type, singular for 1.</summary>
+    private static string EnglishName(ConditionObject type, int count)
+    {
+        bool one = count == 1;
+        return type switch
+        {
+            ConditionObject.Rings => one ? "ring" : "rings",
+            ConditionObject.Balloons => one ? "balloon" : "balloons",
+            ConditionObject.Targets => one ? "target" : "targets",
+            ConditionObject.HoverPads => one ? "floating pad" : "floating pads",
+            ConditionObject.MecaHawks => one ? "Meca Hawk" : "Meca Hawks",
+            ConditionObject.BallTargets => one ? "ball target" : "ball targets",
+            _ => one ? "goal" : "goals",
+        };
     }
 
     /// <summary>A time like the game's texts: 1'30".</summary>

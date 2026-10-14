@@ -97,7 +97,19 @@ public sealed class MissionDraft
 
     /// <summary>The generated mission screen text.</summary>
     public string MissionScreenText(Func<TestId, MissionComm?> otherComm) =>
-        MissionTextGenerator.MissionScreenText(TextLines(otherComm), Settings.Footnote);
+        MissionTextGenerator.MissionScreenText(TextLines(otherComm), Footnote(otherComm));
+
+    /// <summary>The footnote the mission screen text gets: written from the settings, or as typed in.</summary>
+    public IReadOnlyList<string> Footnote(Func<TestId, MissionComm?> otherComm) =>
+        Settings.AutoFootnote == true
+            ? MissionTextGenerator.SuggestFootnote(Comm, TextLines(otherComm), Conditions)
+            : Settings.Footnote;
+
+    /// <summary>The conditions: as set in the editor, or the retail condition of the mission file.</summary>
+    public MissionConditions Conditions => Settings.Conditions ?? MissionConditions.FromComm(Comm);
+
+    /// <summary>True if "a crash gives 0 points" can be set (not for Cannonball: a shot always ends in the water or on a target).</summary>
+    public bool CanSetCrashCondition => Vehicle != Vehicle.Cannonball;
 
     /// <summary>The generated result sheet text.</summary>
     public string ResultSheetText(Func<TestId, MissionComm?> otherComm) =>
@@ -269,19 +281,30 @@ public sealed class MissionDraft
         Touch();
     }
 
-    /// <summary>Changes the condition and its value.</summary>
-    public void SetCondition(MissionCondition condition, float value)
+    /// <summary>Replaces the conditions (written into the mission file where the retail game can express them).</summary>
+    public void SetConditions(MissionConditions conditions)
     {
-        Comm.Condition = condition;
-        if (condition == MissionCondition.SomeObjects)
+        MissionConditions copy = conditions.Clone();
+        if (!CanSetCrashCondition)
         {
-            Comm.RequiredObjects = value;
-        }
-        else if (condition == MissionCondition.MinimumAltitude)
-        {
-            Comm.MinimumAltitude = value;
+            copy.CrashGivesZero = false;
         }
 
+        foreach (ConditionObject type in copy.Required.Keys.ToList())
+        {
+            if (copy.Required[type] is not MissionConditions.All and < 1)
+            {
+                copy.Required.Remove(type);
+            }
+        }
+
+        if (!copy.CanLandWhenReached(Comm))
+        {
+            copy.LandWhenReached = false;
+        }
+
+        Settings.Conditions = copy;
+        copy.ApplyTo(Comm);
         Touch();
     }
 
@@ -313,9 +336,23 @@ public sealed class MissionDraft
         Touch();
     }
 
-    /// <summary>Changes the footnote of the mission screen text.</summary>
+    /// <summary>Switches between a footnote written from the settings and one typed in.</summary>
+    public void SetAutoFootnote(bool automatic, Func<TestId, MissionComm?> otherComm)
+    {
+        if (!automatic && Settings.AutoFootnote == true)
+        {
+            // Start the typed-in footnote with the one written so far.
+            Settings.Footnote = [.. Footnote(otherComm)];
+        }
+
+        Settings.AutoFootnote = automatic;
+        Touch();
+    }
+
+    /// <summary>Changes the footnote of the mission screen text (it is no longer written automatically).</summary>
     public void SetFootnote(IEnumerable<string> lines)
     {
+        Settings.AutoFootnote = false;
         Settings.Footnote = lines.Select(l => l.TrimEnd()).ToList();
         while (Settings.Footnote.Count > 0 && Settings.Footnote[^1].Length == 0)
         {
@@ -347,9 +384,14 @@ public sealed class MissionDraft
         if (!Settings.GenerateTexts)
         {
             Settings.GenerateTexts = true;
-            if (Settings.Footnote.Count == 0 && CurrentScreenText is not null)
+            if (Settings.AutoFootnote is null && Settings.Footnote.Count == 0)
             {
-                Settings.Footnote = [.. MissionTextGenerator.ExtractFootnote(CurrentScreenText)];
+                // From now on the footnote follows the settings; the old one is kept for "typed in".
+                Settings.AutoFootnote = true;
+                if (CurrentScreenText is not null)
+                {
+                    Settings.Footnote = [.. MissionTextGenerator.ExtractFootnote(CurrentScreenText)];
+                }
             }
         }
 
@@ -367,6 +409,8 @@ public sealed class MissionDraft
             && (a.ResultRows ?? []).SequenceEqual(other.ResultRows ?? [])
             && (a.ResultRows is null) == (other.ResultRows is null)
             && a.Footnote.SequenceEqual(other.Footnote)
+            && a.AutoFootnote == other.AutoFootnote
+            && (a.Conditions is null ? other.Conditions is null : a.Conditions.SameAs(other.Conditions))
             && a.TextPoints.Count == other.TextPoints.Count
             && a.TextPoints.All(p => other.TextPoints.TryGetValue(p.Key, out int v) && v == p.Value);
     }

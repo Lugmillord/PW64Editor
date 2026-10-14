@@ -52,6 +52,29 @@ public sealed class ProjectSettings
 
     /// <summary>Changed result sheets and generated point texts of missions (only missions with changes).</summary>
     public List<Missions.MissionSettings> Missions { get; set; } = [];
+
+    /// <summary>Additional features built into the game (Features tab).</summary>
+    public GameFeatureSettings Features { get; set; } = new();
+}
+
+/// <summary>Additional features the editor builds into the game (stored in project.json).</summary>
+public sealed class GameFeatureSettings
+{
+    /// <summary>Debug output: messages to the IS-Viewer port of emulators and into a log in RAM.</summary>
+    public bool DebugOutput { get; set; }
+
+    /// <summary>With <see cref="DebugOutput"/>: report the steps of the game's startup.</summary>
+    public bool StartupInfo { get; set; }
+
+    /// <summary>With <see cref="DebugOutput"/>: pass on the debug messages of the original developers.</summary>
+    public bool GameMessages { get; set; }
+
+    /// <summary>With <see cref="DebugOutput"/>: show the editor's messages on the screen too (15 seconds).</summary>
+    public bool OnScreen { get; set; } = true;
+
+    /// <summary>What the game module does in a build (without the mission conditions).</summary>
+    public Code.GameModuleOptions ModuleOptions =>
+        new(DebugOutput, DebugOutput && StartupInfo, DebugOutput && GameMessages, DebugOutput && OnScreen);
 }
 
 /// <summary>

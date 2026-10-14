@@ -1,0 +1,56 @@
+<UserControl x:Class="PW64Editor.App.Views.FeaturesTab"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <UserControl.Resources>
+        <Style x:Key="SectionTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,4,0,6" />
+        </Style>
+        <Style x:Key="Note" TargetType="TextBlock">
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+            <Setter Property="Margin" Value="0,2,0,2" />
+        </Style>
+    </UserControl.Resources>
+
+    <!-- Additional features the editor builds into the game. Every change is saved in the project
+         right away and takes effect with the next build (Ctrl+S). -->
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel Margin="16,10,16,10" MaxWidth="900" HorizontalAlignment="Left">
+            <TextBlock Style="{StaticResource Note}"
+                       Text="Additional features that the editor builds into the hack ROM. Every change is saved in the project right away and takes effect with the next build (Ctrl+S)." />
+
+            <TextBlock Text="Debug output" Style="{StaticResource SectionTitle}" Margin="0,14,0,6" />
+            <CheckBox x:Name="DebugBox" Content="Write debug information" Checked="OnChanged" Unchecked="OnChanged" />
+            <TextBlock Style="{StaticResource Note}" Margin="22,4,0,0"
+                       Text="The game sends messages to the debug port (IS-Viewer) of the emulator. In ares, start ares.exe with --terminal: a console window shows the messages (or Tools › Tracer, entry &quot;ISViewer&quot;, to write them into a file). mupen64plus and simple64 show them in their log. Some flash carts (e.g. SummerCart64) send them over USB; on a normal cartridge they are ignored." />
+            <TextBlock Style="{StaticResource Note}" Margin="22,4,0,0"
+                       Text="In addition the game keeps the last 8 KiB of messages in RAM. The editor's code is loaded to 0x803805E0 (it starts with &quot;HHGM&quot;); the word at +0x18 points to the messages, the word at +0x20 counts the bytes written." />
+
+            <StackPanel x:Name="DebugOptions" Margin="22,10,0,0">
+                <CheckBox x:Name="OnScreenBox" Content="Also on the screen" Checked="OnChanged" Unchecked="OnChanged" />
+                <TextBlock Style="{StaticResource Note}" Margin="22,2,0,8"
+                           Text="The editor's messages (not those of the developers) also appear at the bottom of the picture and disappear 15 seconds after the last one. They are drawn into the finished picture, like the game's snow: emulators that draw the game themselves (e.g. ares, Parallel Launcher) show them; some others only with a setting such as &quot;copy the frame buffer to RAM&quot;." />
+                <CheckBox x:Name="StartupBox" Content="Startup information" Checked="OnChanged" Unchecked="OnChanged" />
+                <TextBlock Style="{StaticResource Note}" Margin="22,2,0,8"
+                           Text="Each step the game takes while starting, in order: &quot;Starting: …&quot; and &quot;Done: …&quot; with the time it took, and details where useful (controllers, EEPROM, memory used, number of texts). Ends with &quot;Startup complete&quot; when the title screen is ready. A step without &quot;Done&quot; is where the game stopped." />
+                <CheckBox x:Name="GameMessagesBox" Content="Messages of the original developers" Checked="OnChanged" Unchecked="OnChanged" />
+                <TextBlock Style="{StaticResource Note}" Margin="22,2,0,0"
+                           Text="The game contains debug messages of its developers (e.g. about the EEPROM or the memory), which the retail version does not print. They are passed on with the prefix [game]." />
+            </StackPanel>
+
+            <TextBlock Text="Mission settings report" Style="{StaticResource SectionTitle}" Margin="0,18,0,6" />
+            <Button x:Name="ReportButton" Content="Save mission settings as a text file…" Click="OnSaveReport"
+                    Style="{StaticResource DialogButton}" HorizontalAlignment="Left" />
+            <TextBlock Style="{StaticResource Note}" Margin="0,4,0,0"
+                       Text="Writes everything the Missions tab sets into one text file, as saved in the project: point rows, curves, ring points, time limits, conditions and how they are checked, footnotes and texts, the bytes changed in each mission file, and the build options and code fixes. Handy for finding a problem without sending the whole project. Changes that are not saved in the Missions tab yet are not in it." />
+
+            <Border Background="#FFF4E0" BorderBrush="#E8B04B" BorderThickness="1" Padding="8,5" Margin="0,14,0,0">
+                <TextBlock TextWrapping="Wrap" Foreground="#6B4500"
+                           Text="The editor's code is built into the ROM for the debug output and for missions with combined conditions (Missions tab). It takes 64 KiB of the game's free memory (0x803805E0–0x803905E0) and the last 64 KiB of the ROM. Use the debug output for testing; switch it off for a release." />
+            </Border>
+            <TextBlock x:Name="StatusText" Style="{StaticResource Note}" Margin="0,10,0,0" />
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

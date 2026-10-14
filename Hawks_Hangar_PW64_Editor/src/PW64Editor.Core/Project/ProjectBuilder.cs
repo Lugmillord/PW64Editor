@@ -1,4 +1,5 @@
 using PW64Editor.Core.Build;
+using PW64Editor.Core.Code;
 using PW64Editor.Core.FileSystem;
 using PW64Editor.Core.Iff;
 using PW64Editor.Core.Localization;
@@ -56,6 +57,7 @@ public static class ProjectBuilder
         }
 
         CheckTextFile(project, fileSystem, files);
+        ApplyMissionConditions(project, files);
 
         RomBuildResult romBuild;
         try
@@ -65,6 +67,8 @@ public static class ProjectBuilder
                 {
                     SequenceFile = BuildMusic(project, cleanRom, layout),
                     DataPatches = MissionPatches(project, cleanRom, layout),
+                    GameModule = project.Settings.Features.ModuleOptions with { Conditions = ModuleConditions(project, files) },
+                    GameModuleInfo = ModuleInfo(project),
                 });
         }
         catch (InvalidDataException ex)
@@ -180,6 +184,71 @@ public static class ProjectBuilder
             throw new ProjectException(CoreText.F("The music could not be changed: {0}", ex.Message), ex);
         }
     }
+
+    /// <summary>
+    /// Writes the condition byte of every mission with conditions from those conditions, so the
+    /// mission file always matches them (projects saved by earlier versions may still have the
+    /// game's "at least N" mode there, which would make the game say "please land" and remove the
+    /// other objects).
+    /// </summary>
+    public static void ApplyMissionConditions(HackProject project, List<GameFile> files)
+    {
+        List<Missions.MissionSettings> withConditions = project.Settings.Missions.Where(m => m.Conditions is not null).ToList();
+        if (withConditions.Count == 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < files.Count; i++)
+        {
+            if (files[i].FileType != Missions.MissionFile.FormType)
+            {
+                continue;
+            }
+
+            Missions.MissionFile mission = Missions.MissionFile.Parse(files[i].Data);
+            if (withConditions.FirstOrDefault(m => m.Id == mission.Comm.Id) is not { Conditions: { } conditions })
+            {
+                continue;
+            }
+
+            Missions.MissionComm comm = mission.Comm.Clone();
+            conditions.ApplyTo(comm);
+            if (!comm.ToArray().AsSpan().SequenceEqual(mission.Comm.ToArray()))
+            {
+                files[i] = files[i] with { Data = mission.WithComm(comm) };
+            }
+        }
+    }
+
+    /// <summary>
+    /// The missions whose conditions only the game module can check (combinations the retail
+    /// condition byte cannot express), read from the mission files as they are built.
+    /// </summary>
+    public static IReadOnlyList<GameModuleCondition> ModuleConditions(HackProject project, IReadOnlyList<GameFile> files)
+    {
+        List<Missions.MissionSettings> withConditions = project.Settings.Missions.Where(m => m.Conditions is not null).ToList();
+        if (withConditions.Count == 0)
+        {
+            return [];
+        }
+
+        var result = new List<GameModuleCondition>();
+        foreach (GameFile file in files.Where(f => f.FileType == Missions.MissionFile.FormType))
+        {
+            Missions.MissionComm comm = Missions.MissionFile.Parse(file.Data).Comm;
+            if (withConditions.FirstOrDefault(m => m.Id == comm.Id) is { Conditions: { } conditions } && conditions.NeedsModule(comm))
+            {
+                result.Add(conditions.ToModuleCondition(comm));
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>The line the debug output starts with: project, version and build time.</summary>
+    private static string ModuleInfo(HackProject project) =>
+        $"project \"{project.Settings.Name}\" {project.Settings.Version}, built {DateTime.Now:yyyy-MM-dd HH:mm}";
 
     /// <summary>The changed result rows of the missions, as patches of the table in the game code.</summary>
     /// <exception cref="ProjectException">A mission's rows cannot be stored.</exception>

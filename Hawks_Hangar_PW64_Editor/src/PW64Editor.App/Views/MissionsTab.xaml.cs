@@ -76,15 +76,6 @@ public partial class MissionsTab : UserControl
             new ChoiceItem<TimeMode>(TimeMode.Custom, L.T("Custom points")),
         };
         TimeShapeBox.DisplayMemberPath = nameof(ChoiceItem<int>.Text);
-        ConditionBox.ItemsSource = new[]
-        {
-            new ChoiceItem<MissionCondition>(MissionCondition.None, L.T("No condition (objects also count after a crash)")),
-            new ChoiceItem<MissionCondition>(MissionCondition.CrashGivesZero, L.T("A crash gives 0 points in total")),
-            new ChoiceItem<MissionCondition>(MissionCondition.AllObjects, L.T("Time points only if all objects are cleared")),
-            new ChoiceItem<MissionCondition>(MissionCondition.SomeObjects, L.T("Time points only if at least this many objects are cleared:")),
-            new ChoiceItem<MissionCondition>(MissionCondition.MinimumAltitude, L.T("Time points only if this altitude was reached:")),
-        };
-        ConditionBox.DisplayMemberPath = nameof(ChoiceItem<int>.Text);
     }
 
     /// <summary>Raised when changes become unsaved or saved.</summary>
@@ -97,7 +88,10 @@ public partial class MissionsTab : UserControl
     public sealed record VehicleItem(Vehicle Vehicle, string Text);
 
     /// <summary>A test of the second list.</summary>
-    public sealed record TestItem(MissionInfo Mission, string Text);
+    /// <param name="Mission">The mission shown (for Cannonball the level's first target).</param>
+    /// <param name="Text">The text of the list.</param>
+    /// <param name="Group">The missions edited together (Cannonball: the four targets of a level; otherwise the mission alone).</param>
+    public sealed record TestItem(MissionInfo Mission, string Text, IReadOnlyList<MissionInfo> Group);
 
     /// <summary>An entry of a choice list.</summary>
     public sealed record ChoiceItem<T>(T Value, string Text);
@@ -110,7 +104,7 @@ public partial class MissionsTab : UserControl
     private MissionDraft? SelectedDraft => SelectedMission is { } mission ? Draft(mission) : null;
 
     private IEnumerable<TextBox> ValueBoxes =>
-        [FullUntilBox, ZeroAtBox, TargetTimeBox, WindowBox, ZeroDistanceBox, LandNowBox, ConditionValueBox, HitCostBox, OutOfAreaBox, ReactionBox];
+        [FullUntilBox, ZeroAtBox, TargetTimeBox, WindowBox, ZeroDistanceBox, LandNowBox, AltitudeConditionValue, HitCostBox, OutOfAreaBox, ReactionBox];
 
     private IEnumerable<TextEditorPanel> Panels => [TitleEditor, TaskEditor, HintEditor, ScreenTextView, ResultTextView];
 
@@ -255,8 +249,42 @@ public partial class MissionsTab : UserControl
     private void FillTests(Vehicle vehicle)
     {
         _filling = true;
-        TestBox.ItemsSource = _missions.Where(m => m.Id.Vehicle == vehicle).Select(m => new TestItem(m, TestText(m))).ToList();
+        List<MissionInfo> missions = _missions.Where(m => m.Id.Vehicle == vehicle).ToList();
+        TestBox.ItemsSource = vehicle == Vehicle.Cannonball
+            // A Cannonball level is edited as a whole: its four targets share texts and the sheet.
+            ? missions.GroupBy(m => m.Id.Class)
+                .Select(g => g.OrderBy(m => m.Id.Test).ToList())
+                .Select(g => new TestItem(g[0], LevelText(g), g))
+                .ToList()
+            : missions.Select(m => new TestItem(m, TestText(m), [m])).ToList();
         _filling = false;
+    }
+
+    /// <summary>"Level 1 – title (4 targets)" for a Cannonball level.</summary>
+    private string LevelText(IReadOnlyList<MissionInfo> targets)
+    {
+        MissionInfo first = targets[0];
+        string title = first.TitleTextName is { } name && _texts?.FindRow(name) is { } row ? PlainText(row.Markup) : first.File.Name;
+        string changed = targets.Any(t => _drafts.TryGetValue(t.Id, out MissionDraft? d) && d.IsChanged) ? " ●" : string.Empty;
+        return $"{MissionCatalog.ClassName(first.Id.Vehicle, first.Id.Class)} – {title} ({L.F("{0} targets", targets.Count)}){changed}";
+    }
+
+    /// <summary>The missions edited together with the selected one.</summary>
+    private IReadOnlyList<MissionInfo> SelectedGroup => (TestBox.SelectedItem as TestItem)?.Group ?? [];
+
+    /// <summary>For a Cannonball level: the draft of the target behind a row of the sheet, or null.</summary>
+    private MissionDraft? CannonballTarget(MissionDraft draft, int rowIndex)
+    {
+        if (draft.Vehicle != Vehicle.Cannonball || rowIndex >= draft.Rows.Count
+            || draft.Rows[rowIndex] is < PointSource.CannonballTarget1 or > PointSource.CannonballTarget4)
+        {
+            return null;
+        }
+
+        int test = draft.Rows[rowIndex] - PointSource.CannonballTarget1;
+        return _missions.FirstOrDefault(m => m.Id == new TestId(draft.Mission.Id.Class, Vehicle.Cannonball, test)) is { } target
+            ? Draft(target)
+            : null;
     }
 
     private void OnTestChanged(object sender, SelectionChangedEventArgs e)
@@ -375,8 +403,45 @@ public partial class MissionsTab : UserControl
             _filling = false;
         }
 
-        ShowMission(draft.Mission);
+        ShowMission(SelectedMission ?? draft.Mission);
         UnsavedChangesChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>Drops the unsaved changes of the mission shown (a Cannonball level: all four targets).</summary>
+    private void OnUndoChanges(object sender, RoutedEventArgs e)
+    {
+        if (SelectedMission is not { } shown)
+        {
+            return;
+        }
+
+        IReadOnlyList<MissionInfo> group = SelectedGroup.Count > 0 ? SelectedGroup : [shown];
+        foreach (MissionInfo mission in group)
+        {
+            _drafts.Remove(mission.Id);
+            _customTime.Remove(mission.Id);
+        }
+
+        // The point texts back to their saved state, unless another changed mission writes them.
+        HashSet<string> stillWritten = _drafts.Values.Where(d => d.IsChanged && d.Settings.GenerateTexts)
+            .SelectMany(d => new[] { d.Mission.MissionScreenTextName, d.Mission.ResultSheetTextName })
+            .OfType<string>()
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (string? name in new[] { shown.MissionScreenTextName, shown.ResultSheetTextName })
+        {
+            if (Row(name) is { } row && !stillWritten.Contains(row.Name))
+            {
+                SetText(name, row.SavedMarkup);
+            }
+        }
+
+        // Missions whose saved settings generate the texts write them again from the saved state.
+        foreach (MissionInfo mission in group.Where(m => m.Settings?.GenerateTexts == true))
+        {
+            WriteTexts(Draft(mission));
+        }
+
+        Changed(Draft(shown));
     }
 
     private void OnRestoreOriginal(object sender, RoutedEventArgs e)
@@ -386,16 +451,22 @@ public partial class MissionsTab : UserControl
             return;
         }
 
-        if (!Ui.Confirm(Window.GetWindow(this)!, L.F("Set points, conditions, time limit and point texts of {0} back to the original game?",
-                MissionCatalog.Label(draft.Mission.Id))))
+        IReadOnlyList<MissionInfo> group = SelectedGroup.Count > 0 ? SelectedGroup : [draft.Mission];
+        string label = group.Count > 1
+            ? $"{Vehicles.Name(draft.Vehicle)} {MissionCatalog.ClassName(draft.Vehicle, draft.Mission.Id.Class)}"
+            : MissionCatalog.Label(draft.Mission.Id);
+        if (!Ui.Confirm(Window.GetWindow(this)!, L.F("Set points, conditions, time limit and point texts of {0} back to the original game?", label)))
         {
             return;
         }
 
         try
         {
-            draft.RestoreOriginal(_session.OriginalMissionComm(draft.Mission));
-            _customTime.Remove(draft.Mission.Id);
+            foreach (MissionInfo mission in group)
+            {
+                Draft(mission).RestoreOriginal(_session.OriginalMissionComm(mission));
+                _customTime.Remove(mission.Id);
+            }
         }
         catch (Exception ex) when (Ui.IsExpectedError(ex))
         {
@@ -434,11 +505,13 @@ public partial class MissionsTab : UserControl
                 PointsGrid.Children.Clear();
                 PointsGrid.RowDefinitions.Clear();
                 RestoreButton.IsEnabled = false;
+                UndoButton.IsEnabled = false;
                 return;
             }
 
             MissionDraft draft = Draft(mission);
             RestoreButton.IsEnabled = !mission.IsBirdman;
+            UndoButton.IsEnabled = SelectedGroup.Append(mission).Any(m => _drafts.TryGetValue(m.Id, out MissionDraft? d) && d.IsChanged);
             InfoText.Text = L.F("Mission file {0} · island: {1} · texts: {2}", mission.FileNumber, MissionCatalog.IslandName(mission.Island),
                 mission.File.TextBase.Length > 0 ? mission.File.TextBase : L.T("none"))
                 + (mission.FromProject ? " · " + L.T("changed in the project") : string.Empty)
@@ -448,6 +521,7 @@ public partial class MissionsTab : UserControl
             ShowPoints(draft);
             ShowTime(draft);
             ShowAltitude(draft);
+            ShowLanding(draft);
             ShowConditions(draft);
             ShowResults(draft);
         }
@@ -471,7 +545,9 @@ public partial class MissionsTab : UserControl
         IEnumerable<TextBox> boxes = PointsGrid.Children.OfType<TextBox>()
             .Concat(RingTypes.Children.OfType<TextBox>())
             .Concat(CurveBoxes(TimeCurvePanel))
-            .Concat(CurveBoxes(AltitudeCurvePanel));
+            .Concat(CurveBoxes(AltitudeCurvePanel))
+            .Concat(CurveBoxes(LandingCurvePanel))
+            .Concat(ObjectConditionsGrid.Children.OfType<TextBox>());
         if (boxes.FirstOrDefault(b => Equals(b.Tag, tag)) is { } target)
         {
             Dispatcher.BeginInvoke(new Action(() => target.Focus()));
@@ -547,7 +623,7 @@ public partial class MissionsTab : UserControl
 
         PointsNote.Text = draft.CanChangeSources
             ? L.T("The rows of the result sheet, from top to bottom (at most 4). Drag a row by its handle (⠿) to move it. For points from a curve, the number changes the curve; for points from objects, it is the number the texts show (the game counts the objects).")
-            : L.T("The four targets of the level. Each target has its own test; here you can change the points of this target.");
+            : L.T("The four targets of the level. Each target is a test of its own; its row gives the points of its landing curve (the best of the three shots counts).");
 
         IReadOnlyList<MissionPointRow> rows = draft.EvaluateRows(OtherComm);
         AddHeader();
@@ -684,7 +760,7 @@ public partial class MissionsTab : UserControl
             Text = points.ToString(CultureInfo.CurrentCulture),
             Width = 60,
             Margin = new Thickness(0, 2, 14, 2),
-            IsEnabled = draft.CanSetRowPoints(index),
+            IsEnabled = draft.CanSetRowPoints(index) || CannonballTarget(draft, index) is not null,
             VerticalContentAlignment = VerticalAlignment.Center,
             Tag = $"points{index}",
         };
@@ -704,8 +780,10 @@ public partial class MissionsTab : UserControl
 
             if (value != points)
             {
-                draft.SetRowPoints(index, value, OtherComm);
-                Changed(draft);
+                // Cannonball: the row of a target changes that target's own test.
+                MissionDraft target = CannonballTarget(draft, index) ?? draft;
+                target.SetRowPoints(index, value, OtherComm);
+                Changed(target);
             }
         }
 
@@ -843,7 +921,7 @@ public partial class MissionsTab : UserControl
 
     private static int ObjectCount(MissionInfo mission, PointSource source) => source switch
     {
-        PointSource.Rings => mission.File.Comm.GetObjectCount(MissionObjectKind.Ring),
+        PointSource.Rings => MissionCatalog.ConditionTotal(mission.File, ConditionObject.Rings),
         PointSource.Balloons => mission.File.Comm.GetObjectCount(MissionObjectKind.Balloon),
         PointSource.Targets => mission.File.Comm.GetObjectCount(MissionObjectKind.Target),
         PointSource.HoverPads => mission.File.Comm.GetObjectCount(MissionObjectKind.HoverPad),
@@ -855,23 +933,43 @@ public partial class MissionsTab : UserControl
     {
         RingTypes.Children.Clear();
         int[] counts = MissionCatalog.RingTypeCounts(draft.Mission.File);
-        if (counts.Sum() == 0)
+        if (counts.Sum() == 0 && !draft.Rows.Contains(PointSource.Rings))
         {
             return;
         }
 
+        // Types 1 and 2 always (rings of any type can be added later), the goal ring only where
+        // the mission has one. Type 3 rings are invisible check rings that only unlock other
+        // rings: they give no points, so they only get a line of explanation.
         RingPanel.Visibility = Visibility.Visible;
         for (int type = 0; type < counts.Length; type++)
         {
-            if (counts[type] == 0)
+            bool goal = type == MissionComm.RingTypeCount - 1;
+            if (goal && counts[type] == 0)
             {
                 continue;
             }
 
+            if (type == MissionCatalog.CheckRingType)
+            {
+                if (counts[type] > 0)
+                {
+                    RingTypes.Children.Add(new TextBlock
+                    {
+                        Text = L.F("Type 3 ({0}×): invisible check rings, no points", counts[type]),
+                        VerticalAlignment = VerticalAlignment.Center,
+                        Margin = new Thickness(0, 0, 18, 0),
+                        Foreground = (System.Windows.Media.Brush)FindResource("MutedTextBrush"),
+                    });
+                }
+
+                continue;
+            }
+
             int ringType = type;
-            string label = type == MissionComm.RingTypeCount - 1
+            string label = goal
                 ? L.F("Goal ring ({0}×):", counts[type])
-                : L.F("Type {0} ({1}×):", type + 1, counts[type]);
+                : counts[type] > 0 ? L.F("Type {0} ({1}×):", type + 1, counts[type]) : L.F("Type {0} (not used):", type + 1);
             RingTypes.Children.Add(new TextBlock { Text = label, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 6, 0) });
             int current = draft.Comm.GetRingPoints(type);
             var box = new TextBox { Text = current.ToString(CultureInfo.CurrentCulture), Width = 50, Margin = new Thickness(0, 0, 18, 0), Tag = $"ring{type}" };
@@ -916,6 +1014,8 @@ public partial class MissionsTab : UserControl
 
     private void ShowTime(MissionDraft draft)
     {
+        // Cannonball: no time points, no "Land now" (a shot is over in seconds).
+        TimeSection.Visibility = draft.Vehicle == Vehicle.Cannonball ? Visibility.Collapsed : Visibility.Visible;
         MissionComm comm = draft.Comm;
         bool hasTime = draft.Rows.Contains(PointSource.Time);
         ScoreCurve curve = comm.GetCurve(ScoreCurveKind.Time);
@@ -978,8 +1078,33 @@ public partial class MissionsTab : UserControl
         AltitudePanel.Visibility = hasAltitude ? Visibility.Visible : Visibility.Collapsed;
         if (hasAltitude)
         {
-            AltitudeCurvePanel.Children.Add(CurveEditor(draft, ScoreCurveKind.Altitude, L.T("Altitude"), 100, "altitude"));
+            AltitudeCurvePanel.Children.Add(CurveEditor(draft, ScoreCurveKind.Altitude, L.T("Altitude (m)"), 100, "altitude", GameUnits.MetersPerUnit));
         }
+    }
+
+    /// <summary>The landing accuracy curve: distance in meters as the game counts them.</summary>
+    private void ShowLanding(MissionDraft draft)
+    {
+        LandingCurvePanel.Children.Clear();
+        bool cannonball = draft.Vehicle == Vehicle.Cannonball;
+        bool shown = cannonball || draft.Rows.Contains(PointSource.LandingAccuracy);
+        LandingPanel.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
+        if (!shown)
+        {
+            return;
+        }
+
+        bool gyrocopter = draft.Vehicle == Vehicle.Gyrocopter;
+        LandingTitle.Text = cannonball ? L.T("Target accuracy") : L.T("Landing accuracy");
+        LandingNote.Text = (cannonball
+                ? L.T("The distance of the cannonball's landing point from the centre of the target gives the points of this curve.")
+                : L.T("The distance of the resting position from the centre of the nearest landing pad (or from the centre line of a runway) gives the points of this curve. A good landing needs the resting position on the pad (within 21 m of its centre)."))
+            + " " + L.T("Distances are in meters as the game counts them. Between two points the points fall or rise evenly; beyond the last point the last one counts. Two points at the same distance make a step.")
+            + (gyrocopter
+                ? " " + L.T("The Gyrocopter measures twice, at the touchdown point and at the resting position, and multiplies the two values of the curve. The points shown are those for a landing with both at this distance.")
+                : string.Empty);
+        LandingCurvePanel.Children.Add(CurveEditor(draft, ScoreCurveKind.LandingAccuracy, L.T("Distance (m)"), 5, "landing",
+            GameUnits.MetersPerUnit, squaredPoints: gyrocopter));
     }
 
     // ----------------------------------------------------------------- curve points
@@ -993,9 +1118,15 @@ public partial class MissionsTab : UserControl
     /// <param name="valueHeader">Header of the measured value (time, altitude).</param>
     /// <param name="step">Distance of a new point behind the last one.</param>
     /// <param name="tagPrefix">Prefix of the boxes' tags (to keep the focus after rebuilding).</param>
-    private UIElement CurveEditor(MissionDraft draft, ScoreCurveKind kind, string valueHeader, float step, string tagPrefix)
+    /// <param name="xScale">Shown measured value per stored one (heights and distances: meters per game unit).</param>
+    /// <param name="squaredPoints">The points shown are the square of the stored ones (Gyrocopter landing:
+    /// the game multiplies two values of the same curve).</param>
+    private UIElement CurveEditor(MissionDraft draft, ScoreCurveKind kind, string valueHeader, float step, string tagPrefix, float xScale = 1,
+        bool squaredPoints = false)
     {
         List<CurvePoint> points = [.. draft.Comm.GetCurve(kind).Points];
+        string ShowX(float x) => xScale == 1 ? FormatNumber(x) : FormatMeters(x * xScale);
+        string ShowY(float y) => squaredPoints ? FormatMeters(y * y) : FormatNumber(y);
         var panel = new StackPanel();
         var grid = new Grid();
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto, MinWidth = 40 });
@@ -1038,7 +1169,18 @@ public partial class MissionsTab : UserControl
                     return;
                 }
 
-                typed.Add(new CurvePoint((float)x, (float)y));
+                if (squaredPoints && y > MissionCurves.MaxCurvePoints)
+                {
+                    Ui.ShowError(Window.GetWindow(this)!, L.T("Points are whole numbers from 0 to 126 (the game stores at most 126 per test)."));
+                    ShowMission(draft.Mission);
+                    return;
+                }
+
+                // An unchanged box keeps the stored value exactly (shown values are rounded).
+                float storedX = valueBoxes[i].Text.Trim() == ShowX(points[i].X) ? points[i].X : (float)(x / xScale);
+                float storedY = pointBoxes[i].Text.Trim() == ShowY(points[i].Y) ? points[i].Y
+                    : squaredPoints ? MathF.Sqrt((float)Math.Max(0, y)) : (float)y;
+                typed.Add(new CurvePoint(storedX, storedY));
             }
 
             if (!typed.SequenceEqual(points))
@@ -1081,8 +1223,8 @@ public partial class MissionsTab : UserControl
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             Add(new TextBlock { Text = (i + 1).ToString(CultureInfo.CurrentCulture), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 2, 14, 2) }, row, 0);
 
-            var valueBox = new TextBox { Text = FormatNumber(points[i].X), Width = 80, Margin = new Thickness(0, 2, 14, 2), Tag = $"{tagPrefix}x{i}" };
-            var pointBox = new TextBox { Text = FormatNumber(points[i].Y), Width = 60, Margin = new Thickness(0, 2, 14, 2), Tag = $"{tagPrefix}y{i}" };
+            var valueBox = new TextBox { Text = ShowX(points[i].X), Width = 80, Margin = new Thickness(0, 2, 14, 2), Tag = $"{tagPrefix}x{i}" };
+            var pointBox = new TextBox { Text = ShowY(points[i].Y), Width = 60, Margin = new Thickness(0, 2, 14, 2), Tag = $"{tagPrefix}y{i}" };
             Hook(valueBox);
             Hook(pointBox);
             valueBoxes.Add(valueBox);
@@ -1117,10 +1259,10 @@ public partial class MissionsTab : UserControl
         addButton.Click += (_, _) =>
         {
             CurvePoint last = points.Count > 0 ? points[^1] : new CurvePoint(0, 0);
-            Apply([.. points, new CurvePoint(last.X + step, last.Y)]);
+            Apply([.. points, new CurvePoint(last.X + (step / xScale), last.Y)]);
         };
         panel.Children.Add(addButton);
-        panel.Children.Add(CurveDrawing(points));
+        panel.Children.Add(CurveDrawing(points.Select(p => new CurvePoint(p.X * xScale, squaredPoints ? p.Y * p.Y : p.Y)).ToList()));
         return panel;
     }
 
@@ -1164,30 +1306,219 @@ public partial class MissionsTab : UserControl
         return canvas;
     }
 
+    /// <summary>The controls of one object type in the conditions (see <see cref="ShowConditions"/>).</summary>
+    private sealed record ObjectConditionRow(ConditionObject Type, int Total, CheckBox Check, ComboBox Kind, TextBox Count);
+
+    private readonly List<ObjectConditionRow> _objectRows = [];
+
     private void ShowConditions(MissionDraft draft)
     {
         MissionComm comm = draft.Comm;
-        ConditionBox.SelectedItem = ((IEnumerable<ChoiceItem<MissionCondition>>)ConditionBox.ItemsSource).FirstOrDefault(i => i.Value == comm.Condition);
-        ConditionValueBox.Visibility = comm.Condition is MissionCondition.SomeObjects or MissionCondition.MinimumAltitude ? Visibility.Visible : Visibility.Collapsed;
-        ConditionValueBox.Text = comm.Condition switch
+        MissionConditions conditions = draft.Conditions;
+        bool cannonball = draft.Vehicle == Vehicle.Cannonball;
+
+        // Cannonball: a shot always ends in the water or on a target, and there are no time points.
+        ConditionsSection.Visibility = cannonball || draft.Mission.IsBirdman ? Visibility.Collapsed : Visibility.Visible;
+        CrashZeroBox.IsChecked = conditions.CrashGivesZero;
+        CrashZeroBox.Visibility = draft.CanSetCrashCondition ? Visibility.Visible : Visibility.Collapsed;
+        TimeConditionsNote.Text = draft.Rows.Contains(PointSource.Time)
+            ? L.T("All checked conditions must be met; otherwise the time points are 0.")
+            : L.T("This mission has no time points: these conditions only matter once \"Time\" is one of its rows.");
+
+        ObjectConditionsGrid.Children.Clear();
+        ObjectConditionsGrid.RowDefinitions.Clear();
+        _objectRows.Clear();
+        foreach (ConditionObject type in Enum.GetValues<ConditionObject>())
         {
-            MissionCondition.SomeObjects => FormatNumber(comm.RequiredObjects),
-            MissionCondition.MinimumAltitude => FormatNumber(comm.MinimumAltitude),
-            _ => string.Empty,
-        };
+            int total = MissionCatalog.ConditionTotal(draft.Mission.File, type);
+            if (total > 0 || conditions.Required.ContainsKey(type))
+            {
+                AddObjectCondition(type, total, conditions);
+            }
+        }
+
+        if (_objectRows.Count == 0)
+        {
+            ObjectConditionsGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            ObjectConditionsGrid.Children.Add(new TextBlock
+            {
+                Text = L.T("The mission has no objects that can be counted (rings, balloons, targets, floating pads, Meca Hawks, ball targets, goals)."),
+                TextWrapping = TextWrapping.Wrap,
+                Foreground = (System.Windows.Media.Brush)FindResource("MutedTextBrush"),
+            });
+        }
+
+        LandWhenReachedBox.Visibility = conditions.CanLandWhenReached(comm) ? Visibility.Visible : Visibility.Collapsed;
+        LandWhenReachedBox.IsChecked = conditions.LandWhenReached;
+        AltitudeConditionBox.IsChecked = conditions.MinimumAltitude is not null;
+        // Shown in the game's meters, stored in game units.
+        AltitudeConditionValue.Text = conditions.MinimumAltitude is { } minimum
+            ? FormatMeters(GameUnits.ToMeters(minimum))
+            : FormatMeters(comm.MinimumAltitude > 0 ? GameUnits.ToMeters(comm.MinimumAltitude) : 400);
+        AltitudeConditionValue.IsEnabled = conditions.MinimumAltitude is not null;
+
+        // The highest altitude counts from the start: a value below the takeoff height is always reached.
+        float? start = MissionCatalog.StartAltitude(draft.Mission.File);
+        StartAltitudeNote.Text = start is { } height
+            ? L.F("The flight starts {0} m above sea level (the HUD's \"SEA LEVEL\"), so the highest altitude reached is always at least that much.",
+                FormatMeters(MathF.Round(GameUnits.ToMeters(height))))
+                + (conditions.MinimumAltitude is { } needed && needed <= height ? " " + L.T("This condition is therefore always met.") : string.Empty)
+            : string.Empty;
+        ConditionsHowNote.Text = conditions.IsEmpty
+            ? string.Empty
+            : conditions.NeedsModule(comm)
+                ? L.T("The original game can only check one of these conditions at a time. This combination is checked by the editor's game code, which is built into the ROM for it.")
+                : L.T("The original game checks these conditions itself.");
 
         bool birdman = draft.Mission.IsBirdman;
         HitPanel.Visibility = draft.Vehicle is Vehicle.Gyrocopter or Vehicle.RocketBelt || comm.HitDeduction != 0 ? Visibility.Visible : Visibility.Collapsed;
         HitCostBox.Text = (-comm.HitDeduction).ToString(CultureInfo.CurrentCulture);
         OutOfAreaPanel.Visibility = draft.Vehicle == Vehicle.JumbleHopper ? Visibility.Visible : Visibility.Collapsed;
         OutOfAreaBox.Text = FormatNumber(comm.OutOfAreaDeduction);
-        ReactionPanel.Visibility = birdman ? Visibility.Collapsed : Visibility.Visible;
+        ReactionPanel.Visibility = birdman || cannonball ? Visibility.Collapsed : Visibility.Visible;
         ReactionBox.Text = comm.ReactionThreshold.ToString(CultureInfo.CurrentCulture);
 
+        // Footnote: written from the settings, or typed in.
+        bool automatic = draft.Settings.AutoFootnote ?? !draft.Settings.GenerateTexts;
+        AutoFootnoteBox.IsChecked = automatic;
         FootnoteBox.Text = string.Join("\n", draft.Settings.GenerateTexts
-            ? draft.Settings.Footnote
-            : draft.CurrentScreenText is { } screen ? MissionTextGenerator.ExtractFootnote(screen) : []);
+            ? draft.Footnote(OtherComm)
+            : automatic
+                ? MissionTextGenerator.SuggestFootnote(comm, draft.TextLines(OtherComm), conditions)
+                : draft.CurrentScreenText is { } screen ? MissionTextGenerator.ExtractFootnote(screen) : []);
+        FootnoteBox.IsReadOnly = automatic;
         FootnoteBox.IsEnabled = !birdman && draft.Mission.MissionScreenTextName is not null;
+        AutoFootnoteBox.IsEnabled = FootnoteBox.IsEnabled;
+    }
+
+    /// <summary>One line of the object conditions: "[x] Rings   [at least ▾] [5] of 15 rings".</summary>
+    private void AddObjectCondition(ConditionObject type, int total, MissionConditions conditions)
+    {
+        int gridRow = ObjectConditionsGrid.RowDefinitions.Count;
+        ObjectConditionsGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        bool required = conditions.Required.TryGetValue(type, out int count);
+        string name = MissionConditions.Name(type);
+
+        var check = new CheckBox
+        {
+            Content = char.ToUpper(name[0], CultureInfo.CurrentCulture) + name[1..],
+            IsChecked = required,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 2, 10, 2),
+        };
+        var kind = new ComboBox
+        {
+            ItemsSource = new[] { L.F("all {0}", total), L.T("at least") },
+            SelectedIndex = required && count != MissionConditions.All ? 1 : 0,
+            Width = 110,
+            IsEnabled = required,
+            Margin = new Thickness(0, 2, 6, 2),
+        };
+        var number = new TextBox
+        {
+            Text = (required && count != MissionConditions.All ? count : Math.Max(1, total)).ToString(CultureInfo.CurrentCulture),
+            Width = 50,
+            IsEnabled = required && count != MissionConditions.All,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 2, 6, 2),
+            Tag = $"condition{(int)type}",
+        };
+        var label = new TextBlock
+        {
+            Text = L.F("of {0} {1}", total, name),
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = (System.Windows.Media.Brush)FindResource("MutedTextBrush"),
+        };
+
+        check.Click += (_, _) => OnConditionsChanged(check, new RoutedEventArgs());
+        kind.SelectionChanged += (_, _) =>
+        {
+            if (!_showing)
+            {
+                // The rows are rebuilt afterwards; do that after this list's event.
+                Dispatcher.BeginInvoke(new Action(() => OnConditionsChanged(kind, new RoutedEventArgs())));
+            }
+        };
+        number.LostKeyboardFocus += (_, e) =>
+        {
+            _focusAfterRefresh = (e.NewFocus as FrameworkElement)?.Tag as string;
+            OnConditionsChanged(number, new RoutedEventArgs());
+        };
+        number.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Enter)
+            {
+                OnConditionsChanged(number, new RoutedEventArgs());
+            }
+        };
+
+        UIElement[] cells = [check, kind, number, label];
+        for (int c = 0; c < cells.Length; c++)
+        {
+            Grid.SetRow(cells[c], gridRow);
+            Grid.SetColumn(cells[c], c);
+            ObjectConditionsGrid.Children.Add(cells[c]);
+        }
+
+        _objectRows.Add(new ObjectConditionRow(type, total, check, kind, number));
+    }
+
+    /// <summary>A condition was switched or changed: read all of them and store them.</summary>
+    private void OnConditionsChanged(object sender, RoutedEventArgs e)
+    {
+        if (_showing || SelectedDraft is not { } draft)
+        {
+            return;
+        }
+
+        var conditions = new MissionConditions
+        {
+            CrashGivesZero = CrashZeroBox.IsChecked == true,
+            LandWhenReached = LandWhenReachedBox.Visibility == Visibility.Visible && LandWhenReachedBox.IsChecked == true,
+        };
+        foreach (ObjectConditionRow row in _objectRows.Where(r => r.Check.IsChecked == true))
+        {
+            if (row.Kind.SelectedIndex == 0)
+            {
+                conditions.Required[row.Type] = MissionConditions.All;
+                continue;
+            }
+
+            if (!int.TryParse(row.Count.Text.Trim(), NumberStyles.Integer, CultureInfo.CurrentCulture, out int count) || count < 1
+                || (row.Total > 0 && count > row.Total))
+            {
+                Ui.ShowError(Window.GetWindow(this)!, L.F("The number of {0} must be from 1 to {1}.", MissionConditions.Name(row.Type), Math.Max(1, row.Total)));
+                ShowMission(draft.Mission);
+                return;
+            }
+
+            conditions.Required[row.Type] = count;
+        }
+
+        if (AltitudeConditionBox.IsChecked == true)
+        {
+            if (!TryParseNumber(AltitudeConditionValue.Text, out double altitude) || altitude < 0 || altitude > 100000)
+            {
+                Ui.ShowError(Window.GetWindow(this)!, L.F("\"{0}\" is not a number from 0 on.", AltitudeConditionValue.Text.Trim()));
+                ShowMission(draft.Mission);
+                return;
+            }
+
+            // An unchanged box keeps the stored value exactly (the shown meters are rounded).
+            conditions.MinimumAltitude = draft.Conditions.MinimumAltitude is { } current && AltitudeConditionValue.Text.Trim() == FormatMeters(GameUnits.ToMeters(current))
+                ? current
+                : GameUnits.FromMeters((float)altitude);
+        }
+
+        if (!conditions.SameAs(draft.Conditions))
+        {
+            draft.SetConditions(conditions);
+            Changed(draft);
+        }
+        else
+        {
+            ShowMission(SelectedMission);
+        }
     }
 
     private void OnTimeShapeChanged(object sender, SelectionChangedEventArgs e)
@@ -1231,24 +1562,6 @@ public partial class MissionsTab : UserControl
         Changed(draft);
     }
 
-    private void OnConditionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (_showing || SelectedDraft is not { } draft || ConditionBox.SelectedItem is not ChoiceItem<MissionCondition> item
-            || item.Value == draft.Comm.Condition)
-        {
-            return;
-        }
-
-        float value = item.Value switch
-        {
-            MissionCondition.SomeObjects => draft.Comm.RequiredObjects > 0 ? draft.Comm.RequiredObjects : 1,
-            MissionCondition.MinimumAltitude => draft.Comm.MinimumAltitude > 0 ? draft.Comm.MinimumAltitude : 400,
-            _ => 0,
-        };
-        draft.SetCondition(item.Value, value);
-        Changed(draft);
-    }
-
     /// <summary>A value box lost the focus or got Enter: take its value.</summary>
     private void OnValueCommitted(TextBox box)
     {
@@ -1289,14 +1602,10 @@ public partial class MissionsTab : UserControl
                 draft.SetLandNowTime(number);
             }
         }
-        else if (box == ConditionValueBox)
+        else if (box == AltitudeConditionValue)
         {
-            float old = comm.Condition == MissionCondition.SomeObjects ? comm.RequiredObjects : comm.MinimumAltitude;
-            changed = number != old;
-            if (changed)
-            {
-                draft.SetCondition(comm.Condition, comm.Condition == MissionCondition.SomeObjects ? MathF.Round(number) : number);
-            }
+            OnConditionsChanged(box, new RoutedEventArgs());
+            return;
         }
         else if (box == HitCostBox)
         {
@@ -1331,7 +1640,7 @@ public partial class MissionsTab : UserControl
 
     private void OnFootnoteCommitted(object sender, KeyboardFocusChangedEventArgs e)
     {
-        if (_showing || SelectedDraft is not { } draft || !FootnoteBox.IsEnabled)
+        if (_showing || SelectedDraft is not { } draft || !FootnoteBox.IsEnabled || FootnoteBox.IsReadOnly)
         {
             return;
         }
@@ -1349,7 +1658,7 @@ public partial class MissionsTab : UserControl
         }
 
         IReadOnlyList<string> current = draft.Settings.GenerateTexts
-            ? draft.Settings.Footnote
+            ? draft.Footnote(OtherComm)
             : draft.CurrentScreenText is { } screen ? MissionTextGenerator.ExtractFootnote(screen) : [];
         if (!lines.Select(l => l.Trim()).Where(l => l.Length > 0).SequenceEqual(current.Select(l => l.Trim()).Where(l => l.Length > 0)))
         {
@@ -1358,14 +1667,14 @@ public partial class MissionsTab : UserControl
         }
     }
 
-    private void OnSuggestFootnote(object sender, RoutedEventArgs e)
+    private void OnAutoFootnoteChanged(object sender, RoutedEventArgs e)
     {
-        if (SelectedDraft is not { } draft || draft.Mission.IsBirdman)
+        if (_showing || SelectedDraft is not { } draft)
         {
             return;
         }
 
-        draft.SetFootnote(MissionTextGenerator.SuggestFootnote(draft.Comm, draft.TextLines(OtherComm)));
+        draft.SetAutoFootnote(AutoFootnoteBox.IsChecked == true, OtherComm);
         Changed(draft);
     }
 
@@ -1432,4 +1741,7 @@ public partial class MissionsTab : UserControl
     }
 
     private static string FormatNumber(float value) => value.ToString("0.###", CultureInfo.CurrentCulture);
+
+    /// <summary>Meters, to a tenth (converted values are not whole numbers exactly).</summary>
+    private static string FormatMeters(float value) => value.ToString("0.#", CultureInfo.CurrentCulture);
 }

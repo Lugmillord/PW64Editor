@@ -26,6 +26,15 @@ public sealed record RomBuildOptions(bool AlwaysRelocateAudio = false, bool Allo
     /// </summary>
     public IReadOnlyList<DataPatch> DataPatches { get; init; } = [];
 
+    /// <summary>
+    /// The editor's new program code (debug output), or null for none. It is placed into the last
+    /// <see cref="Code.GameModule.RomReserve"/> bytes of the ROM.
+    /// </summary>
+    public GameModuleOptions? GameModule { get; init; }
+
+    /// <summary>A line about the build for the game module's debug output (project, time).</summary>
+    public string GameModuleInfo { get; init; } = string.Empty;
+
     /// <summary>The default settings.</summary>
     public static readonly RomBuildOptions Default = new();
 }

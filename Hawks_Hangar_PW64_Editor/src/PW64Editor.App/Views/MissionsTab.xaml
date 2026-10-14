@@ -22,7 +22,12 @@
             <ComboBox x:Name="VehicleBox" Width="170" DisplayMemberPath="Text" SelectionChanged="OnVehicleChanged" />
             <TextBlock Text="Test:" VerticalAlignment="Center" Margin="16,0,6,0" />
             <ComboBox x:Name="TestBox" Width="380" DisplayMemberPath="Text" SelectionChanged="OnTestChanged" />
-            <Button x:Name="RestoreButton" Content="Restore original" Click="OnRestoreOriginal" Style="{StaticResource DialogButton}" Margin="10,0,0,0"
+        </WrapPanel>
+        <!-- Undo and restore for the mission shown (a Cannonball level: all four targets). -->
+        <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+            <Button x:Name="UndoButton" Content="Undo changes" Click="OnUndoChanges" Style="{StaticResource DialogButton}" Margin="0,0,8,0"
+                    ToolTip="Back to the last saved state of this mission: drops the changes that are not saved yet." />
+            <Button x:Name="RestoreButton" Content="Restore original" Click="OnRestoreOriginal" Style="{StaticResource DialogButton}"
                     ToolTip="Sets points, conditions, time limit and point texts of this mission back to the original game (title, task and hint stay as they are)." />
         </WrapPanel>
         <TextBlock x:Name="InfoText" DockPanel.Dock="Top" TextWrapping="Wrap" Foreground="{StaticResource MutedTextBrush}" />
@@ -72,10 +77,12 @@
                         <StackPanel x:Name="RingPanel" Margin="0,10,0,0">
                             <TextBlock Text="Points per ring" FontWeight="SemiBold" />
                             <TextBlock Style="{StaticResource Note}"
-                                       Text="Each ring gives the points of its type. Which ring has which type is set in the mission's objects." />
+                                       Text="Each ring gives the points of its type. Which ring has which type is set in the mission's objects. Rings of type 3 are invisible check rings (no model, no radar mark): flying through them unlocks the next rings, in Dark Cavern the goal ring. They give no points and do not count for the conditions." />
                             <WrapPanel x:Name="RingTypes" Margin="0,4,0,0" />
                         </StackPanel>
 
+                        <!-- Time limit, "Land now" and hard end (not for Cannonball). -->
+                        <StackPanel x:Name="TimeSection">
                         <TextBlock Text="Time limit" Style="{StaticResource SectionTitle}" />
                         <TextBlock x:Name="TimeNote" Style="{StaticResource Note}" />
                         <StackPanel x:Name="TimePanel">
@@ -109,20 +116,47 @@
                             <TextBlock Text="seconds (0 = off; the mission objects are removed then)." VerticalAlignment="Center" Margin="6,0,0,0" />
                         </WrapPanel>
                         <TextBlock x:Name="HardEndText" Style="{StaticResource Note}" Margin="0,6,0,0" />
+                        </StackPanel>
 
                         <!-- Only for missions with altitude points. -->
                         <StackPanel x:Name="AltitudePanel">
                             <TextBlock Text="Altitude points" Style="{StaticResource SectionTitle}" />
                             <TextBlock Style="{StaticResource Note}"
-                                       Text="The highest altitude of the flight gives the points of this curve. Between two points the points rise or fall evenly; below the first point the first one counts, above the last point the last one. Two points at the same altitude make a step." />
+                                       Text="The highest altitude of the flight gives the points of this curve. Between two points the points rise or fall evenly; below the first point the first one counts, above the last point the last one. Two points at the same altitude make a step. Altitudes are in meters above sea level, the number the HUD shows under &quot;SEA LEVEL&quot; (the altimeter shows the height above the ground): a flight from a tower or a mountain starts with that height." />
                             <StackPanel x:Name="AltitudeCurvePanel" Margin="0,6,0,0" />
                         </StackPanel>
 
+                        <!-- Only for missions with landing accuracy points (and the Cannonball targets). -->
+                        <StackPanel x:Name="LandingPanel">
+                            <TextBlock x:Name="LandingTitle" Text="Landing accuracy" Style="{StaticResource SectionTitle}" />
+                            <TextBlock x:Name="LandingNote" Style="{StaticResource Note}" />
+                            <StackPanel x:Name="LandingCurvePanel" Margin="0,6,0,0" />
+                        </StackPanel>
+
                         <TextBlock Text="Conditions" Style="{StaticResource SectionTitle}" />
-                        <WrapPanel>
-                            <ComboBox x:Name="ConditionBox" Width="420" SelectionChanged="OnConditionChanged" />
-                            <TextBox x:Name="ConditionValueBox" Width="70" Margin="8,0,0,0" Tag="value" />
-                        </WrapPanel>
+                        <StackPanel x:Name="ConditionsSection">
+                            <CheckBox x:Name="CrashZeroBox" Content="A crash gives 0 points in total" Click="OnConditionsChanged" />
+                            <TextBlock Text="Time points only if:" FontWeight="SemiBold" Margin="0,10,0,2" />
+                            <TextBlock x:Name="TimeConditionsNote" Style="{StaticResource Note}" />
+                            <!-- One line per object type of the mission; filled in code. -->
+                            <Grid x:Name="ObjectConditionsGrid" Margin="0,2,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" MinWidth="160" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                            </Grid>
+                            <CheckBox x:Name="LandWhenReachedBox" Margin="0,4,0,0" Click="OnConditionsChanged"
+                                      Content="As soon as the number is reached: &quot;please land&quot;, the other objects disappear (as in the original game)" />
+                            <WrapPanel Margin="0,4,0,0">
+                                <CheckBox x:Name="AltitudeConditionBox" Content="the highest altitude reached at least" VerticalAlignment="Center" Click="OnConditionsChanged" />
+                                <TextBox x:Name="AltitudeConditionValue" Width="60" Margin="6,0,6,0" Tag="value" />
+                                <TextBlock Text="m" VerticalAlignment="Center" />
+                            </WrapPanel>
+                            <TextBlock x:Name="StartAltitudeNote" Style="{StaticResource Note}" Margin="22,0,0,0" />
+                            <TextBlock x:Name="ConditionsHowNote" Style="{StaticResource Note}" Margin="0,6,0,0" />
+                        </StackPanel>
                         <WrapPanel x:Name="HitPanel" Margin="0,8,0,0">
                             <TextBlock Text="Each hit costs" VerticalAlignment="Center" Margin="0,0,6,0" />
                             <TextBox x:Name="HitCostBox" Width="50" Tag="value" />
@@ -136,18 +170,17 @@
                         <WrapPanel x:Name="ReactionPanel" Margin="0,8,0,0">
                             <TextBlock Text="The pilot cheers above" VerticalAlignment="Center" Margin="0,0,6,0" />
                             <TextBox x:Name="ReactionBox" Width="50" Tag="value" />
-                            <TextBlock Text="points." VerticalAlignment="Center" Margin="6,0,0,0" />
+                            <TextBlock Text="points (set per mission)." VerticalAlignment="Center" Margin="6,0,0,0" />
                         </WrapPanel>
+
 
                         <TextBlock Text="Footnote" Style="{StaticResource SectionTitle}" />
                         <TextBlock Style="{StaticResource Note}"
                                    Text="Shown below the total on the mission screen, with a * in front. One line per line of the text box." />
-                        <DockPanel Margin="0,4,0,0">
-                            <Button DockPanel.Dock="Right" Content="Suggest" Click="OnSuggestFootnote" Style="{StaticResource DialogButton}" VerticalAlignment="Top"
-                                    ToolTip="Writes a footnote that fits the time limit, the altitude or the photos of this mission." />
-                            <TextBox x:Name="FootnoteBox" Height="52" AcceptsReturn="True" TextWrapping="NoWrap" FontFamily="Consolas"
-                                     LostKeyboardFocus="OnFootnoteCommitted" />
-                        </DockPanel>
+                        <CheckBox x:Name="AutoFootnoteBox" Margin="0,4,0,0" Click="OnAutoFootnoteChanged"
+                                  Content="Write the footnote from the settings (time limit, conditions, altitude points, crash)" />
+                        <TextBox x:Name="FootnoteBox" Height="70" Margin="0,4,0,0" AcceptsReturn="True" TextWrapping="NoWrap" FontFamily="Consolas"
+                                 LostKeyboardFocus="OnFootnoteCommitted" />
 
                         <TextBlock Text="Text on the mission screen" Style="{StaticResource SectionTitle}" />
                         <TextBlock x:Name="ScreenTextNote" Style="{StaticResource Note}" />

@@ -75,7 +75,10 @@ public static class RomBuilder
         var newEntries = files.Select(f => new FileTableEntry(f.FileType, f.Size)).ToList();
         int fileSystemEnd = layout.FileSystemOffset + newEntries.Sum(e => e.Size);
 
-        AudioPlacement placement = PlanAudio(baseRom, layout, fileSystemEnd, options);
+        // The game module (new program code) takes the last bytes of the ROM.
+        bool withModule = options.GameModule is { IsNeeded: true };
+        int endReserve = withModule ? GameModule.RomReserve : 0;
+        AudioPlacement placement = PlanAudio(baseRom, layout, fileSystemEnd, options, endReserve);
 
         byte[] output = new byte[placement.RomSize];
         baseRom.Data.AsSpan(0, Math.Min(baseRom.Size, output.Length)).CopyTo(output);
@@ -128,6 +131,12 @@ public static class RomBuilder
             patch.Data.CopyTo(output, patch.Offset);
         }
 
+        // 5c. The game module at the end of the ROM, with the changes of the game code that load and use it.
+        if (withModule)
+        {
+            GameModule.Apply(output, options.GameModule!, output.Length - GameModule.RomReserve, options.GameModuleInfo);
+        }
+
         // 6. Boot checksum. The code, the file table and the first game files all lie inside
         //    the checksummed first MiB. With an unknown CIC (only possible with homebrew or
         //    test data, never with a verified retail ROM) we cannot compute it, so we leave the
@@ -145,7 +154,7 @@ public static class RomBuilder
             fileSystemEnd,
             placement.AudioOffset,
             placement.Relocated,
-            ComputeFreeSpace(layout, fileSystemEnd, output.Length),
+            ComputeFreeSpace(layout, fileSystemEnd, output.Length - endReserve),
             cic)
         {
             Expanded = output.Length > baseRom.Size,
@@ -183,7 +192,8 @@ public static class RomBuilder
         PatchAudioReferences(output, audio, placement.AudioOffset, bankOffset);
     }
 
-    private static AudioPlacement PlanAudio(N64Rom baseRom, RomLayout layout, int fileSystemEnd, RomBuildOptions options)
+    /// <param name="endReserve">Bytes at the end of the ROM that must stay free (for the game module).</param>
+    private static AudioPlacement PlanAudio(N64Rom baseRom, RomLayout layout, int fileSystemEnd, RomBuildOptions options, int endReserve)
     {
         AudioLayout? audio = layout.Audio;
         bool fitsInPlace = fileSystemEnd <= layout.FileSystemLimit;
@@ -200,6 +210,11 @@ public static class RomBuilder
                         fileSystemEnd - layout.FileSystemOffset, layout.FileSystemCapacity, fileSystemEnd - layout.FileSystemLimit));
             }
 
+            if (layout.FileSystemLimit > baseRom.Size - endReserve)
+            {
+                throw new FileSystemFullException(CoreText.T("There is no room for the game module at the end of the ROM."));
+            }
+
             return new AudioPlacement(layout.FileSystemLimit, false, baseRom.Size);
         }
 
@@ -209,13 +224,13 @@ public static class RomBuilder
         }
 
         bool inPlace = fitsInPlace && !options.AlwaysRelocateAudio;
-        if (inPlace && growth == 0)
+        if (inPlace && growth == 0 && audio.EndOffset <= baseRom.Size - endReserve)
         {
             return new AudioPlacement(audio.SequenceOffset, false, baseRom.Size);
         }
 
         int audioOffset = inPlace ? audio.SequenceOffset : AlignUp(fileSystemEnd, AudioLayout.Alignment);
-        int requiredSize = audioOffset + audio.Size + growth;
+        int requiredSize = audioOffset + audio.Size + growth + endReserve;
         int romSize = baseRom.Size;
 
         if (requiredSize > romSize)

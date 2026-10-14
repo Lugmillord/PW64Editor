@@ -98,12 +98,16 @@ public static class MissionCurves
             ScoreCurveKind.LandingAccuracy => ScoreCurve.Create(
                 [new(0, p), new(6, p), new(11, Round(p * 0.75f)), new(18, Round(p * 0.5f)), new(35, Round(p * 0.1f)), new(35, 0)]),
             ScoreCurveKind.Impact => ScoreCurve.Create([new(0, p), new(5, p), new(9, Round(p * 0.5f)), new(14, 0)]),
+            // In meters as the game shows them (full points at 500 m), stored in game units.
             ScoreCurveKind.Altitude => ScoreCurve.Create(
-                [new(0, 0), new(260, 0), new(400, Round(p * 3 / 7)), new(600, Round(p * 5 / 7)), new(750, Round(p * 6 / 7)), new(940, p)]),
+                [new(0, 0), new(M(140), 0), new(M(215), Round(p * 3 / 7)), new(M(320), Round(p * 5 / 7)), new(M(400), Round(p * 6 / 7)), new(M(500), p)]),
             ScoreCurveKind.Time => Plateau(points, 120, 300),
             _ => ScoreCurve.Create([new(0, p)]),
         };
     }
+
+    /// <summary>Meters as shown in the game to game units (rounded to a tenth).</summary>
+    private static float M(float meters) => MathF.Round(GameUnits.FromMeters(meters), 1);
 
     /// <summary>Full points up to <paramref name="fullUntil"/> seconds (plus the grace), then a straight fall to 0 at <paramref name="zeroAt"/>.</summary>
     public static ScoreCurve Plateau(int points, float fullUntil, float zeroAt)

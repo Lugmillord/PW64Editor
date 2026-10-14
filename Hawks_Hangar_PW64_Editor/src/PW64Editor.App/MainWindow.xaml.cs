@@ -680,6 +680,7 @@ public partial class MainWindow : Window
         SaveEditor.Load(_session);
         TextureEditor.Load(_session);
         MusicEditor.Load(_session);
+        FeatureEditor.Load(_session);
         UpdateProjectInfo();
     }
 
