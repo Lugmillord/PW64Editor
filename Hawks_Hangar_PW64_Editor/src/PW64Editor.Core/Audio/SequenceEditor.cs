@@ -8,21 +8,23 @@ namespace PW64Editor.Core.Audio;
 /// </summary>
 /// <remarks>
 /// <para>Replacing an instrument changes the program number of the channel's program changes in
-/// place. Silencing a channel sets the values of its volume changes (controller 7) to 0. Both
-/// keep the size of the data.</para>
+/// place. Silencing a channel sets the velocity of all its notes to 0: the sequence player treats
+/// a note with velocity 0 as a note off, so it never sounds. (Volume changes, controller 7, are not
+/// enough: every program change sets the channel volume to the instrument's own volume again,
+/// __setInstChanState in csplayer.c, and the songs select their instruments after their volume.)
+/// Both keep the size of the data.</para>
 /// <para>A byte can be read more than once, because repeated byte runs ("FE hi lo n", see
 /// <see cref="CompactSequence"/>) refer to earlier bytes, also of other channels. If a byte is
 /// used by events that must get different values, the repetition is written out as plain bytes
 /// first, so each use gets its own byte.</para>
-/// <para>If a channel has no program change (or no volume change before its first note), a new
-/// event is inserted in front of the channel's first event. Whenever bytes are inserted, the
+/// <para>If a channel has no program change, a new event is inserted in front of the channel's
+/// first event. Whenever bytes are inserted, the
 /// track offsets and the distances of repetitions and loops across them are corrected.</para>
 /// <para>At the end the result is read again and compared event by event with the expected
 /// result, so a change can never damage a song unnoticed.</para>
 /// </remarks>
 public static class SequenceEditor
 {
-    private const int VolumeController = 7;
     private const int MaxRounds = 500;
 
     /// <summary>Applies the settings to a sequence.</summary>
@@ -59,7 +61,7 @@ public static class SequenceEditor
         return data;
     }
 
-    /// <summary>Changes program numbers and volumes in place, writing out shared repetitions where needed.</summary>
+    /// <summary>Changes program numbers and note velocities in place, writing out shared repetitions where needed.</summary>
     private static byte[] PatchValues(byte[] data, SongSettings settings)
     {
         for (int round = 0; round < MaxRounds; round++)
@@ -106,7 +108,7 @@ public static class SequenceEditor
         throw new InvalidDataException(CoreText.T("The song cannot be changed there safely (shared data)."));
     }
 
-    /// <summary>The new value of a byte if it is the program or volume value of an event that changes.</summary>
+    /// <summary>The new value of a byte if it is the program or the velocity of an event that changes.</summary>
     private static byte? Wanted(CompactSequence sequence, SequenceByteUse use, SongSettings settings)
     {
         if (use.Event >= sequence.Events.Count)
@@ -124,7 +126,7 @@ public static class SequenceEditor
         return changed == e ? null : (byte)(e.Kind == SequenceEventKind.Program ? changed.Data1 : changed.Data2);
     }
 
-    /// <summary>Events to insert: program changes for channels without one, volume 0 for silenced channels without a volume change in front of their first note.</summary>
+    /// <summary>Events to insert: program changes for channels without one.</summary>
     private static List<(int, byte[], SequenceEvent)> PlanInsertions(CompactSequence sequence, SongSettings settings)
     {
         var insertions = new List<(int, byte[], SequenceEvent)>();
@@ -134,27 +136,6 @@ public static class SequenceEditor
             SequenceTrack track = TrackOf(sequence, channels, change.Channel);
             insertions.Add((change.Channel, [(byte)(0xC0 | change.Channel), (byte)change.Instrument, 0],
                 new SequenceEvent(track.Index, track.FirstTick, SequenceEventKind.Program, change.Channel, change.Instrument, 0, 0, -1)));
-        }
-
-        foreach (int channel in settings.MutedChannels.Distinct())
-        {
-            bool silentFromStart = false;
-            foreach (SequenceEvent e in sequence.Events.Where(e => e.Channel == channel))
-            {
-                if (e.Kind == SequenceEventKind.Note)
-                {
-                    break;
-                }
-
-                silentFromStart |= e.Kind == SequenceEventKind.Control && e.Data1 == VolumeController;
-            }
-
-            if (!silentFromStart)
-            {
-                SequenceTrack track = TrackOf(sequence, channels, channel);
-                insertions.Add((channel, [(byte)(0xB0 | channel), VolumeController, 0, 0],
-                    new SequenceEvent(track.Index, track.FirstTick, SequenceEventKind.Control, channel, VolumeController, 0, 0, -1)));
-            }
         }
 
         return insertions;
@@ -249,7 +230,7 @@ public static class SequenceEditor
             return e with { Data1 = change.Instrument };
         }
 
-        if (e.Kind == SequenceEventKind.Control && e.Data1 == VolumeController && settings.MutedChannels.Contains(e.Channel))
+        if (e.Kind == SequenceEventKind.Note && settings.MutedChannels.Contains(e.Channel))
         {
             return e with { Data2 = 0 };
         }

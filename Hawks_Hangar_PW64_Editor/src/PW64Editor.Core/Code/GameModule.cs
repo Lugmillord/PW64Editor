@@ -24,8 +24,25 @@ public sealed record GameModuleCallSite(int RomOffset, uint OriginalWord, uint H
 /// <param name="MinimumAltitude">Time points only if this altitude was reached, or null.</param>
 /// <param name="Required">Per object type (<see cref="GameModule.ObjectTypes"/>): 0 = not required,
 /// <see cref="GameModule.RequiredAll"/> = all, otherwise at least this many.</param>
+/// <param name="MinimumDistance">Time points only if the distance flown reached this, or null (game units).</param>
+/// <param name="UnlimitedFuel">Rocket Belt and Gyrocopter: the module refills the fuel every flight frame.</param>
 public sealed record GameModuleCondition(byte Class, byte Vehicle, byte Test, bool CrashGivesZero, float? MinimumAltitude,
-    IReadOnlyList<byte> Required);
+    IReadOnlyList<byte> Required, float? MinimumDistance = null, bool UnlimitedFuel = false)
+{
+    /// <summary>True if the entry has conditions for the points (otherwise the game's own condition counts).</summary>
+    public bool HasConditions => CrashGivesZero || MinimumAltitude is not null || MinimumDistance is not null || Required.Any(r => r != 0);
+}
+
+/// <summary>The values the live display shows during missions (debug output).</summary>
+[Flags]
+public enum LiveValues
+{
+    None = 0,
+    Distance = 1,
+    HighestAltitude = 2,
+    HorizontalSpeed = 4,
+    VerticalSpeed = 8,
+}
 
 /// <summary>What the game module does in a build (nothing: no module).</summary>
 /// <param name="DebugOutput">Debug output at all (messages to the IS-Viewer port and a log in RAM).</param>
@@ -37,8 +54,21 @@ public sealed record GameModuleOptions(bool DebugOutput, bool StartupInfo = fals
     /// <summary>Missions whose conditions the module checks (combinations the retail game cannot express).</summary>
     public IReadOnlyList<GameModuleCondition> Conditions { get; init; } = [];
 
+    /// <summary>With <see cref="DebugOutput"/>: current values during missions.</summary>
+    public LiveValues Live { get; init; }
+
+    /// <summary>A mission shows distance points on its result sheet (row type 10, see <see cref="GameModule"/>).</summary>
+    public bool DistanceRow { get; init; }
+
+    /// <summary>"Time requirement met" in the game's text codes as held in RAM (line break 0xFFE, end 0xFFFF), shown on the HUD; empty: nothing.</summary>
+    public IReadOnlyList<ushort> RequirementMetText { get; init; } = [];
+
+    /// <summary>The codes of the bold digits 0-9 (as in RAM): the penalty messages ("5 pts. deducted",
+    /// "2 pts. deducted") show the mission's own number. Empty: the fixed texts stay.</summary>
+    public IReadOnlyList<ushort> PenaltyDigits { get; init; } = [];
+
     /// <summary>True if the module is built into the ROM.</summary>
-    public bool IsNeeded => DebugOutput || Conditions.Count > 0;
+    public bool IsNeeded => DebugOutput || Conditions.Count > 0 || DistanceRow || PenaltyDigits.Count > 0;
 }
 
 /// <summary>
@@ -64,10 +94,20 @@ public sealed record GameModuleOptions(bool DebugOutput, bool StartupInfo = fals
 /// instead of taskGet_80346364 for the condition mode. For the missions in the module's table it
 /// applies the conditions itself and returns 0 (no retail condition); for all others it returns the
 /// retail mode.</para>
+/// <para><b>Live values</b> (with the debug output): the vehicles call func_802EDAF0 once per
+/// flight frame (distance, highest altitude, end of the flight); with live values these calls go
+/// through module_flight_frame, which shows distance, highest altitude and the speeds in a line on
+/// the screen and once a second on the debug port.</para>
+/// <para><b>Distance row</b>: the result sheet has no case for row type 10 (distance points); its
+/// jump table entry then points to a two-instruction stub in the module that loads them.</para>
 /// <para><b>"n to go"</b>: when a ring is passed or a target hit, the game asks func_8032C080 how many
 /// objects are still needed and shows one less on the HUD; the retail game answers only in condition
 /// mode 3. For missions in the table that need a number of rings or targets the module answers
 /// instead, without ever reporting "reached" (no "please land").</para>
+/// <para><b>Penalty messages</b>: the HUD texts "5 pts. deducted" (Gyrocopter hit) and "2 pts. deducted"
+/// (Rocket Belt hit, Jumble Hopper leaving the area) are fixed. Their hudWarningText calls go to the
+/// module, which shows the message with the mission's own number (COMM+0x3B4, COMM+0x414), or none
+/// if nothing is deducted.</para>
 /// </remarks>
 public static class GameModule
 {
@@ -83,7 +123,39 @@ public static class GameModule
     private const int ConditionCountOffset = 0x2C;
     private const int InfoOffset = 0x30;
     private const int InfoLength = 96;
-    private const int ConditionSize = 16;
+    private const int ConditionSize = 20;
+    private const int LiveOffset = 0x90;
+    private const int MetTextOffset = 0x94;
+    private const int MetTextLength = 32;
+    private const int DigitsOffset = 0xD4;
+
+    /// <summary>jal hudWarningText.</summary>
+    private const uint HudWarningCall = 0x0C0C766E;
+
+    /// <summary>The hudWarningText calls of the hit messages: Gyrocopter "5 pts. deducted" (0x802F6C10), Rocket Belt "2 pts. deducted" (0x80325B94).</summary>
+    private static readonly int[] HitMessageCalls = [0x7E140, 0xAD0C4];
+
+    /// <summary>The hudWarningText call of the Jumble Hopper's "2 pts. deducted" when it leaves the area (0x802FBF30).</summary>
+    private const int AreaMessageCall = 0x83460;
+
+    /// <summary>The calls of func_802EDAF0 (once per flight frame) in the vehicles' code, as RAM addresses.</summary>
+    private static readonly uint[] FlightFrameCalls =
+        [0x802D7D2C, 0x802D8A18, 0x802ED288, 0x802ED370, 0x802ED45C, 0x802ED53C, 0x802ED5CC, 0x802ED68C];
+
+    /// <summary>The calls of hudDrawFuel (in hudDrawRocketPack and hudDrawGyrocopter), as RAM addresses.</summary>
+    private static readonly uint[] HudFuelCalls = [0x80318860, 0x8031A1B4];
+
+    /// <summary>jal hudDrawFuel.</summary>
+    private const uint HudFuelCall = 0x0C0C707A;
+
+    /// <summary>jal func_802EDAF0.</summary>
+    private const uint FlightFrameCall = 0x0C0BB6BC;
+
+    /// <summary>ROM offset of the jump table entry of result row type 10 (resultInit, table at 0x80355CA8).</summary>
+    public const int DistanceRowTableRomOffset = (int)(0x80355CA8u + (9 * 4) - 0x80278AD0u);
+
+    /// <summary>The original entry: the "no points" case.</summary>
+    private const uint DistanceRowOriginal = 0x8032E598;
 
     /// <summary>Number of object types of a condition: rings, balloons, targets, hover pads, Meca Hawks, ball targets, hopper goals.</summary>
     public const int ObjectTypes = 7;
@@ -123,9 +195,30 @@ public static class GameModule
             throw new InvalidDataException("The game module is too large for its room.");
         }
 
+        bool live = options.DebugOutput && options.Live != LiveValues.None;
         uint flags = (options.StartupInfo ? 1u : 0) | (options.GameMessages ? 2u : 0)
-            | (options.DebugOutput ? 4u : 0) | (options.OnScreen ? 8u : 0);
+            | (options.DebugOutput ? 4u : 0) | (options.OnScreen ? 8u : 0) | (live ? 16u : 0);
         BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(FlagsOffset), flags);
+        BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(LiveOffset), live ? (uint)options.Live : 0);
+        if (options.RequirementMetText.Count > MetTextLength)
+        {
+            throw new InvalidDataException($"The HUD text of the game module has room for {MetTextLength - 1} characters.");
+        }
+
+        for (int i = 0; i < options.RequirementMetText.Count; i++)
+        {
+            BinaryPrimitives.WriteUInt16BigEndian(image.AsSpan(MetTextOffset + (i * 2)), options.RequirementMetText[i]);
+        }
+        if (options.PenaltyDigits.Count is not (0 or 10))
+        {
+            throw new InvalidDataException("The game module needs the codes of the ten digits.");
+        }
+
+        for (int i = 0; i < options.PenaltyDigits.Count; i++)
+        {
+            BinaryPrimitives.WriteUInt16BigEndian(image.AsSpan(DigitsOffset + (i * 2)), options.PenaltyDigits[i]);
+        }
+
         BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(RomOffsetOffset), (uint)romOffset);
         BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(ImageSizeOffset), (uint)AlignedSize(image.Length));
 
@@ -162,7 +255,9 @@ public static class GameModule
                 entry[4 + t] = t < c.Required.Count ? c.Required[t] : (byte)0;
             }
 
+            entry[3] |= (byte)((c.MinimumDistance is not null ? 4 : 0) | (c.UnlimitedFuel ? 8 : 0));
             BinaryPrimitives.WriteSingleBigEndian(entry[12..], c.MinimumAltitude ?? 0);
+            BinaryPrimitives.WriteSingleBigEndian(entry[16..], c.MinimumDistance ?? 0);
         }
 
         BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(ConditionCountOffset), (uint)options.Conditions.Count);
@@ -198,6 +293,46 @@ public static class GameModule
                 [ObjectsLeftCall], [CodeArea.Jal(GameModuleImage.RingsLeftHookAddress)]));
             patches.Add(new WordPatch("targets left, targets_8034473C", TargetsLeftCallRomOffset,
                 [ObjectsLeftCall], [CodeArea.Jal(GameModuleImage.TargetsLeftHookAddress)]));
+        }
+
+        // Live values and unlimited fuel: the vehicles' flight frame goes through the module.
+        if ((options.DebugOutput && options.Live != LiveValues.None) || options.Conditions.Any(c => c.UnlimitedFuel))
+        {
+            foreach (uint call in FlightFrameCalls)
+            {
+                patches.Add(new WordPatch($"live values, flight frame at 0x{call:X8}", (int)(call - 0x80278AD0),
+                    [FlightFrameCall], [CodeArea.Jal(GameModuleImage.FlightFrameHookAddress)]));
+            }
+        }
+
+        // Unlimited fuel: no fuel gauge on the HUD.
+        if (options.Conditions.Any(c => c.UnlimitedFuel))
+        {
+            foreach (uint call in HudFuelCalls)
+            {
+                patches.Add(new WordPatch($"fuel gauge, hudDrawFuel call at 0x{call:X8}", (int)(call - 0x80278AD0),
+                    [HudFuelCall], [CodeArea.Jal(GameModuleImage.HudFuelHookAddress)]));
+            }
+        }
+
+        // Penalty messages with the mission's number.
+        if (options.PenaltyDigits.Count > 0)
+        {
+            foreach (int call in HitMessageCalls)
+            {
+                patches.Add(new WordPatch($"penalty message, hit at 0x{call:X6}", call,
+                    [HudWarningCall], [CodeArea.Jal(GameModuleImage.PenaltyHitHookAddress)]));
+            }
+
+            patches.Add(new WordPatch("penalty message, Jumble Hopper out of the area", AreaMessageCall,
+                [HudWarningCall], [CodeArea.Jal(GameModuleImage.PenaltyAreaHookAddress)]));
+        }
+
+        // Distance points on the result sheet: the jump table entry of row type 10.
+        if (options.DistanceRow)
+        {
+            patches.Add(new WordPatch("distance row, resultInit jump table", DistanceRowTableRomOffset,
+                [DistanceRowOriginal], [GameModuleImage.DistanceRowAddress]));
         }
 
         if (options.DebugOutput && options.StartupInfo)

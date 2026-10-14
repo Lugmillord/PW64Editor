@@ -49,6 +49,18 @@ public sealed class MissionSettings
     /// </summary>
     public Dictionary<int, int> TextPoints { get; set; } = [];
 
+    /// <summary>
+    /// Beginner missions of Hang Glider, Rocket Belt and Gyrocopter: the hint screen has no
+    /// "View Demo" button (see <see cref="DemoButton"/>).
+    /// </summary>
+    public bool HideDemo { get; set; }
+
+    /// <summary>Rocket Belt and Gyrocopter: the fuel at the start (0 to 1), or null for the mission file's.</summary>
+    public float? StartFuel { get; set; }
+
+    /// <summary>Rocket Belt and Gyrocopter: the fuel never runs out (the game module refills it every frame).</summary>
+    public bool UnlimitedFuel { get; set; }
+
     /// <summary>The mission these settings belong to.</summary>
     [JsonIgnore]
     public TestId Id => new(Class, (Vehicle)Vehicle, Test);
@@ -56,7 +68,7 @@ public sealed class MissionSettings
     /// <summary>True if the settings change nothing.</summary>
     [JsonIgnore]
     public bool IsEmpty => ResultRows is null && !GenerateTexts && Footnote.Count == 0 && TextPoints.Count == 0
-        && AutoFootnote is null && Conditions is null;
+        && AutoFootnote is null && Conditions is null && !HideDemo && StartFuel is null && !UnlimitedFuel;
 
     /// <summary>Empty settings for a mission.</summary>
     public static MissionSettings For(TestId id) => new() { Vehicle = (int)id.Vehicle, Class = id.Class, Test = id.Test };
@@ -73,5 +85,8 @@ public sealed class MissionSettings
         AutoFootnote = AutoFootnote,
         Conditions = Conditions?.Clone(),
         TextPoints = new Dictionary<int, int>(TextPoints),
+        HideDemo = HideDemo,
+        StartFuel = StartFuel,
+        UnlimitedFuel = UnlimitedFuel,
     };
 }

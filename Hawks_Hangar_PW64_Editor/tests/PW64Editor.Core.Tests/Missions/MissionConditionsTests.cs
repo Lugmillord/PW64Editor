@@ -3,6 +3,7 @@ using PW64Editor.Core.Code;
 using PW64Editor.Core.FileSystem;
 using PW64Editor.Core.Missions;
 using PW64Editor.Core.Rom;
+using PW64Editor.Core.Project;
 using PW64Editor.Core.SaveGame;
 using PW64Editor.Core.Tests.TestSupport;
 using PW64Editor.Core.Text;
@@ -278,5 +279,114 @@ public class MissionConditionsTests
         // The default altitude curve reaches its full points at 500 m.
         ScoreCurve curve = MissionCurves.Default(ScoreCurveKind.Altitude, Vehicle.HangGlider, 10);
         Assert.Equal(500, MathF.Round(GameUnits.ToMeters(curve.Points[^1].X)));
+    }
+
+    [RealRomFact]
+    public void Build_DistanceRowConditionDemoAndLiveValues()
+    {
+        using var temp = new TempDirectory();
+        N64Rom rom = N64Rom.Load(TestRomLocator.RomPath!);
+        Assert.True(DemoButton.MatchesRom(rom.Data));
+        EditorSession session = EditorSession.Create(temp.Combine("hack"), "Step31", false, rom, TestRomLocator.RomPath!);
+        MissionInfo rb = session.LoadMissions().Missions.Single(m => m.Id == new TestId(0, Vehicle.RocketBelt, 0));
+        var draft = new MissionDraft(rb, null);
+        Assert.Null(draft.SetRowSource(draft.Rows.Count - 1, PointSource.Distance, 10)); // 4 rows: the last one
+        Assert.Equal(10, draft.EvaluateRows(_ => null).Single(r => r.Source == PointSource.Distance).Value);
+        draft.SetConditions(new MissionConditions { MinimumDistance = 1000 });
+        Assert.True(draft.Conditions.NeedsModule(draft.Comm)); // the game has no distance condition
+        Assert.True(draft.CanHideDemo);
+        draft.SetHideDemo(true);
+        session.SaveMission(rb, draft.Comm, draft.SettingsToSave());
+        session.SaveFeatures(new PW64Editor.Core.Project.GameFeatureSettings { DebugOutput = true, LiveValues = true });
+
+        byte[] built = session.Build(false).Result.RomBuild.Rom.Data;
+        uint Word(long offset) => BinaryPrimitives.ReadUInt32BigEndian(built.AsSpan((int)offset));
+        int module = rom.Size - GameModule.RomReserve;
+
+        // Distance row: the result sheet's jump table entry of row type 10.
+        Assert.Equal(GameModuleImage.DistanceRowAddress, Word(GameModule.DistanceRowTableRomOffset));
+
+        // Distance condition in the table (flags 4, distance at +16) and the HUD text.
+        int entry = module + GameModuleImage.ConditionsTableOffset;
+        Assert.Equal(1, built[entry]); // vehicle
+        Assert.Equal(4, built[entry + 3]);
+        Assert.Equal(1000f, BinaryPrimitives.ReadSingleBigEndian(built.AsSpan(entry + 16)));
+        Assert.NotEqual(0, BinaryPrimitives.ReadUInt16BigEndian(built.AsSpan(module + 0x94)));
+
+        // Live values: flag 16, all four values, the flight frame calls go to the module.
+        Assert.Equal(16u, Word(module + 0x0C) & 16u);
+        Assert.Equal(15u, Word(module + 0x90));
+        Assert.Equal(CodeArea.Jal(GameModuleImage.FlightFrameHookAddress), Word(0x802ED288 - 0x80278AD0));
+
+        // Demo button of the Rocket Belt hidden: lui at, 0xA000 (HG and GC keep theirs).
+        Assert.Equal(0x3C01A000u, Word(0x80349368 - 0x80278AD0));
+        Assert.Equal(0x03210804u, Word(0x80349374 - 0x80278AD0)); // sllv at, at, t9
+        Assert.Equal(0x04210005u, Word(0x80349378 - 0x80278AD0)); // bgez at, same target
+
+        // Footnote and report know the distance.
+        Assert.Contains("flown", string.Join(" ", draft.Footnote(_ => null)));
+        string report = MissionReport.Create(session);
+        Assert.Contains("distance at least 1000 units = 700 m", report);
+        Assert.Contains("\"View Demo\" button: hidden", report);
+    }
+
+    [RealRomFact]
+    public void Build_StartFuelAndUnlimitedFuel()
+    {
+        using var temp = new TempDirectory();
+        N64Rom rom = N64Rom.Load(TestRomLocator.RomPath!);
+        EditorSession session = EditorSession.Create(temp.Combine("hack"), "Fuel", false, rom, TestRomLocator.RomPath!);
+        var id = new TestId(1, Vehicle.RocketBelt, 1); // Touch & Go starts with a quarter tank
+        MissionInfo rb = session.LoadMissions().Missions.Single(m => m.Id == id);
+        Assert.Equal(0.25f, rb.File.StartFuel);
+        var draft = new MissionDraft(rb, null);
+        Assert.True(draft.CanSetFuel);
+        draft.SetStartFuel(0.6f);
+        draft.SetUnlimitedFuel(true);
+        session.SaveMission(rb, draft.Comm, draft.SettingsToSave());
+        Assert.False(new MissionDraft(session.LoadMissions().Missions.Single(m => m.Id == id), null).IsChanged);
+        Assert.False(new MissionDraft(session.LoadMissions().Missions.Single(m => m.Id == new TestId(0, Vehicle.HangGlider, 0)), null).CanSetFuel);
+
+        byte[] built = session.Build(false).Result.RomBuild.Rom.Data;
+        MissionFile file = GameFileSystem.Read(N64Rom.FromBytes(built), RomLayout.PilotwingsUsa).Files
+            .Where(f => f.FileType == MissionFile.FormType).Select(f => MissionFile.Parse(f.Data)).Single(f => f.Comm.Id == id);
+        Assert.Equal(0.6f, file.StartFuel);
+        Assert.Equal(MissionCondition.AllObjects, file.Comm.Condition); // the game's own condition stays
+
+        int module = rom.Size - GameModule.RomReserve;
+        int entry = module + GameModuleImage.ConditionsTableOffset;
+        Assert.Equal(1u, BinaryPrimitives.ReadUInt32BigEndian(built.AsSpan(module + 0x2C)));
+        Assert.Equal(8, built[entry + 3]); // only the fuel flag
+        Assert.Equal(CodeArea.Jal(GameModuleImage.FlightFrameHookAddress),
+            BinaryPrimitives.ReadUInt32BigEndian(built.AsSpan((int)(0x802ED45Cu - 0x80278AD0u))));
+        Assert.Contains("unlimited yes", MissionReport.Create(session));
+    }
+    [RealRomFact]
+    public void Build_PenaltyMessagesShowTheMissionsPoints()
+    {
+        using var temp = new TempDirectory();
+        N64Rom rom = N64Rom.Load(TestRomLocator.RomPath!);
+        Assert.False(ProjectBuilder.NeedsPenaltyMessages(GameFileSystem.Read(rom, RomLayout.PilotwingsUsa).Files)); // retail: the texts fit
+
+        EditorSession session = EditorSession.Create(temp.Combine("hack"), "Penalty", false, rom, TestRomLocator.RomPath!);
+        var id = new TestId(0, Vehicle.Gyrocopter, 0);
+        MissionInfo gc = session.LoadMissions().Missions.Single(m => m.Id == id);
+        Assert.Equal(-5, gc.File.Comm.HitDeduction);
+        var draft = new MissionDraft(gc, null);
+        draft.SetHitCost(12);
+        session.SaveMission(gc, draft.Comm, draft.SettingsToSave());
+
+        byte[] built = session.Build(false).Result.RomBuild.Rom.Data;
+        int module = rom.Size - GameModule.RomReserve;
+        Assert.Equal(GameModule.Magic, BinaryPrimitives.ReadUInt32BigEndian(built.AsSpan(module)));
+        // The bold digits 0-9 for the module.
+        Assert.Equal(Enumerable.Range(0x60, 10).Select(c => (ushort)c),
+            Enumerable.Range(0, 10).Select(i => BinaryPrimitives.ReadUInt16BigEndian(built.AsSpan(module + 0xD4 + (i * 2)))));
+        foreach (int call in new[] { 0x7E140, 0xAD0C4 })
+        {
+            Assert.Equal(CodeArea.Jal(GameModuleImage.PenaltyHitHookAddress), BinaryPrimitives.ReadUInt32BigEndian(built.AsSpan(call)));
+        }
+
+        Assert.Equal(CodeArea.Jal(GameModuleImage.PenaltyAreaHookAddress), BinaryPrimitives.ReadUInt32BigEndian(built.AsSpan(0x83460)));
     }
 }

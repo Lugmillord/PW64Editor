@@ -56,17 +56,17 @@ public static class MissionCatalog
     /// </summary>
     public static IReadOnlyList<PointSource> AvailableSources(Vehicle vehicle) => vehicle switch
     {
-        Vehicle.HangGlider => [PointSource.Rings, PointSource.Balloons, PointSource.Photo, PointSource.Altitude, PointSource.Time,
+        Vehicle.HangGlider => [PointSource.Rings, PointSource.Balloons, PointSource.Photo, PointSource.Altitude, PointSource.Distance, PointSource.Time,
             PointSource.LandingAccuracy, PointSource.LandingImpact],
-        Vehicle.RocketBelt => [PointSource.Rings, PointSource.Balloons, PointSource.HoverPads, PointSource.Altitude, PointSource.Time,
+        Vehicle.RocketBelt => [PointSource.Rings, PointSource.Balloons, PointSource.HoverPads, PointSource.Altitude, PointSource.Distance, PointSource.Time,
             PointSource.LandingAccuracy, PointSource.LandingImpact],
         Vehicle.Gyrocopter => [PointSource.Rings, PointSource.Balloons, PointSource.Targets, PointSource.MecaHawks, PointSource.Altitude,
-            PointSource.Time, PointSource.LandingAccuracy, PointSource.LandingImpact],
-        Vehicle.SkyDiving => [PointSource.Formation, PointSource.Rings, PointSource.Altitude, PointSource.Time,
+            PointSource.Distance, PointSource.Time, PointSource.LandingAccuracy, PointSource.LandingImpact],
+        Vehicle.SkyDiving => [PointSource.Formation, PointSource.Rings, PointSource.Altitude, PointSource.Distance, PointSource.Time,
             PointSource.LandingAccuracy, PointSource.LandingImpact],
 
         // The Jumble Hopper does not measure an impact (it would always give the full points).
-        Vehicle.JumbleHopper => [PointSource.Rings, PointSource.Balloons, PointSource.Altitude, PointSource.Time, PointSource.LandingAccuracy],
+        Vehicle.JumbleHopper => [PointSource.Rings, PointSource.Balloons, PointSource.Altitude, PointSource.Distance, PointSource.Time, PointSource.LandingAccuracy],
         _ => [],
     };
 

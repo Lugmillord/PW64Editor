@@ -101,6 +101,8 @@ public static class MissionCurves
             // In meters as the game shows them (full points at 500 m), stored in game units.
             ScoreCurveKind.Altitude => ScoreCurve.Create(
                 [new(0, 0), new(M(140), 0), new(M(215), Round(p * 3 / 7)), new(M(320), Round(p * 5 / 7)), new(M(400), Round(p * 6 / 7)), new(M(500), p)]),
+            // Full points after 2000 m flown (meters as the game shows them).
+            ScoreCurveKind.Distance => ScoreCurve.Create([new(0, 0), new(M(2000), p)]),
             ScoreCurveKind.Time => Plateau(points, 120, 300),
             _ => ScoreCurve.Create([new(0, p)]),
         };

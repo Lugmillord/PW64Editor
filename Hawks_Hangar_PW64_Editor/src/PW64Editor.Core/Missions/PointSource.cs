@@ -4,7 +4,8 @@ namespace PW64Editor.Core.Missions;
 
 /// <summary>
 /// A kind of points, numbered as in the game's table of result rows (sResultPtTypes in
-/// src/app/results.c). 0 is an empty row; 10 does not exist.
+/// src/app/results.c). 0 is an empty row. 10 (distance) has no case on the original result sheet;
+/// the game module adds it (<see cref="Code.GameModuleOptions.DistanceRow"/>).
 /// </summary>
 public enum PointSource
 {
@@ -18,6 +19,7 @@ public enum PointSource
     Targets = 7,
     MecaHawks = 8,
     HoverPads = 9,
+    Distance = 10,
     Photo = 11,
     CannonballTarget1 = 12,
     CannonballTarget2 = 13,
@@ -45,6 +47,7 @@ public static class PointSources
         PointSource.Targets => CoreText.T("Targets"),
         PointSource.MecaHawks => "Meca Hawks",
         PointSource.HoverPads => CoreText.T("Floating pads"),
+        PointSource.Distance => CoreText.T("Distance"),
         PointSource.Photo => CoreText.T("Photo"),
         PointSource.CannonballTarget1 => CoreText.F("Target {0}", 1),
         PointSource.CannonballTarget2 => CoreText.F("Target {0}", 2),
@@ -61,6 +64,7 @@ public static class PointSources
         PointSource.LandingAccuracy => ScoreCurveKind.LandingAccuracy,
         PointSource.Time => ScoreCurveKind.Time,
         PointSource.Altitude => ScoreCurveKind.Altitude,
+        PointSource.Distance => ScoreCurveKind.Distance,
         _ => null,
     };
 }

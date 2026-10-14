@@ -72,9 +72,33 @@ public sealed class GameFeatureSettings
     /// <summary>With <see cref="DebugOutput"/>: show the editor's messages on the screen too (15 seconds).</summary>
     public bool OnScreen { get; set; } = true;
 
+    /// <summary>With <see cref="DebugOutput"/>: show current values during missions (the four below).</summary>
+    public bool LiveValues { get; set; }
+
+    /// <summary>Live value: distance flown.</summary>
+    public bool LiveDistance { get; set; } = true;
+
+    /// <summary>Live value: highest altitude of this flight.</summary>
+    public bool LiveAltitude { get; set; } = true;
+
+    /// <summary>Live value: horizontal speed.</summary>
+    public bool LiveHorizontalSpeed { get; set; } = true;
+
+    /// <summary>Live value: vertical speed.</summary>
+    public bool LiveVerticalSpeed { get; set; } = true;
+
+    /// <summary>The live values chosen (none unless <see cref="DebugOutput"/> and <see cref="LiveValues"/>).</summary>
+    public Code.LiveValues LiveMask => !DebugOutput || !LiveValues
+        ? Code.LiveValues.None
+        : (LiveDistance ? Code.LiveValues.Distance : 0) | (LiveAltitude ? Code.LiveValues.HighestAltitude : 0)
+          | (LiveHorizontalSpeed ? Code.LiveValues.HorizontalSpeed : 0) | (LiveVerticalSpeed ? Code.LiveValues.VerticalSpeed : 0);
+
+    /// <summary>A copy.</summary>
+    public GameFeatureSettings Clone() => (GameFeatureSettings)MemberwiseClone();
+
     /// <summary>What the game module does in a build (without the mission conditions).</summary>
     public Code.GameModuleOptions ModuleOptions =>
-        new(DebugOutput, DebugOutput && StartupInfo, DebugOutput && GameMessages, DebugOutput && OnScreen);
+        new(DebugOutput, DebugOutput && StartupInfo, DebugOutput && GameMessages, DebugOutput && OnScreen) { Live = LiveMask };
 }
 
 /// <summary>

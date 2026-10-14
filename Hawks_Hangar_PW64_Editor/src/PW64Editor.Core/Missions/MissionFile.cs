@@ -98,6 +98,31 @@ public sealed class MissionFile
         return result;
     }
 
+    /// <summary>Offset of the start fuel in the takeoff pad (TaskTPAD.unk2C, 0 to 1, Rocket Belt and Gyrocopter).</summary>
+    public const int StartFuelOffset = 0x2C;
+
+    /// <summary>The fuel at the start (first takeoff pad), or null without one.</summary>
+    public float? StartFuel
+    {
+        get
+        {
+            ReadOnlySpan<byte> pad = GetObjectData(MissionObjectKind.TakeoffPad);
+            return pad.Length >= 0x30 ? System.Buffers.Binary.BinaryPrimitives.ReadSingleBigEndian(pad[StartFuelOffset..]) : null;
+        }
+    }
+
+    /// <summary>The file with another start fuel in its first takeoff pad (unchanged without one).</summary>
+    public byte[] WithStartFuel(float fuel)
+    {
+        byte[] result = (byte[])_file.Clone();
+        if (_chunks.TryGetValue("TPAD", out IffChunk? chunk) && chunk.DataSize >= 0x30)
+        {
+            System.Buffers.Binary.BinaryPrimitives.WriteSingleBigEndian(result.AsSpan(chunk.DataOffset + StartFuelOffset), fuel);
+        }
+
+        return result;
+    }
+
     private static string ReadString(byte[] file, IffChunk? chunk)
     {
         if (chunk is null)

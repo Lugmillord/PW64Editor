@@ -8,6 +8,15 @@
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Margin" Value="0,16,0,6" />
         </Style>
+        <!-- The sections of the Parameters tab can be folded; open by default, the state stays while missions change. -->
+        <Style x:Key="Section" TargetType="Expander">
+            <Setter Property="IsExpanded" Value="True" />
+            <Setter Property="Margin" Value="0,12,0,0" />
+        </Style>
+        <Style x:Key="SectionHeader" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+        </Style>
         <Style x:Key="Note" TargetType="TextBlock">
             <Setter Property="TextWrapping" Value="Wrap" />
             <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
@@ -54,10 +63,12 @@
             </TabItem>
 
             <!-- The points of the mission and the text of the mission screen ("…_S1"). -->
-            <TabItem Header="Point Distribution">
+            <TabItem Header="Parameters">
                 <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                     <StackPanel Margin="10,0,16,6" MaxWidth="900" HorizontalAlignment="Left">
-                        <TextBlock Text="Points" Style="{StaticResource SectionTitle}" />
+                        <Expander Style="{StaticResource Section}">
+                            <Expander.Header><TextBlock Text="Points" Style="{StaticResource SectionHeader}" /></Expander.Header>
+                            <StackPanel Margin="18,0,0,0">
                         <TextBlock x:Name="PointsNote" Style="{StaticResource Note}" />
                         <!-- One line per row of the result sheet, plus one to add a row; filled in code. -->
                         <!-- The rows can be dragged by their handle (⠿) to another place. -->
@@ -80,10 +91,13 @@
                                        Text="Each ring gives the points of its type. Which ring has which type is set in the mission's objects. Rings of type 3 are invisible check rings (no model, no radar mark): flying through them unlocks the next rings, in Dark Cavern the goal ring. They give no points and do not count for the conditions." />
                             <WrapPanel x:Name="RingTypes" Margin="0,4,0,0" />
                         </StackPanel>
+                        </StackPanel>
+                        </Expander>
 
                         <!-- Time limit, "Land now" and hard end (not for Cannonball). -->
-                        <StackPanel x:Name="TimeSection">
-                        <TextBlock Text="Time limit" Style="{StaticResource SectionTitle}" />
+                        <Expander x:Name="TimeSection" Style="{StaticResource Section}">
+                            <Expander.Header><TextBlock Text="Time limit" Style="{StaticResource SectionHeader}" /></Expander.Header>
+                            <StackPanel Margin="18,0,0,0">
                         <TextBlock x:Name="TimeNote" Style="{StaticResource Note}" />
                         <StackPanel x:Name="TimePanel">
                             <WrapPanel Margin="0,4,0,0">
@@ -117,23 +131,40 @@
                         </WrapPanel>
                         <TextBlock x:Name="HardEndText" Style="{StaticResource Note}" Margin="0,6,0,0" />
                         </StackPanel>
+                        </Expander>
 
                         <!-- Only for missions with altitude points. -->
-                        <StackPanel x:Name="AltitudePanel">
-                            <TextBlock Text="Altitude points" Style="{StaticResource SectionTitle}" />
+                        <Expander x:Name="AltitudePanel" Style="{StaticResource Section}">
+                            <Expander.Header><TextBlock Text="Altitude points" Style="{StaticResource SectionHeader}" /></Expander.Header>
+                            <StackPanel Margin="18,0,0,0">
                             <TextBlock Style="{StaticResource Note}"
                                        Text="The highest altitude of the flight gives the points of this curve. Between two points the points rise or fall evenly; below the first point the first one counts, above the last point the last one. Two points at the same altitude make a step. Altitudes are in meters above sea level, the number the HUD shows under &quot;SEA LEVEL&quot; (the altimeter shows the height above the ground): a flight from a tower or a mountain starts with that height." />
                             <StackPanel x:Name="AltitudeCurvePanel" Margin="0,6,0,0" />
                         </StackPanel>
+                        </Expander>
+
+                        <!-- Only for missions with distance points. -->
+                        <Expander x:Name="DistancePanel" Style="{StaticResource Section}">
+                            <Expander.Header><TextBlock Text="Distance points" Style="{StaticResource SectionHeader}" /></Expander.Header>
+                            <StackPanel Margin="18,0,0,0">
+                            <TextBlock Style="{StaticResource Note}"
+                                       Text="The distance flown (the whole way, also up and down) gives the points of this curve. Distances are in meters as the game counts them. Between two points the points rise or fall evenly; beyond the last point the last one counts. The original result sheet has no line for these points: the editor's game code adds it." />
+                            <StackPanel x:Name="DistanceCurvePanel" Margin="0,6,0,0" />
+                        </StackPanel>
+                        </Expander>
 
                         <!-- Only for missions with landing accuracy points (and the Cannonball targets). -->
-                        <StackPanel x:Name="LandingPanel">
-                            <TextBlock x:Name="LandingTitle" Text="Landing accuracy" Style="{StaticResource SectionTitle}" />
+                        <Expander x:Name="LandingPanel" Style="{StaticResource Section}">
+                            <Expander.Header><TextBlock x:Name="LandingTitle" Text="Landing accuracy" Style="{StaticResource SectionHeader}" /></Expander.Header>
+                            <StackPanel Margin="18,0,0,0">
                             <TextBlock x:Name="LandingNote" Style="{StaticResource Note}" />
                             <StackPanel x:Name="LandingCurvePanel" Margin="0,6,0,0" />
                         </StackPanel>
+                        </Expander>
 
-                        <TextBlock Text="Conditions" Style="{StaticResource SectionTitle}" />
+                        <Expander x:Name="ConditionsExpander" Style="{StaticResource Section}">
+                            <Expander.Header><TextBlock Text="Conditions and deductions" Style="{StaticResource SectionHeader}" /></Expander.Header>
+                            <StackPanel Margin="18,0,0,0">
                         <StackPanel x:Name="ConditionsSection">
                             <CheckBox x:Name="CrashZeroBox" Content="A crash gives 0 points in total" Click="OnConditionsChanged" />
                             <TextBlock Text="Time points only if:" FontWeight="SemiBold" Margin="0,10,0,2" />
@@ -155,6 +186,11 @@
                                 <TextBlock Text="m" VerticalAlignment="Center" />
                             </WrapPanel>
                             <TextBlock x:Name="StartAltitudeNote" Style="{StaticResource Note}" Margin="22,0,0,0" />
+                            <WrapPanel Margin="0,4,0,0">
+                                <CheckBox x:Name="DistanceConditionBox" Content="the distance flown at least" VerticalAlignment="Center" Click="OnConditionsChanged" />
+                                <TextBox x:Name="DistanceConditionValue" Width="60" Margin="6,0,6,0" Tag="value" />
+                                <TextBlock Text="m" VerticalAlignment="Center" />
+                            </WrapPanel>
                             <TextBlock x:Name="ConditionsHowNote" Style="{StaticResource Note}" Margin="0,6,0,0" />
                         </StackPanel>
                         <WrapPanel x:Name="HitPanel" Margin="0,8,0,0">
@@ -172,19 +208,56 @@
                             <TextBox x:Name="ReactionBox" Width="50" Tag="value" />
                             <TextBlock Text="points (set per mission)." VerticalAlignment="Center" Margin="6,0,0,0" />
                         </WrapPanel>
+                        </StackPanel>
+                        </Expander>
 
 
-                        <TextBlock Text="Footnote" Style="{StaticResource SectionTitle}" />
+                        <Expander Style="{StaticResource Section}">
+                            <Expander.Header><TextBlock Text="Footnote" Style="{StaticResource SectionHeader}" /></Expander.Header>
+                            <StackPanel Margin="18,0,0,0">
                         <TextBlock Style="{StaticResource Note}"
                                    Text="Shown below the total on the mission screen, with a * in front. One line per line of the text box." />
                         <CheckBox x:Name="AutoFootnoteBox" Margin="0,4,0,0" Click="OnAutoFootnoteChanged"
                                   Content="Write the footnote from the settings (time limit, conditions, altitude points, crash)" />
                         <TextBox x:Name="FootnoteBox" Height="70" Margin="0,4,0,0" AcceptsReturn="True" TextWrapping="NoWrap" FontFamily="Consolas"
                                  LostKeyboardFocus="OnFootnoteCommitted" />
+                        </StackPanel>
+                        </Expander>
 
-                        <TextBlock Text="Text on the mission screen" Style="{StaticResource SectionTitle}" />
+                        <!-- Only for Rocket Belt and Gyrocopter. -->
+                        <Expander x:Name="FuelPanel" Style="{StaticResource Section}">
+                            <Expander.Header><TextBlock Text="Fuel" Style="{StaticResource SectionHeader}" /></Expander.Header>
+                            <StackPanel Margin="18,0,0,0">
+                            <WrapPanel>
+                                <TextBlock Text="Fuel at the start:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                <TextBox x:Name="StartFuelBox" Width="50" Tag="value" />
+                                <TextBlock Text="% of a full tank" VerticalAlignment="Center" Margin="6,0,0,0" />
+                            </WrapPanel>
+                            <CheckBox x:Name="UnlimitedFuelBox" Margin="0,6,0,0" Click="OnUnlimitedFuelChanged"
+                                      Content="Unlimited fuel (the tank is filled again all the time)" />
+                            <TextBlock x:Name="FuelNote" Style="{StaticResource Note}" Margin="22,2,0,0"
+                                       Text="The editor's game code fills the tank in every frame of the flight. The fuel gauge and its &quot;FUEL&quot; label are not shown, and there is no &quot;Low fuel&quot;." />
+                        </StackPanel>
+                        </Expander>
+
+                        <!-- Only for the Beginner missions of Hang Glider, Rocket Belt and Gyrocopter. -->
+                        <Expander x:Name="DemoPanel" Style="{StaticResource Section}">
+                            <Expander.Header><TextBlock Text="Hint screen" Style="{StaticResource SectionHeader}" /></Expander.Header>
+                            <StackPanel Margin="18,0,0,0">
+                            <CheckBox x:Name="HideDemoBox" Click="OnHideDemoChanged"
+                                      Content="Hide the &quot;View Demo&quot; button (the demo flight can no longer be chosen)" />
+                            <TextBlock Style="{StaticResource Note}" Margin="22,2,0,0"
+                                       Text="The hint screen of the Beginner missions offers a demo flight. Without the button it works like the hint screens of the other classes: only &quot;Return&quot;." />
+                        </StackPanel>
+                        </Expander>
+
+                        <Expander Style="{StaticResource Section}">
+                            <Expander.Header><TextBlock Text="Text on the mission screen" Style="{StaticResource SectionHeader}" /></Expander.Header>
+                            <StackPanel Margin="18,0,0,0">
                         <TextBlock x:Name="ScreenTextNote" Style="{StaticResource Note}" />
                         <local:TextEditorPanel x:Name="ScreenTextView" ShowHeader="False" IsReadOnly="True" TextBoxHeight="150" />
+                        </StackPanel>
+                        </Expander>
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>

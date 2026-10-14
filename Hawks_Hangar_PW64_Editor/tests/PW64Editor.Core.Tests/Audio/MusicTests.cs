@@ -82,10 +82,11 @@ public class MusicTests
                 }
             }
 
-            Assert.All(result.Events.Where(e => e.Kind == SequenceEventKind.Control && e.Data1 == 7 && used.Contains(e.Channel)),
+            // Silent: every note of the channel has velocity 0 (a note off for the sequence player).
+            Assert.All(result.Events.Where(e => e.Kind == SequenceEventKind.Note && used.Contains(e.Channel)),
                 e => Assert.Equal(0, e.Data2));
             // Shared repetitions may have been written out, so the song can only grow.
-            Assert.True(changed.Length >= original.Length + (channels.Any(c => c.Programs.Contains(-1)) ? 7 : 0));
+            Assert.True(changed.Length >= original.Length + (channels.Any(c => c.Programs.Contains(-1)) ? 3 : 0)); // an inserted program change
         }
     }
 
@@ -162,7 +163,8 @@ public class MusicTests
         SequenceBank songs = SequenceBank.Parse(built.AsSpan(sequenceOffset, bankOffset - sequenceOffset));
         CompactSequence song0 = CompactSequence.Parse(songs.Sequences[0]);
         Assert.Equal(60, song0.Events.First(e => e.Kind == SequenceEventKind.Program && e.Channel == 0).Data1);
-        Assert.All(song0.Events.Where(e => e.Kind == SequenceEventKind.Control && e.Channel == 1 && e.Data1 == 7), e => Assert.Equal(0, e.Data2));
+        Assert.All(song0.Events.Where(e => e.Kind == SequenceEventKind.Note && e.Channel == 1), e => Assert.Equal(0, e.Data2));
+        Assert.Contains(song0.Events, e => e.Kind == SequenceEventKind.Note && e.Channel == 0 && e.Data2 > 0); // the others still play
         Assert.Equal(Sequences(rom.Data).Sequences[5], songs.Sequences[5]);
 
         Assert.True(reopened.RestoreSong(0));

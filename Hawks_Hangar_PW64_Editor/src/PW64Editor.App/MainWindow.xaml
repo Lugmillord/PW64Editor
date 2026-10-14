@@ -94,6 +94,12 @@
             <TabItem Header="Model">
                 <TextBlock Style="{StaticResource PlaceholderText}" Text="Editing models will be added here in a later version." />
             </TabItem>
+            <TabItem Header="Behaviors">
+                <TextBlock Style="{StaticResource PlaceholderText}" Text="Editing behaviors will be added here in a later version." />
+            </TabItem>
+            <TabItem Header="Menu">
+                <TextBlock Style="{StaticResource PlaceholderText}" Text="Editing the menus will be added here in a later version." />
+            </TabItem>
             <TabItem Header="Objects">
                 <TextBlock Style="{StaticResource PlaceholderText}" Text="Editing objects will be added here in a later version." />
             </TabItem>

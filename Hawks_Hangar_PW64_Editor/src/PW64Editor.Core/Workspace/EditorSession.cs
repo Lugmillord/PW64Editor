@@ -684,13 +684,7 @@ public sealed class EditorSession
     /// <summary>Saves which additional features are built into the game (Features tab).</summary>
     public void SaveFeatures(GameFeatureSettings features)
     {
-        Project.Settings.Features = new GameFeatureSettings
-        {
-            DebugOutput = features.DebugOutput,
-            StartupInfo = features.StartupInfo,
-            GameMessages = features.GameMessages,
-            OnScreen = features.OnScreen,
-        };
+        Project.Settings.Features = features.Clone();
         Project.Save();
     }
 

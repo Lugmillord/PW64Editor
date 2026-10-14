@@ -64,6 +64,13 @@ typedef __builtin_va_list va_list;
 #define FLAG_GAME_MESSAGES 2u /* the game's own debug messages */
 #define FLAG_DEBUG         4u /* debug output at all */
 #define FLAG_SCREEN        8u /* the editor's messages also on the screen */
+#define FLAG_LIVE         16u /* current values during missions (header field live) */
+
+/* Values of the live display (header field live). */
+#define LIVE_DISTANCE   1u /* distance flown */
+#define LIVE_ALTITUDE   2u /* highest altitude of this flight */
+#define LIVE_HORIZONTAL 4u /* horizontal speed */
+#define LIVE_VERTICAL   8u /* vertical speed */
 
 #define LOG_SIZE 8192
 
@@ -80,12 +87,18 @@ static char sLog[LOG_SIZE];
 
 #define COND_CRASH_ZERO 1u /* a crash gives 0 points in total */
 #define COND_ALTITUDE   2u /* time points only if the highest altitude reached "altitude" */
+#define COND_DISTANCE   4u /* time points only if the distance flown reached "distance" */
+#define COND_FUEL       8u /* Rocket Belt, Gyrocopter: the fuel never runs out */
+#define COND_POINTS (COND_CRASH_ZERO | COND_ALTITUDE | COND_DISTANCE) /* flags about the points */
+
+/* True if an entry has conditions for the points (an entry may only be there for the fuel). */
+#define HAS_POINT_CONDITIONS(c) (((c)->flags & COND_POINTS) || has_required(c))
 
 #define OBJECT_TYPES 7      /* rings, balloons, targets, hover pads, Meca Hawks, ball targets, hopper goals */
 #define REQUIRED_ALL 0xFF
 #define MAX_CONDITIONS 160
 
-/* One mission with conditions (16 bytes). required[type]: 0 = not required, 0xFF = all,
+/* One mission with conditions (20 bytes). required[type]: 0 = not required, 0xFF = all,
    otherwise at least this many. Written by the editor (GameModule.cs). */
 typedef struct {
     u8 vehicle;
@@ -94,10 +107,11 @@ typedef struct {
     u8 flags;
     u8 required[OBJECT_TYPES];
     u8 pad;
-    u32 altitude; /* f32 bits */
+    u32 altitude; /* f32 bits, game units above sea level */
+    u32 distance; /* f32 bits, game units */
 } Condition;
 
-__attribute__((section(".data"))) Condition gConditions[MAX_CONDITIONS] = { { 0xFF, 0, 0, 0, { 0 }, 0, 0 } };
+__attribute__((section(".data"))) Condition gConditions[MAX_CONDITIONS] = { { 0xFF, 0, 0, 0, { 0 }, 0, 0, 0 } };
 
 /* Fixed layout, read by the loader (init), the printf gate (magic, printf) and the editor
    (flags, rom, info). See GameModule.cs. */
@@ -115,11 +129,14 @@ struct Header {
     void *conditions;   /* +0x28 table of the missions with conditions (gConditions) */
     u32 conditionCount; /* +0x2C entries used, written by the editor */
     char info[96];      /* +0x30 "project ..., built ...", written by the editor */
+    u32 live;           /* +0x90 LIVE_... values shown during missions, written by the editor */
+    u16 metText[32];    /* +0x94 "Time requirement met" in the game's text codes as in RAM (end 0xFFFF), or 0 */
+    u16 digits[10];     /* +0xD4 codes of the bold digits 0-9 (penalty messages), or 0 */
 };
 
 __attribute__((section(".header"), used)) struct Header gHeader = {
     0x4848474D, (void *)module_game_printf, (void *)module_init, 0, 0, 0,
-    sLog, LOG_SIZE, 0, 2, gConditions, 0, "",
+    sLog, LOG_SIZE, 0, 4, gConditions, 0, "", 0, { 0 }, { 0 },
 };
 
 /* ------------------------------------------------------------------ low level */
@@ -495,6 +512,17 @@ static void message(const char *fmt, ...) {
     }
 }
 
+/* A message of the editor only to the debug port and the log (not to the screen). */
+static void message_quiet(const char *fmt, ...) {
+    va_list ap;
+    if (!(gHeader.flags & FLAG_DEBUG)) {
+        return;
+    }
+    va_start(ap, fmt);
+    vmessage("[HH] ", fmt, ap);
+    va_end(ap);
+}
+
 /* Takes the place of the game's _uvDebugPrintf (through the gate in the code cave). */
 int module_game_printf(const char *fmt, ...) {
     va_list ap;
@@ -528,7 +556,20 @@ static int sScreenCount;   /* lines used */
 static u32 sScreenTime;    /* CPU count of the last message */
 static FrameCallback sOtherCallback;
 
+static char sLiveLine[OVL_COLS + 1]; /* current values during a mission (see live_update) */
+static u32 sLiveTime;                /* CPU count of the last flight frame */
+#define LIVE_Y 30                    /* top pixel row of the live line (below the HUD's clock) */
+#define LIVE_TICKS (46875000u / 2)   /* the line goes half a second after the last flight frame */
+
 static void overlay(u16 *frame, void *depth);
+
+/* Puts the overlay into the frame callback (keeping the one the game uses, e.g. for snow). */
+static void overlay_install(void) {
+    if (GAME_GFX_CALLBACK != (void *)overlay) {
+        sOtherCallback = (FrameCallback)GAME_GFX_CALLBACK;
+        GAME_GFX_CALLBACK = (void *)overlay;
+    }
+}
 
 static void screen_newline(void) {
     int i;
@@ -574,9 +615,33 @@ static void screen_add(const char *text, u32 length) {
     }
 
     sScreenTime = cpu_count();
-    if (GAME_GFX_CALLBACK != (void *)overlay) {
-        sOtherCallback = (FrameCallback)GAME_GFX_CALLBACK;
-        GAME_GFX_CALLBACK = (void *)overlay;
+    overlay_install();
+}
+
+/* One line of text at a pixel row, on a darkened background. */
+static void draw_line(u16 *frame, int top, const char *line) {
+    int col, y, x;
+    int width = 0;
+    while (line[width]) {
+        width++;
+    }
+    for (y = 0; y < 9; y++) {
+        u16 *p = frame + (top + y) * SCREEN_W + OVL_X - 2;
+        for (x = 0; x < width * 6 + 4; x++) {
+            p[x] = ((p[x] >> 2) & 0x39CE) | 1; /* a quarter of the brightness */
+        }
+    }
+    for (col = 0; col < width; col++) {
+        const u8 *glyph = sFont6x9[line[col] - 32];
+        for (y = 0; y < 9; y++) {
+            u8 bits = glyph[y];
+            u16 *p = frame + (top + y) * SCREEN_W + OVL_X + col * 6;
+            for (x = 0; x < 6; x++) {
+                if (bits & (0x20 >> x)) {
+                    p[x] = 0xFFFF;
+                }
+            }
+        }
     }
 }
 
@@ -584,44 +649,31 @@ static void screen_add(const char *text, u32 length) {
    lines' background and draws the text. After 15 seconds without a new message the callback
    the game had before is put back. */
 static void overlay(u16 *frame, void *depth) {
-    int row, col, y, x;
+    int row;
     int top;
+    u32 now = cpu_count();
+    int messages, live;
     if (sOtherCallback != 0 && sOtherCallback != overlay) {
         sOtherCallback(frame, depth);
     }
-    if (cpu_count() - sScreenTime > OVL_TICKS) {
+    messages = sScreenCount > 0 && now - sScreenTime <= OVL_TICKS;
+    live = sLiveLine[0] != 0 && now - sLiveTime <= LIVE_TICKS;
+    if (!messages) {
+        sScreenCount = 0;
+    }
+    if (!messages && !live) {
         if (GAME_GFX_CALLBACK == (void *)overlay) {
             GAME_GFX_CALLBACK = (void *)sOtherCallback;
         }
-        sScreenCount = 0;
         return;
     }
 
+    if (live) {
+        draw_line(frame, LIVE_Y, sLiveLine);
+    }
     top = OVL_BOTTOM + 1 - sScreenCount * 9;
     for (row = 0; row < sScreenCount; row++) {
-        const char *line = sScreen[row];
-        int width = 0;
-        while (line[width]) {
-            width++;
-        }
-        for (y = 0; y < 9; y++) {
-            u16 *p = frame + (top + row * 9 + y) * SCREEN_W + OVL_X - 2;
-            for (x = 0; x < width * 6 + 4; x++) {
-                p[x] = ((p[x] >> 2) & 0x39CE) | 1; /* a quarter of the brightness */
-            }
-        }
-        for (col = 0; col < width; col++) {
-            const u8 *glyph = sFont6x9[line[col] - 32];
-            for (y = 0; y < 9; y++) {
-                u8 bits = glyph[y];
-                u16 *p = frame + (top + row * 9 + y) * SCREEN_W + OVL_X + col * 6;
-                for (x = 0; x < 6; x++) {
-                    if (bits & (0x20 >> x)) {
-                        p[x] = 0xFFFF;
-                    }
-                }
-            }
-        }
+        draw_line(frame, top + row * 9, sScreen[row]);
     }
 }
 
@@ -703,19 +755,37 @@ static const char *const sTypeNames[OBJECT_TYPES] = {
     "rings", "balloons", "targets", "hover pads", "Meca Hawks", "ball targets", "hopper goals",
 };
 
-/* The whole part of a float (given as its bits), without the FPU. */
-static s32 float_to_int(s32 bits) {
-    int exp = ((bits >> 23) & 0xFF) - 127;
+/* A float (given as its bits) times 256, without the FPU (fixed point with 8 fraction bits). */
+static s32 float_to_fixed8(s32 bits) {
+    int exp = ((bits >> 23) & 0xFF) - 127 - 15; /* the mantissa has 23 fraction bits, we keep 8 */
     u32 mant = ((u32)bits & 0x7FFFFF) | 0x800000;
     s32 value;
-    if (exp < 0) {
+    if (((bits >> 23) & 0xFF) == 0) {
         return 0;
     }
-    if (exp > 30) {
+    if (exp > 7) {
         return bits < 0 ? -0x7FFFFFFF : 0x7FFFFFFF;
     }
-    value = (s32)(exp >= 23 ? mant << (exp - 23) : mant >> (23 - exp));
+    value = (s32)(exp >= 0 ? mant << exp : (exp > -31 ? mant >> -exp : 0));
     return bits < 0 ? -value : value;
+}
+
+/* Game units (float bits) to the meters the game shows (x 0.7), rounded. */
+static s32 units_to_meters(s32 bits) {
+    s32 f = float_to_fixed8(bits);
+    s32 m = (f / 16) * 7 / 160; /* f / 256 * 0.7, without overflow up to 300 km */
+    return m;
+}
+
+/* The player's flight data (Unk80362690_Unk0 of the active player): distance flown at +0x0C,
+   highest altitude at +0x10, position matrix at +0x2C (x, y, z at +0x5C, +0x60, +0x64). */
+#define GAME_STATE (*(u8 *volatile *)0x80362690) /* D_80362690 */
+static u8 *player_flight(void) {
+    u8 *state = GAME_STATE;
+    if (state == 0) {
+        return 0;
+    }
+    return state + 0x0C + *(s32 *)(state + 0x9C) * 0x8C;
 }
 
 /* Called by the scoring function (func_8032B560) instead of taskGet_80346364, after the crash
@@ -733,13 +803,23 @@ static const Condition *current_condition(void) {
     return 0;
 }
 
+static int has_required(const Condition *c) {
+    int t;
+    for (t = 0; t < OBJECT_TYPES; t++) {
+        if (c->required[t]) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
 s32 module_conditions(u8 *result) {
     const Condition *c = current_condition();
     u32 *flags = (u32 *)result;
     u32 i;
     int met = 1;
 
-    if (c == 0) {
+    if (c == 0 || !HAS_POINT_CONDITIONS(c)) {
         return GAME_TASK_MODE();
     }
 
@@ -765,9 +845,19 @@ s32 module_conditions(u8 *result) {
         s32 limit = (s32)c->altitude;
         /* non-negative floats compare like integers */
         int high = reached >= 0 && reached >= limit;
-        message("Conditions: highest altitude %d m, %d m needed: %s.\n", float_to_int(reached), float_to_int(limit),
+        message("Conditions: highest altitude %d m, %d m needed: %s.\n", units_to_meters(reached), units_to_meters(limit),
                 high ? "reached" : "not reached");
         if (!high) {
+            met = 0;
+        }
+    }
+    if (c->flags & COND_DISTANCE) {
+        s32 flown = *(s32 *)(result + 0x14);
+        s32 limit = (s32)c->distance;
+        int far = flown >= 0 && flown >= limit;
+        message("Conditions: distance %d m, %d m needed: %s.\n", units_to_meters(flown), units_to_meters(limit),
+                far ? "reached" : "not reached");
+        if (!far) {
             met = 0;
         }
     }
@@ -785,6 +875,55 @@ s32 module_conditions(u8 *result) {
    so the game does not say "please land" or remove the other objects. */
 #define GAME_OBJECTS_LEFT ((s32(*)(s32 *))0x8032C080) /* func_8032C080 */
 
+#define GAME_HUD_WARNING ((void (*)(s32, u32, u32))0x8031D9B8)  /* hudWarningText(textId, 3.0f, 8.0f) */
+#define GAME_HUD_WARNING_TEXT ((volatile u16 *)(0x8036C5A8 + 0xB40)) /* sHudState.unkB40[0x3C] */
+#define TEXT_LEFT_CNT 0x29
+#define FLOAT_3 0x40400000u
+#define FLOAT_8 0x41000000u
+
+/* True if all conditions of the time points are met, counting "extra" more objects of "type". */
+static int time_requirement_met(const Condition *c, int type, int extra) {
+    int t;
+    u8 *flight = player_flight();
+    for (t = 0; t < OBJECT_TYPES; t++) {
+        s32 cleared, total, need;
+        if (c->required[t] == 0) {
+            continue;
+        }
+        count_objects(t, &cleared, &total);
+        if (t == type) {
+            cleared += extra;
+        }
+        need = c->required[t] == REQUIRED_ALL ? total : c->required[t];
+        if (cleared < need) {
+            return 0;
+        }
+    }
+    if ((c->flags & COND_ALTITUDE) && (flight == 0 || *(s32 *)(flight + 0x10) < (s32)c->altitude)) {
+        return 0;
+    }
+    if ((c->flags & COND_DISTANCE) && (flight == 0 || *(s32 *)(flight + 0x0C) < (s32)c->distance)) {
+        return 0;
+    }
+    return 1;
+}
+
+/* "Time requirement met" as the second HUD line (the text comes from the editor, in the
+   game's text codes): the game's own message with the "to go" text, whose copy is then replaced. */
+static void show_requirement_met(void) {
+    int i;
+    if (gHeader.metText[0] == 0) {
+        return;
+    }
+    GAME_HUD_WARNING(TEXT_LEFT_CNT, FLOAT_3, FLOAT_8);
+    for (i = 0; i < 32 && i < 0x3C; i++) {
+        GAME_HUD_WARNING_TEXT[i] = gHeader.metText[i];
+        if (gHeader.metText[i] == 0xFFFF) {
+            break;
+        }
+    }
+}
+
 static s32 objects_left(int type, s32 *left) {
     const Condition *c = current_condition();
     s32 cleared, total, need;
@@ -796,7 +935,12 @@ static s32 objects_left(int type, s32 *left) {
     /* "cleared" does not include the object just cleared yet. */
     message("HUD: %s %d of %d cleared, %d needed.\n", sTypeNames[type], cleared + 1, total, need);
     if (left != 0) {
-        *left = need > cleared ? need - cleared : 0;
+        /* The game shows one less; with 1 left (this object reaches the number) nothing. */
+        *left = need - cleared > 1 ? need - cleared : 0;
+    }
+    if (!time_requirement_met(c, type, 0) && time_requirement_met(c, type, 1)) {
+        message("HUD: time requirement met.\n");
+        show_requirement_met();
     }
     return 0;
 }
@@ -809,6 +953,234 @@ s32 module_rings_left(s32 *left) {
 /* Called by targets_8034473C (a target was hit) instead of func_8032C080. */
 s32 module_targets_left(s32 *left) {
     return objects_left(2, left);
+}
+
+/* ------------------------------------------------------------------ penalty messages */
+
+/* "5 pts. deducted" (Gyrocopter, a hit) and "2 pts. deducted" (Rocket Belt, a hit; Jumble Hopper,
+   leaving the area) are fixed texts, but the points come from the mission. The calls of
+   hudWarningText for them go here: the message is shown, then the number in its copy is replaced
+   by the mission's value (no message if nothing is deducted). */
+#define TEXT_OFF_2 0x4F
+#define TEXT_OFF_5 0x148
+#define HUD_TEXT_LENGTH 0x3C
+
+static void show_penalty(s32 textId, u32 a1, u32 a2, s32 points) {
+    volatile u16 *text = GAME_HUD_WARNING_TEXT;
+    s32 shown = textId == TEXT_OFF_5 ? 5 : 2;
+    u16 digits[3];
+    int n = 0, at, end, i;
+    if (points <= 0) {
+        message("HUD: no points deducted, no message.\n");
+        return;
+    }
+    GAME_HUD_WARNING(textId, a1, a2);
+    if (points == shown || gHeader.digits[shown] == 0) {
+        return;
+    }
+    if (points > 999) {
+        points = 999;
+    }
+    for (at = 0; at < HUD_TEXT_LENGTH && text[at] != 0xFFFF && text[at] != gHeader.digits[shown]; at++) {
+    }
+    for (end = at; end < HUD_TEXT_LENGTH && text[end] != 0xFFFF; end++) {
+    }
+    if (end >= HUD_TEXT_LENGTH || at == end) {
+        return; /* the text was changed and has no such number */
+    }
+    do {
+        digits[n++] = gHeader.digits[points % 10];
+        points /= 10;
+    } while (points != 0);
+    if (end + n - 1 >= HUD_TEXT_LENGTH) {
+        return;
+    }
+    for (i = end; i > at; i--) {
+        text[i + n - 1] = text[i];
+    }
+    for (i = 0; i < n; i++) {
+        text[at + i] = digits[n - 1 - i];
+    }
+}
+
+/* A non-negative f32 (bits) rounded to an integer, without floating point (soft-float build). */
+static s32 round_float_bits(u32 bits) {
+    s32 e = (s32)((bits >> 23) & 0xFF) - 127;
+    u32 mantissa = (bits & 0x7FFFFF) | 0x800000, twice;
+    if ((bits & 0x80000000u) || e < -1) {
+        return 0;
+    }
+    if (e > 20) {
+        return 999;
+    }
+    twice = e >= 22 ? mantissa << (e - 22) : mantissa >> (22 - e);
+    return (s32)((twice + 1) >> 1);
+}
+
+/* Gyrocopter and Rocket Belt: a hit costs COMM+0x3B4 (s32, negative). */
+void module_penalty_hit(s32 textId, u32 a1, u32 a2) {
+    s32 points = -*(s32 *)(GAME_TASK_SCORING() + 0x3B4);
+    message("HUD: hit, %d points deducted.\n", points);
+    show_penalty(textId, a1, a2, points);
+}
+
+/* Jumble Hopper: leaving the area costs COMM+0x414 (f32). */
+void module_penalty_area(s32 textId, u32 a1, u32 a2) {
+    s32 points = round_float_bits(*(u32 *)(GAME_TASK_SCORING() - 0x48 + 0x414));
+    message("HUD: out of the area, %d points deducted.\n", points);
+    show_penalty(textId, a1, a2, points);
+}
+
+/* ------------------------------------------------------------------ distance row */
+
+/* The result sheet (resultInit) picks the points of each row through a jump table; row type 10
+   (distance) has no entry there and shows nothing. The editor points that entry here: load the
+   distance points (unk8 of the test's result) like the other rows do and continue with them. */
+__asm__(".section .text\n"
+        ".set push\n"
+        ".set noreorder\n"
+        ".globl module_distance_row\n"
+        "module_distance_row:\n"
+        "    j 0x8032E528\n"
+        "    lh $a1, 8($t0)\n"
+        ".set pop\n");
+
+/* ------------------------------------------------------------------ live values */
+
+static u32 sLiveSampleTime;      /* CPU count of the last speed sample */
+static s32 sLiveX, sLiveY, sLiveZ; /* position then (fixed point, 8 fraction bits) */
+static s32 sLiveHorizontal;      /* km/h */
+static s32 sLiveVertical;        /* m/s x 10 */
+static u32 sLivePrintTime;       /* CPU count of the last line to the debug port */
+#define SAMPLE_TICKS (46875000u / 4)
+
+static u32 isqrt(u32 v) {
+    u32 r = 0, bit = 1u << 30;
+    while (bit > v) {
+        bit >>= 2;
+    }
+    while (bit) {
+        if (v >= r + bit) {
+            v -= r + bit;
+            r = (r >> 1) + bit;
+        } else {
+            r >>= 1;
+        }
+        bit >>= 2;
+    }
+    return r;
+}
+
+static void append(char *line, int *pos, const char *fmt, ...) {
+    va_list ap;
+    Out o;
+    o.buf = line + *pos;
+    o.pos = 0;
+    o.cap = OVL_COLS - *pos;
+    va_start(ap, fmt);
+    format(&o, fmt, ap);
+    va_end(ap);
+    *pos += o.pos;
+    line[*pos] = 0;
+}
+
+/* Once per flight frame: the values of the live display. */
+static void live_update(u8 *flight) {
+    u32 now = cpu_count();
+    s32 x = float_to_fixed8(*(s32 *)(flight + 0x5C));
+    s32 y = float_to_fixed8(*(s32 *)(flight + 0x60));
+    s32 z = float_to_fixed8(*(s32 *)(flight + 0x64));
+    u32 elapsed = now - sLiveSampleTime;
+    char line[OVL_COLS + 1];
+    int pos = 0;
+    u32 live = gHeader.live;
+
+    if (now - sLiveTime > LIVE_TICKS) {
+        /* a new flight (or the first frame after a pause): start the speeds again */
+        sLiveSampleTime = now;
+        sLiveX = x;
+        sLiveY = y;
+        sLiveZ = z;
+        sLiveHorizontal = 0;
+        sLiveVertical = 0;
+    } else if (elapsed >= SAMPLE_TICKS) {
+        s32 dx = (x - sLiveX) / 4, dy = (y - sLiveY) / 4; /* /4 keeps the square in range */
+        u32 ticks = elapsed >> 10;
+        u32 h = isqrt((u32)(dx * dx + dy * dy)) * 4; /* units x 256 */
+        /* units x 256 per (ticks x 1024) to km/h: x 0.7 x 3.6 x 46875000 / 256 / 1024 = 450.6 */
+        sLiveHorizontal = (s32)(h * 451u / ticks);
+        /* to m/s x 10: x 0.7 x 10 x 46875000 / 256 / 1024 = 1251.7 */
+        sLiveVertical = (z - sLiveZ) * 1252 / (s32)ticks;
+        sLiveSampleTime = now;
+        sLiveX = x;
+        sLiveY = y;
+        sLiveZ = z;
+    }
+    sLiveTime = now;
+
+    if (live & LIVE_DISTANCE) {
+        append(line, &pos, "Dist %d m  ", units_to_meters(*(s32 *)(flight + 0x0C)));
+    }
+    if (live & LIVE_ALTITUDE) {
+        append(line, &pos, "Max %d m  ", units_to_meters(*(s32 *)(flight + 0x10)));
+    }
+    if (live & LIVE_HORIZONTAL) {
+        append(line, &pos, "H %d km/h  ", sLiveHorizontal);
+    }
+    if (live & LIVE_VERTICAL) {
+        s32 v = sLiveVertical;
+        append(line, &pos, "V %s%d.%d m/s", v < 0 ? "-" : "", (v < 0 ? -v : v) / 10, (v < 0 ? -v : v) % 10);
+    }
+    if (pos == 0) {
+        return;
+    }
+    if (gHeader.flags & FLAG_SCREEN) {
+        int i;
+        for (i = 0; i <= pos; i++) {
+            sLiveLine[i] = line[i];
+        }
+        overlay_install();
+    }
+    if (now - sLivePrintTime >= 46875000u) {
+        sLivePrintTime = now;
+        message_quiet("Live: %s\n", line);
+    }
+}
+
+/* Called by the vehicles once per flight frame instead of func_802EDAF0 (it records distance,
+   highest altitude and the end of the flight). All arguments are passed on as they came. */
+#define GAME_FLIGHT_FRAME ((void (*)(u32, u32, u32, u32, u32, u32, u32, u32, u32, u32, u32))0x802EDAF0)
+#define FLOAT_1 0x3F800000u
+void module_flight_frame(u32 a0, u32 a1, u32 a2, u32 a3, u32 a4, u32 a5, u32 a6, u32 a7, u32 a8, u32 a9, u32 a10) {
+    const Condition *c;
+    GAME_FLIGHT_FRAME(a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10);
+
+    /* Unlimited fuel: fill the tank again after each frame (a1 is the vehicle's matrix at +0x10;
+       the fuel is at +0xF8 for the Rocket Belt and +0xD8 for the Gyrocopter, 1.0 = full). */
+    c = current_condition();
+    if (c != 0 && (c->flags & COND_FUEL)) {
+        u16 vehicle = *(u16 *)((u8 *)a0 + 2);
+        u8 *data = (u8 *)a1 - 0x10;
+        if (vehicle == 1) {
+            *(u32 *)(data + 0xF8) = FLOAT_1;
+        } else if (vehicle == 2) {
+            *(u32 *)(data + 0xD8) = FLOAT_1;
+        }
+    }
+    if (gHeader.flags & FLAG_LIVE) {
+        live_update((u8 *)a0);
+    }
+}
+
+/* Called by hudDrawRocketPack and hudDrawGyrocopter instead of hudDrawFuel (gauge and "FUEL"
+   label): with unlimited fuel there is nothing to show. */
+#define GAME_HUD_DRAW_FUEL ((void (*)(s32, s32, u32))0x8031C1E8)
+void module_hud_fuel(s32 x, s32 y, u32 fuel) {
+    const Condition *c = current_condition();
+    if (c != 0 && (c->flags & COND_FUEL)) {
+        return;
+    }
+    GAME_HUD_DRAW_FUEL(x, y, fuel);
 }
 
 /* ------------------------------------------------------------------ startup steps */

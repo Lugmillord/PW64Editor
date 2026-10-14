@@ -39,7 +39,7 @@ public static class MissionReport
         Line(text, $"Code fixes:   {(settings.AppliedCodeFixes.Count == 0 ? "none" : string.Join(", ", settings.AppliedCodeFixes))}");
         GameFeatureSettings f = settings.Features;
         Line(text, $"Features:     debug output {YesNo(f.DebugOutput)}, startup info {YesNo(f.StartupInfo)}, "
-            + $"developers' messages {YesNo(f.GameMessages)}, on screen {YesNo(f.OnScreen)}");
+            + $"developers' messages {YesNo(f.GameMessages)}, on screen {YesNo(f.OnScreen)}, live values {f.LiveMask}");
 
         IReadOnlyList<FileOverride> overrides;
         try
@@ -63,14 +63,19 @@ public static class MissionReport
         GameTextLibrary? texts = TryLoad(session.LoadTexts, text, "texts");
         GameTextLibrary? originalTexts = TryLoad(session.LoadOriginalTexts, text, "original texts");
 
-        // The conditions table the build gives the game module, from the current mission files.
+        // The conditions table the build gives the game module, from the current mission files (as the build makes it).
         var moduleConditions = new List<(TestId Id, GameModuleCondition Entry)>();
-        foreach (MissionInfo mission in catalog.Missions)
+        try
         {
-            if (mission.Settings?.Conditions is { } conditions && conditions.NeedsModule(mission.File.Comm))
+            IReadOnlyList<GameFile> files = catalog.Missions.Select(m => new GameFile(m.TableIndex, MissionFile.FormType, string.Empty, m.FileNumber, 0, m.File.WithComm(m.File.Comm))).ToList();
+            foreach (GameModuleCondition entry in ProjectBuilder.ModuleConditions(project, files))
             {
-                moduleConditions.Add((mission.Id, conditions.ToModuleCondition(mission.File.Comm)));
+                moduleConditions.Add((new TestId(entry.Class, (Vehicle)entry.Vehicle, entry.Test), entry));
             }
+        }
+        catch (InvalidDataException ex)
+        {
+            Line(text, $"Problem:      the module table cannot be made: {ex.Message}");
         }
 
         Line(text, $"Module:       {(f.ModuleOptions.IsNeeded || moduleConditions.Count > 0 ? "built in" : "not built in")}, "
@@ -192,6 +197,11 @@ public static class MissionReport
                 parts.Add($"highest altitude at least {Num(altitude)} units = {Num(GameUnits.ToMeters(altitude))} m");
             }
 
+            if (conditions.MinimumDistance is { } distance)
+            {
+                parts.Add($"distance at least {Num(distance)} units = {Num(GameUnits.ToMeters(distance))} m");
+            }
+
             if (conditions.LandWhenReached)
             {
                 parts.Add("\"please land\" when reached");
@@ -208,12 +218,16 @@ public static class MissionReport
             if (moduleConditions.FirstOrDefault(c => c.Id == mission.Id) is { Entry: { } entry })
             {
                 Line(text, $"  module entry: vehicle {entry.Vehicle}, class {entry.Class}, test {entry.Test}, crash zero {YesNo(entry.CrashGivesZero)}, "
-                    + $"altitude {(entry.MinimumAltitude is { } a ? Num(a) : "-")}, required [{string.Join(" ", entry.Required.Select(b => b.ToString(CultureInfo.InvariantCulture)))}]");
+                    + $"altitude {(entry.MinimumAltitude is { } a ? Num(a) : "-")}, distance {(entry.MinimumDistance is { } dd ? Num(dd) : "-")}, unlimited fuel {YesNo(entry.UnlimitedFuel)}, required [{string.Join(" ", entry.Required.Select(b => b.ToString(CultureInfo.InvariantCulture)))}]");
             }
         }
         else
         {
             Line(text, "Conditions: those of the condition byte (not changed in the editor)");
+            if (moduleConditions.FirstOrDefault(c => c.Id == mission.Id) is { Entry: { } fuelEntry })
+            {
+                Line(text, $"  module entry (fuel only): unlimited fuel {YesNo(fuelEntry.UnlimitedFuel)}");
+            }
         }
 
         if (MissionCatalog.StartAltitude(mission.File) is { } start)
@@ -228,6 +242,18 @@ public static class MissionReport
         Line(text, string.Empty);
         if (settings is not null)
         {
+            if (mission.Id.Vehicle is Vehicle.RocketBelt or Vehicle.Gyrocopter)
+            {
+                Line(text, $"Fuel: start {Num((settings.StartFuel ?? mission.File.StartFuel ?? 1) * 100)} %"
+                    + (settings.StartFuel is null ? " (mission file)" : $" (mission file {Num((mission.File.StartFuel ?? 1) * 100)} %)")
+                    + $", unlimited {YesNo(settings.UnlimitedFuel)}");
+            }
+
+            if (DemoButton.HasButton(mission.Id))
+            {
+                Line(text, $"\"View Demo\" button: {(settings.HideDemo ? "hidden" : "shown")}");
+            }
+
             Line(text, $"Texts written by the editor: {YesNo(settings.GenerateTexts)}, footnote automatic: "
                 + $"{(settings.AutoFootnote is { } auto ? YesNo(auto) : "not set")}");
             Line(text, $"Footnote: {(settings.Footnote.Count == 0 ? "none" : string.Join(" | ", settings.Footnote))}");
@@ -334,6 +360,16 @@ public static class MissionReport
             if (s.Footnote.Count > 0)
             {
                 yield return "footnote";
+            }
+
+            if (s.HideDemo)
+            {
+                yield return "no demo";
+            }
+
+            if (s.StartFuel is not null || s.UnlimitedFuel)
+            {
+                yield return "fuel";
             }
         }
     }

@@ -9,8 +9,8 @@ using PW64Editor.Core.Workspace;
 namespace PW64Editor.App.Views;
 
 /// <summary>
-/// The tab "Features": additional features the editor builds into the game (so far the debug
-/// output). Changes are saved in the project right away; they take effect with the next build.
+/// The tab "Features": additional features the editor builds into the game (the debug output
+/// with startup steps, developers' messages and live values). Changes are saved in the project right away; they take effect with the next build.
 /// It also writes the mission settings report (<see cref="MissionReport"/>) for debugging.
 /// </summary>
 public partial class FeaturesTab : UserControl
@@ -40,7 +40,13 @@ public partial class FeaturesTab : UserControl
         StartupBox.IsChecked = features.StartupInfo;
         GameMessagesBox.IsChecked = features.GameMessages;
         OnScreenBox.IsChecked = features.OnScreen;
+        LiveBox.IsChecked = features.LiveValues;
+        LiveDistanceBox.IsChecked = features.LiveDistance;
+        LiveAltitudeBox.IsChecked = features.LiveAltitude;
+        LiveHorizontalBox.IsChecked = features.LiveHorizontalSpeed;
+        LiveVerticalBox.IsChecked = features.LiveVerticalSpeed;
         DebugOptions.IsEnabled = features.DebugOutput;
+        LiveOptions.IsEnabled = features.LiveValues;
         _showing = false;
     }
 
@@ -90,8 +96,14 @@ public partial class FeaturesTab : UserControl
             StartupInfo = StartupBox.IsChecked == true,
             GameMessages = GameMessagesBox.IsChecked == true,
             OnScreen = OnScreenBox.IsChecked == true,
+            LiveValues = LiveBox.IsChecked == true,
+            LiveDistance = LiveDistanceBox.IsChecked == true,
+            LiveAltitude = LiveAltitudeBox.IsChecked == true,
+            LiveHorizontalSpeed = LiveHorizontalBox.IsChecked == true,
+            LiveVerticalSpeed = LiveVerticalBox.IsChecked == true,
         };
         DebugOptions.IsEnabled = features.DebugOutput;
+        LiveOptions.IsEnabled = features.LiveValues;
 
         try
         {

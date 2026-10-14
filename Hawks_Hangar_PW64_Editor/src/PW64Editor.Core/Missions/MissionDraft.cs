@@ -349,6 +349,34 @@ public sealed class MissionDraft
         Touch();
     }
 
+    /// <summary>True if the vehicle uses fuel (Rocket Belt, Gyrocopter) and the mission has a takeoff pad.</summary>
+    public bool CanSetFuel => Vehicle is Vehicle.RocketBelt or Vehicle.Gyrocopter && Mission.File.StartFuel is not null;
+
+    /// <summary>The fuel at the start (0 to 1): the setting, or the mission file's.</summary>
+    public float StartFuel => Settings.StartFuel ?? Mission.File.StartFuel ?? 1;
+
+    /// <summary>Changes the fuel at the start (0 to 1; the mission file's value: back to it).</summary>
+    public void SetStartFuel(float fuel)
+    {
+        fuel = Math.Clamp(fuel, 0, 1);
+        Settings.StartFuel = CanSetFuel && fuel != Mission.File.StartFuel ? fuel : null;
+    }
+
+    /// <summary>Switches unlimited fuel on or off.</summary>
+    public void SetUnlimitedFuel(bool unlimited)
+    {
+        Settings.UnlimitedFuel = unlimited && CanSetFuel;
+    }
+
+    /// <summary>True if this mission has a "View Demo" button that can be hidden (Beginner of HG, RB, GC).</summary>
+    public bool CanHideDemo => DemoButton.HasButton(Mission.Id);
+
+    /// <summary>Hides or shows the "View Demo" button of the hint screen (does not touch the texts).</summary>
+    public void SetHideDemo(bool hide)
+    {
+        Settings.HideDemo = hide && CanHideDemo;
+    }
+
     /// <summary>Changes the footnote of the mission screen text (it is no longer written automatically).</summary>
     public void SetFootnote(IEnumerable<string> lines)
     {
@@ -410,6 +438,9 @@ public sealed class MissionDraft
             && (a.ResultRows is null) == (other.ResultRows is null)
             && a.Footnote.SequenceEqual(other.Footnote)
             && a.AutoFootnote == other.AutoFootnote
+            && a.HideDemo == other.HideDemo
+            && a.StartFuel == other.StartFuel
+            && a.UnlimitedFuel == other.UnlimitedFuel
             && (a.Conditions is null ? other.Conditions is null : a.Conditions.SameAs(other.Conditions))
             && a.TextPoints.Count == other.TextPoints.Count
             && a.TextPoints.All(p => other.TextPoints.TryGetValue(p.Key, out int v) && v == p.Value);

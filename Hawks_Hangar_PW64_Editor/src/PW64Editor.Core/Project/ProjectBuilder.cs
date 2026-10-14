@@ -57,7 +57,7 @@ public static class ProjectBuilder
         }
 
         CheckTextFile(project, fileSystem, files);
-        ApplyMissionConditions(project, files);
+        ApplyMissionSettings(project, files);
 
         RomBuildResult romBuild;
         try
@@ -67,7 +67,7 @@ public static class ProjectBuilder
                 {
                     SequenceFile = BuildMusic(project, cleanRom, layout),
                     DataPatches = MissionPatches(project, cleanRom, layout),
-                    GameModule = project.Settings.Features.ModuleOptions with { Conditions = ModuleConditions(project, files) },
+                    GameModule = ModuleOptions(project, fileSystem, files),
                     GameModuleInfo = ModuleInfo(project),
                 });
         }
@@ -186,14 +186,14 @@ public static class ProjectBuilder
     }
 
     /// <summary>
-    /// Writes the condition byte of every mission with conditions from those conditions, so the
-    /// mission file always matches them (projects saved by earlier versions may still have the
-    /// game's "at least N" mode there, which would make the game say "please land" and remove the
-    /// other objects).
+    /// Writes the mission settings that live in the mission files: the condition byte of every
+    /// mission with conditions (so the file always matches them; projects saved by earlier
+    /// versions may still have the game's "at least N" mode there, which would make the game say
+    /// "please land" and remove the other objects) and the start fuel.
     /// </summary>
-    public static void ApplyMissionConditions(HackProject project, List<GameFile> files)
+    public static void ApplyMissionSettings(HackProject project, List<GameFile> files)
     {
-        List<Missions.MissionSettings> withConditions = project.Settings.Missions.Where(m => m.Conditions is not null).ToList();
+        List<Missions.MissionSettings> withConditions = project.Settings.Missions.Where(m => m.Conditions is not null || m.StartFuel is not null).ToList();
         if (withConditions.Count == 0)
         {
             return;
@@ -207,19 +207,90 @@ public static class ProjectBuilder
             }
 
             Missions.MissionFile mission = Missions.MissionFile.Parse(files[i].Data);
-            if (withConditions.FirstOrDefault(m => m.Id == mission.Comm.Id) is not { Conditions: { } conditions })
+            if (withConditions.FirstOrDefault(m => m.Id == mission.Comm.Id) is not { } settings)
             {
                 continue;
             }
 
-            Missions.MissionComm comm = mission.Comm.Clone();
-            conditions.ApplyTo(comm);
-            if (!comm.ToArray().AsSpan().SequenceEqual(mission.Comm.ToArray()))
+            if (settings.Conditions is { } conditions)
             {
-                files[i] = files[i] with { Data = mission.WithComm(comm) };
+                Missions.MissionComm comm = mission.Comm.Clone();
+                conditions.ApplyTo(comm);
+                if (!comm.ToArray().AsSpan().SequenceEqual(mission.Comm.ToArray()))
+                {
+                    files[i] = files[i] with { Data = mission.WithComm(comm) };
+                    mission = Missions.MissionFile.Parse(files[i].Data);
+                }
+            }
+
+            if (settings.StartFuel is { } fuel && mission.StartFuel != fuel)
+            {
+                files[i] = files[i] with { Data = mission.WithStartFuel(fuel) };
             }
         }
     }
+
+    /// <summary>
+    /// What the game module does for this project: the features (debug output, live values), the
+    /// mission conditions it checks with the HUD text "Time requirement met", and the distance row.
+    /// </summary>
+    public static Code.GameModuleOptions ModuleOptions(HackProject project, GameFileSystem cleanFileSystem, IReadOnlyList<GameFile> files)
+    {
+        IReadOnlyList<GameModuleCondition> conditions = ModuleConditions(project, files);
+        IReadOnlyList<ushort> metText = [];
+        if (conditions.Count > 0)
+        {
+            var codec = new Text.TextCodec(Text.TextFont.Load(cleanFileSystem));
+            Text.TextEncodeResult encoded = codec.Encode(RequirementMetText);
+            if (encoded.Success)
+            {
+                // As the game holds texts in RAM (textLoadBlock): line break 0xFE -> 0xFFE, end 0xFF -> 0xFFFF.
+                metText = encoded.Codes.Select(c => c switch
+                {
+                    Text.TextCodec.CodeLineBreak => (ushort)0x0FFE,
+                    Text.TextCodec.CodeEnd => (ushort)0xFFFF,
+                    _ => c,
+                }).ToList();
+            }
+        }
+
+        IReadOnlyList<ushort> digits = [];
+        if (NeedsPenaltyMessages(files))
+        {
+            var codec = new Text.TextCodec(Text.TextFont.Load(cleanFileSystem));
+            Text.TextEncodeResult encoded = codec.Encode("[b]0123456789[/b]");
+            if (encoded.Success)
+            {
+                digits = encoded.Codes.Where(c => c is not (Text.TextCodec.CodeLineBreak or Text.TextCodec.CodeEnd)).ToList();
+            }
+        }
+
+        return project.Settings.Features.ModuleOptions with
+        {
+            Conditions = conditions,
+            RequirementMetText = metText,
+            PenaltyDigits = digits.Count == 10 ? digits : [],
+            DistanceRow = project.Settings.Missions.Any(m => m.ResultRows?.Contains((int)Missions.PointSource.Distance) == true),
+        };
+    }
+
+    /// <summary>
+    /// True if a mission deducts other points than its fixed HUD message says: "5 pts. deducted" for a
+    /// Gyrocopter hit, "2 pts. deducted" for a Rocket Belt hit and when the Jumble Hopper leaves the area.
+    /// </summary>
+    public static bool NeedsPenaltyMessages(IReadOnlyList<GameFile> files) =>
+        files.Where(f => f.FileType == Missions.MissionFile.FormType)
+            .Select(f => Missions.MissionFile.Parse(f.Data).Comm)
+            .Any(comm => comm.Id.Vehicle switch
+            {
+                SaveGame.Vehicle.Gyrocopter => comm.HitDeduction != -5,
+                SaveGame.Vehicle.RocketBelt => comm.HitDeduction != -2,
+                SaveGame.Vehicle.JumbleHopper => comm.OutOfAreaDeduction != 2,
+                _ => false,
+            });
+
+    /// <summary>The HUD message when the conditions of the time points are met (in the game's language, English).</summary>
+    public const string RequirementMetText = "Time requirement met";
 
     /// <summary>
     /// The missions whose conditions only the game module can check (combinations the retail
@@ -227,7 +298,7 @@ public static class ProjectBuilder
     /// </summary>
     public static IReadOnlyList<GameModuleCondition> ModuleConditions(HackProject project, IReadOnlyList<GameFile> files)
     {
-        List<Missions.MissionSettings> withConditions = project.Settings.Missions.Where(m => m.Conditions is not null).ToList();
+        List<Missions.MissionSettings> withConditions = project.Settings.Missions.Where(m => m.Conditions is not null || m.UnlimitedFuel).ToList();
         if (withConditions.Count == 0)
         {
             return [];
@@ -237,9 +308,22 @@ public static class ProjectBuilder
         foreach (GameFile file in files.Where(f => f.FileType == Missions.MissionFile.FormType))
         {
             Missions.MissionComm comm = Missions.MissionFile.Parse(file.Data).Comm;
-            if (withConditions.FirstOrDefault(m => m.Id == comm.Id) is { Conditions: { } conditions } && conditions.NeedsModule(comm))
+            if (withConditions.FirstOrDefault(m => m.Id == comm.Id) is not { } settings)
             {
-                result.Add(conditions.ToModuleCondition(comm));
+                continue;
+            }
+
+            bool fuel = settings.UnlimitedFuel && comm.Id.Vehicle is SaveGame.Vehicle.RocketBelt or SaveGame.Vehicle.Gyrocopter;
+            if (settings.Conditions is { } conditions && conditions.NeedsModule(comm))
+            {
+                result.Add(conditions.ToModuleCondition(comm) with { UnlimitedFuel = fuel });
+            }
+            else if (fuel)
+            {
+                // Only the fuel: the game's own condition byte keeps counting.
+                SaveGame.TestId id = comm.Id;
+                result.Add(new GameModuleCondition((byte)id.Class, (byte)id.Vehicle, (byte)id.Test, false, null,
+                    new byte[GameModule.ObjectTypes], null, UnlimitedFuel: true));
             }
         }
 
@@ -250,14 +334,32 @@ public static class ProjectBuilder
     private static string ModuleInfo(HackProject project) =>
         $"project \"{project.Settings.Name}\" {project.Settings.Version}, built {DateTime.Now:yyyy-MM-dd HH:mm}";
 
-    /// <summary>The changed result rows of the missions, as patches of the table in the game code.</summary>
+    /// <summary>The mission changes of the game code: the changed result rows (a table) and the hidden "View Demo" buttons.</summary>
     /// <exception cref="ProjectException">A mission's rows cannot be stored.</exception>
     public static IReadOnlyList<DataPatch> MissionPatches(HackProject project, N64Rom cleanRom, RomLayout layout)
     {
+        var patches = new List<DataPatch>();
+
+        // The "View Demo" button of the Beginner hint screens.
+        List<SaveGame.Vehicle> hiddenDemos = project.Settings.Missions
+            .Where(m => m.HideDemo && Missions.DemoButton.HasButton(m.Id))
+            .Select(m => m.Id.Vehicle)
+            .Distinct()
+            .ToList();
+        if (hiddenDemos.Count > 0)
+        {
+            if (layout.Missions is null || !Missions.DemoButton.MatchesRom(cleanRom.Data))
+            {
+                throw new ProjectException(CoreText.T("The \"View Demo\" button can only be hidden in the US version of the game."));
+            }
+
+            patches.AddRange(Missions.DemoButton.Patches(hiddenDemos));
+        }
+
         List<Missions.MissionSettings> changed = project.Settings.Missions.Where(m => m.ResultRows is not null).ToList();
         if (changed.Count == 0)
         {
-            return [];
+            return patches;
         }
 
         if (layout.Missions is null)
@@ -266,7 +368,6 @@ public static class ProjectBuilder
         }
 
         var tables = new Missions.MissionTables(cleanRom.Data, layout.Missions);
-        var patches = new List<DataPatch>();
         foreach (Missions.MissionSettings mission in changed)
         {
             List<int> rows = mission.ResultRows!;

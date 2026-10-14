@@ -36,8 +36,8 @@ public enum SequenceEventKind
 /// <param name="Data1">Key, program or controller number.</param>
 /// <param name="Data2">Velocity or controller value.</param>
 /// <param name="Duration">Length of a note in ticks.</param>
-/// <param name="ValuePosition">Where in the data the program number (program change) or the
-/// controller value (control change) is stored; -1 for other events.</param>
+/// <param name="ValuePosition">Where in the data the program number (program change), the
+/// controller value (control change) or the velocity (note) is stored; -1 for other events.</param>
 /// <param name="Status">The MIDI status kind of <see cref="SequenceEventKind.Other"/> events (0xA0, 0xD0 or 0xE0).</param>
 public sealed record SequenceEvent(int Track, long Tick, SequenceEventKind Kind, int Channel, int Data1, int Data2, int Duration, int ValuePosition, int Status = 0);
 
@@ -244,7 +244,7 @@ public sealed class CompactSequence
                             if (kind == 0x90)
                             {
                                 int duration = (int)reader.ReadVariable();
-                                events.Add(new(track, tick, SequenceEventKind.Note, channel, data1, data2, duration, -1));
+                                events.Add(new(track, tick, SequenceEventKind.Note, channel, data1, data2, duration, data2Position));
                             }
                             else if (kind == 0xB0)
                             {

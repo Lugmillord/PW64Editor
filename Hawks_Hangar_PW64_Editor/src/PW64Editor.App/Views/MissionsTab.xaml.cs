@@ -104,7 +104,7 @@ public partial class MissionsTab : UserControl
     private MissionDraft? SelectedDraft => SelectedMission is { } mission ? Draft(mission) : null;
 
     private IEnumerable<TextBox> ValueBoxes =>
-        [FullUntilBox, ZeroAtBox, TargetTimeBox, WindowBox, ZeroDistanceBox, LandNowBox, AltitudeConditionValue, HitCostBox, OutOfAreaBox, ReactionBox];
+        [FullUntilBox, ZeroAtBox, TargetTimeBox, WindowBox, ZeroDistanceBox, LandNowBox, AltitudeConditionValue, DistanceConditionValue, HitCostBox, OutOfAreaBox, ReactionBox, StartFuelBox];
 
     private IEnumerable<TextEditorPanel> Panels => [TitleEditor, TaskEditor, HintEditor, ScreenTextView, ResultTextView];
 
@@ -521,8 +521,15 @@ public partial class MissionsTab : UserControl
             ShowPoints(draft);
             ShowTime(draft);
             ShowAltitude(draft);
+            ShowDistance(draft);
             ShowLanding(draft);
             ShowConditions(draft);
+            DemoPanel.Visibility = draft.CanHideDemo ? Visibility.Visible : Visibility.Collapsed;
+            FuelPanel.Visibility = draft.CanSetFuel ? Visibility.Visible : Visibility.Collapsed;
+            StartFuelBox.Text = FormatMeters(draft.StartFuel * 100);
+            StartFuelBox.IsEnabled = !draft.Settings.UnlimitedFuel;
+            UnlimitedFuelBox.IsChecked = draft.Settings.UnlimitedFuel;
+            HideDemoBox.IsChecked = draft.Settings.HideDemo;
             ShowResults(draft);
         }
         finally
@@ -547,6 +554,7 @@ public partial class MissionsTab : UserControl
             .Concat(CurveBoxes(TimeCurvePanel))
             .Concat(CurveBoxes(AltitudeCurvePanel))
             .Concat(CurveBoxes(LandingCurvePanel))
+            .Concat(CurveBoxes(DistanceCurvePanel))
             .Concat(ObjectConditionsGrid.Children.OfType<TextBox>());
         if (boxes.FirstOrDefault(b => Equals(b.Tag, tag)) is { } target)
         {
@@ -1082,6 +1090,18 @@ public partial class MissionsTab : UserControl
         }
     }
 
+    /// <summary>The distance curve: distance flown in meters as the game counts them.</summary>
+    private void ShowDistance(MissionDraft draft)
+    {
+        DistanceCurvePanel.Children.Clear();
+        bool shown = draft.Rows.Contains(PointSource.Distance);
+        DistancePanel.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
+        if (shown)
+        {
+            DistanceCurvePanel.Children.Add(CurveEditor(draft, ScoreCurveKind.Distance, L.T("Distance (m)"), 500, "distance", GameUnits.MetersPerUnit));
+        }
+    }
+
     /// <summary>The landing accuracy curve: distance in meters as the game counts them.</summary>
     private void ShowLanding(MissionDraft draft)
     {
@@ -1356,6 +1376,9 @@ public partial class MissionsTab : UserControl
             ? FormatMeters(GameUnits.ToMeters(minimum))
             : FormatMeters(comm.MinimumAltitude > 0 ? GameUnits.ToMeters(comm.MinimumAltitude) : 400);
         AltitudeConditionValue.IsEnabled = conditions.MinimumAltitude is not null;
+        DistanceConditionBox.IsChecked = conditions.MinimumDistance is not null;
+        DistanceConditionValue.Text = FormatMeters(conditions.MinimumDistance is { } distance ? GameUnits.ToMeters(distance) : 1000);
+        DistanceConditionValue.IsEnabled = conditions.MinimumDistance is not null;
 
         // The highest altitude counts from the start: a value below the takeoff height is always reached.
         float? start = MissionCatalog.StartAltitude(draft.Mission.File);
@@ -1377,6 +1400,8 @@ public partial class MissionsTab : UserControl
         OutOfAreaBox.Text = FormatNumber(comm.OutOfAreaDeduction);
         ReactionPanel.Visibility = birdman || cannonball ? Visibility.Collapsed : Visibility.Visible;
         ReactionBox.Text = comm.ReactionThreshold.ToString(CultureInfo.CurrentCulture);
+        ConditionsExpander.Visibility = new UIElement[] { ConditionsSection, HitPanel, OutOfAreaPanel, ReactionPanel }
+            .Any(e => e.Visibility == Visibility.Visible) ? Visibility.Visible : Visibility.Collapsed;
 
         // Footnote: written from the settings, or typed in.
         bool automatic = draft.Settings.AutoFootnote ?? !draft.Settings.GenerateTexts;
@@ -1464,6 +1489,28 @@ public partial class MissionsTab : UserControl
     }
 
     /// <summary>A condition was switched or changed: read all of them and store them.</summary>
+    private void OnUnlimitedFuelChanged(object sender, RoutedEventArgs e)
+    {
+        if (_showing || SelectedDraft is not { } draft)
+        {
+            return;
+        }
+
+        draft.SetUnlimitedFuel(UnlimitedFuelBox.IsChecked == true);
+        Changed(draft);
+    }
+
+    private void OnHideDemoChanged(object sender, RoutedEventArgs e)
+    {
+        if (_showing || SelectedDraft is not { } draft)
+        {
+            return;
+        }
+
+        draft.SetHideDemo(HideDemoBox.IsChecked == true);
+        Changed(draft);
+    }
+
     private void OnConditionsChanged(object sender, RoutedEventArgs e)
     {
         if (_showing || SelectedDraft is not { } draft)
@@ -1508,6 +1555,21 @@ public partial class MissionsTab : UserControl
             conditions.MinimumAltitude = draft.Conditions.MinimumAltitude is { } current && AltitudeConditionValue.Text.Trim() == FormatMeters(GameUnits.ToMeters(current))
                 ? current
                 : GameUnits.FromMeters((float)altitude);
+        }
+
+        if (DistanceConditionBox.IsChecked == true)
+        {
+            if (!TryParseNumber(DistanceConditionValue.Text, out double distance) || distance < 0 || distance > 1000000)
+            {
+                Ui.ShowError(Window.GetWindow(this)!, L.F("\"{0}\" is not a number from 0 on.", DistanceConditionValue.Text.Trim()));
+                ShowMission(draft.Mission);
+                return;
+            }
+
+            // An unchanged box keeps the stored value exactly (the shown meters are rounded).
+            conditions.MinimumDistance = draft.Conditions.MinimumDistance is { } current && DistanceConditionValue.Text.Trim() == FormatMeters(GameUnits.ToMeters(current))
+                ? current
+                : GameUnits.FromMeters((float)distance);
         }
 
         if (!conditions.SameAs(draft.Conditions))
@@ -1602,7 +1664,23 @@ public partial class MissionsTab : UserControl
                 draft.SetLandNowTime(number);
             }
         }
-        else if (box == AltitudeConditionValue)
+        else if (box == StartFuelBox)
+        {
+            if (number is < 0 or > 100)
+            {
+                Ui.ShowError(Window.GetWindow(this)!, L.T("The fuel is a number from 0 to 100 (%)."));
+                ShowMission(draft.Mission);
+                return;
+            }
+
+            // An unchanged box keeps the stored value exactly (the percent shown is rounded).
+            changed = box.Text.Trim() != FormatMeters(draft.StartFuel * 100);
+            if (changed)
+            {
+                draft.SetStartFuel((float)(number / 100));
+            }
+        }
+        else if (box == AltitudeConditionValue || box == DistanceConditionValue)
         {
             OnConditionsChanged(box, new RoutedEventArgs());
             return;

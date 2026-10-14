@@ -219,7 +219,7 @@ public partial class MusicTab : UserControl
                 IsChecked = muted,
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(0, 3, 14, 3),
-                ToolTip = L.T("Silences the voice in this song (its volume is set to 0)."),
+                ToolTip = L.T("Silences the voice in this song (its notes are no longer played)."),
             };
             mute.Click += (_, _) => SaveMute(song, info.Channel, mute.IsChecked == true);
             Place(mute, row, 4);

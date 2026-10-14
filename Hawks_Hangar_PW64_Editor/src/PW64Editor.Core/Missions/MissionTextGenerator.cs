@@ -37,6 +37,7 @@ public static class MissionTextGenerator
         PointSource.Rings => "Ring",
         PointSource.Balloons => "Balloon",
         PointSource.Altitude => "Altitude Pts.",
+        PointSource.Distance => "Distance Pts.",
         PointSource.Targets => "Target",
         PointSource.MecaHawks => "Destroyed",
         PointSource.HoverPads => "Floating Pads",
@@ -172,6 +173,11 @@ public static class MissionTextGenerator
                 needs.Add($"{Meters(altitude)} altitude");
             }
 
+            if (conditions.MinimumDistance is { } distance)
+            {
+                needs.Add($"{Meters(distance)} flown");
+            }
+
             if (needs.Count > 0)
             {
                 parts.Add(($"Time points only with {JoinEnglish(needs)}.", $"Time only with {JoinEnglish(needs)}."));
@@ -183,6 +189,13 @@ public static class MissionTextGenerator
             ScoreCurve curve = comm.GetCurve(ScoreCurveKind.Altitude);
             float full = curve.Points.FirstOrDefault(p => p.Y >= curve.Maximum).X;
             parts.Add(($"Full altitude points from {Meters(full)} on.", $"Full altitude pts. at {Meters(full)}."));
+        }
+
+        if (rows.Any(r => r.Source == PointSource.Distance && r.Points > 0))
+        {
+            ScoreCurve curve = comm.GetCurve(ScoreCurveKind.Distance);
+            float full = curve.Points.FirstOrDefault(p => p.Y >= curve.Maximum).X;
+            parts.Add(($"Full distance points after {Meters(full)} flown.", $"Full distance pts. at {Meters(full)}."));
         }
 
         if (conditions.CrashGivesZero)

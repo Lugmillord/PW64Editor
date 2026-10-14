@@ -207,6 +207,58 @@ public class EditorSessionTests
     }
 
     [RealRomFact]
+    public void RestorePoint_KeepsEveryEditorSetting()
+    {
+        using var temp = new TempDirectory();
+        N64Rom rom = N64Rom.Load(TestRomLocator.RomPath!);
+        EditorSession session = EditorSession.Create(temp.Combine("hack"), "Restore Test", false, rom, TestRomLocator.RomPath!);
+
+        // Settings of every tab that stores some: features, missions (conditions, demo button,
+        // rows, footnote), texts, project settings.
+        session.SaveFeatures(new GameFeatureSettings
+        {
+            DebugOutput = true, StartupInfo = true, GameMessages = true, OnScreen = false,
+            LiveValues = true, LiveDistance = true, LiveAltitude = false, LiveHorizontalSpeed = true, LiveVerticalSpeed = false,
+        });
+        Core.Missions.MissionInfo hg = session.LoadMissions().Missions.Single(m => m.Id == new Core.SaveGame.TestId(0, Core.SaveGame.Vehicle.HangGlider, 0));
+        var draft = new Core.Missions.MissionDraft(hg, null);
+        draft.SetConditions(new Core.Missions.MissionConditions
+        {
+            MinimumAltitude = 80, MinimumDistance = 900, Required = { [Core.Missions.ConditionObject.Rings] = 2 },
+        });
+        draft.SetHideDemo(true);
+        Assert.Null(draft.SetRowSource(draft.Rows.Count, Core.Missions.PointSource.Distance, 10));
+        draft.SetFootnote(["A footnote"]);
+        session.SaveMission(hg, draft.Comm, draft.SettingsToSave());
+        Core.Text.GameTextLibrary library = session.LoadTexts();
+        session.SaveTexts(library, new Dictionary<int, string> { [library.Texts[5].Index] = "Changed text" });
+        session.Project.Settings.Version = "2.5";
+        session.Project.Save();
+
+        string Snapshot() => System.Text.Json.JsonSerializer.Serialize(HackProject.Load(temp.Combine("hack")).Settings)
+            + string.Join("|", Directory.EnumerateFiles(session.Project.FilesFolder, "*", SearchOption.AllDirectories).Order()
+                .Select(f => Path.GetFileName(f) + ":" + Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(File.ReadAllBytes(f)))));
+        string before = Snapshot();
+        BackupInfo point = session.CreateRestorePoint();
+
+        // Change all of it again.
+        session.SaveFeatures(new GameFeatureSettings());
+        hg = session.LoadMissions().Missions.Single(m => m.Id == hg.Id);
+        session.SaveMission(hg, session.OriginalMissionComm(hg), null);
+        library = session.LoadTexts();
+        session.SaveTexts(library, new Dictionary<int, string> { [library.Texts[5].Index] = "Something else" });
+        session.Project.Settings.Version = "3.0";
+        session.Project.Save();
+        Assert.NotEqual(before, Snapshot());
+
+        session.RestoreTo(point.Name);
+        Assert.Equal(before, Snapshot());
+        Assert.True(session.Project.Settings.Features.LiveValues);
+        Assert.True(session.Project.Settings.Missions.Single().HideDemo);
+        Assert.Equal(900f, session.Project.Settings.Missions.Single().Conditions!.MinimumDistance);
+    }
+
+    [RealRomFact]
     public void Open_RejectsProjectForDifferentRom()
     {
         using var temp = new TempDirectory();

@@ -38,6 +38,15 @@
                 <CheckBox x:Name="GameMessagesBox" Content="Messages of the original developers" Checked="OnChanged" Unchecked="OnChanged" />
                 <TextBlock Style="{StaticResource Note}" Margin="22,2,0,0"
                            Text="The game contains debug messages of its developers (e.g. about the EEPROM or the memory), which the retail version does not print. They are passed on with the prefix [game]." />
+                <CheckBox x:Name="LiveBox" Content="Current values during missions" Checked="OnChanged" Unchecked="OnChanged" Margin="0,10,0,0" />
+                <TextBlock Style="{StaticResource Note}" Margin="22,2,0,4"
+                           Text="While flying, a line at the top of the picture (with &quot;Also on the screen&quot;) shows the chosen values; once a second they also go to the debug port. Meters as the game shows them." />
+                <StackPanel x:Name="LiveOptions" Margin="22,0,0,0">
+                    <CheckBox x:Name="LiveDistanceBox" Content="Distance flown" Checked="OnChanged" Unchecked="OnChanged" />
+                    <CheckBox x:Name="LiveAltitudeBox" Content="Highest altitude of this flight (above sea level)" Checked="OnChanged" Unchecked="OnChanged" />
+                    <CheckBox x:Name="LiveHorizontalBox" Content="Horizontal speed (km/h)" Checked="OnChanged" Unchecked="OnChanged" />
+                    <CheckBox x:Name="LiveVerticalBox" Content="Vertical speed (m/s, climbing positive)" Checked="OnChanged" Unchecked="OnChanged" />
+                </StackPanel>
             </StackPanel>
 
             <TextBlock Text="Mission settings report" Style="{StaticResource SectionTitle}" Margin="0,18,0,6" />

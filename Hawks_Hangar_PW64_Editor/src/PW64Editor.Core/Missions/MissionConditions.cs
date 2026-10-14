@@ -18,7 +18,8 @@ public enum ConditionObject
 
 /// <summary>
 /// The conditions of a mission, freely combined: "a crash gives 0 points", and for the time
-/// points a number of objects per type and a minimum altitude (all must be met).
+/// points a number of objects per type, a minimum altitude and a minimum distance flown (all
+/// must be met).
 /// </summary>
 /// <remarks>
 /// <para>The retail game has only one condition per mission (COMM byte 4, <see cref="MissionCondition"/>).
@@ -40,6 +41,9 @@ public sealed class MissionConditions
     /// <summary>Time points only if this altitude was reached; null: no altitude condition.</summary>
     public float? MinimumAltitude { get; set; }
 
+    /// <summary>Time points only if the distance flown reached this (game units); null: no distance condition.</summary>
+    public float? MinimumDistance { get; set; }
+
     /// <summary>Time points only if at least this many objects of the type are cleared (<see cref="All"/>: all of them).</summary>
     public Dictionary<ConditionObject, int> Required { get; set; } = [];
 
@@ -52,15 +56,15 @@ public sealed class MissionConditions
 
     /// <summary>True if <see cref="LandWhenReached"/> is possible with these conditions in this mission.</summary>
     public bool CanLandWhenReached(MissionComm comm) =>
-        !CrashGivesZero && MinimumAltitude is null && Required.Count == 1
+        !CrashGivesZero && MinimumAltitude is null && MinimumDistance is null && Required.Count == 1
         && Required.First() is var (type, count) && type != ConditionObject.Balloons && count != All
         && Enum.GetValues<ConditionObject>().Where(t => t != ConditionObject.Balloons && comm.GetObjectCount(Kind(t)) > 0).SequenceEqual([type]);
 
     /// <summary>True if no condition is set.</summary>
-    public bool IsEmpty => !CrashGivesZero && MinimumAltitude is null && Required.Count == 0;
+    public bool IsEmpty => !CrashGivesZero && MinimumAltitude is null && MinimumDistance is null && Required.Count == 0;
 
     /// <summary>True if the time points have a condition.</summary>
-    public bool HasTimeConditions => MinimumAltitude is not null || Required.Count > 0;
+    public bool HasTimeConditions => MinimumAltitude is not null || MinimumDistance is not null || Required.Count > 0;
 
     /// <summary>The mission object kind behind a condition object.</summary>
     public static MissionObjectKind Kind(ConditionObject type) => type switch
@@ -91,6 +95,7 @@ public sealed class MissionConditions
     {
         CrashGivesZero = CrashGivesZero,
         MinimumAltitude = MinimumAltitude,
+        MinimumDistance = MinimumDistance,
         LandWhenReached = LandWhenReached,
         Required = new Dictionary<ConditionObject, int>(Required),
     };
@@ -101,6 +106,7 @@ public sealed class MissionConditions
         && CrashGivesZero == other.CrashGivesZero
         && LandWhenReached == other.LandWhenReached
         && MinimumAltitude == other.MinimumAltitude
+        && MinimumDistance == other.MinimumDistance
         && Required.Count == other.Required.Count
         && Required.All(r => other.Required.TryGetValue(r.Key, out int v) && v == r.Value);
 
@@ -153,6 +159,12 @@ public sealed class MissionConditions
         if (CrashGivesZero)
         {
             return HasTimeConditions ? null : MissionCondition.CrashGivesZero;
+        }
+
+        // The retail game has no distance condition.
+        if (MinimumDistance is not null)
+        {
+            return null;
         }
 
         if (MinimumAltitude is not null)
@@ -210,6 +222,6 @@ public sealed class MissionConditions
             required[(int)type] = count == All ? GameModule.RequiredAll : (byte)Math.Clamp(count, 1, 254);
         }
 
-        return new GameModuleCondition((byte)id.Class, (byte)id.Vehicle, (byte)id.Test, CrashGivesZero, MinimumAltitude, required);
+        return new GameModuleCondition((byte)id.Class, (byte)id.Vehicle, (byte)id.Test, CrashGivesZero, MinimumAltitude, required, MinimumDistance);
     }
 }
