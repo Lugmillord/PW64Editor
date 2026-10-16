@@ -129,7 +129,27 @@
                             <TextBox x:Name="LandNowBox" Width="60" Tag="value" />
                             <TextBlock Text="seconds (0 = off; the mission objects are removed then)." VerticalAlignment="Center" Margin="6,0,0,0" />
                         </WrapPanel>
-                        <TextBlock x:Name="HardEndText" Style="{StaticResource Note}" Margin="0,6,0,0" />
+                        <WrapPanel Margin="0,8,0,0">
+                            <TextBlock Text="Hard end after" VerticalAlignment="Center" Margin="0,0,6,0" />
+                            <TextBox x:Name="HardEndBox" Width="60" Tag="value" />
+                            <TextBlock Text="seconds (0 = off; the mission ends at once, also in the air)." VerticalAlignment="Center" Margin="6,0,0,0" />
+                        </WrapPanel>
+                        <StackPanel x:Name="HardEndModePanel" Margin="18,4,0,0">
+                            <RadioButton x:Name="HardEndScoredBox" GroupName="HardEnd" Click="OnHardEndModeChanged"
+                                         Content="The flight is scored: all points except landing accuracy and landing impact" />
+                            <RadioButton x:Name="HardEndZeroBox" GroupName="HardEnd" Click="OnHardEndModeChanged" Margin="0,2,0,0"
+                                         Content="The flight gives 0 points" />
+                            <TextBlock Text="Jingle when the time is up:" Margin="0,8,0,2" />
+                            <RadioButton x:Name="HardEndJingleOkBox" GroupName="HardEndJingle" Click="OnHardEndJingleChanged" Margin="18,0,0,0"
+                                         Content="Landed successfully" />
+                            <RadioButton x:Name="HardEndJingleMissBox" GroupName="HardEndJingle" Click="OnHardEndJingleChanged" Margin="18,2,0,0"
+                                         Content="Landed wrongly" />
+                            <RadioButton x:Name="HardEndJingleNoneBox" GroupName="HardEndJingle" Click="OnHardEndJingleChanged" Margin="18,2,0,0"
+                                         Content="No jingle" />
+                            <TextBlock x:Name="HardEndJingleNote" Style="{StaticResource Note}" Margin="18,2,0,0" />
+                        </StackPanel>
+                        <TextBlock x:Name="HardEndText" Style="{StaticResource Note}" Margin="0,6,0,0"
+                                   Text="With a hard end time the mission ends at that time, even in the air: for flights that need no landing (for example Birdman) or as a strict time limit. In the last 5 seconds a red countdown appears in the middle of the picture, then &quot;Time up!&quot;. Time points then use the end time; the conditions of the time points still apply. The footnote mentions it." />
                         </StackPanel>
                         </Expander>
 

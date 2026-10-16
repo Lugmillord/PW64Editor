@@ -25,7 +25,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 CS_OUT = os.path.join(HERE, '..', '..', 'src', 'PW64Editor.Core', 'Code', 'GameModuleImage.g.cs')
 LOAD_ADDRESS = 0x803805E0
 AREA_END = 0x803905E0
-CONDITIONS_CAPACITY = 160  # MAX_CONDITIONS in module.c
+CONDITIONS_CAPACITY = 128  # MAX_CONDITIONS in module.c (entries of the data area)
 
 # (ROM offset of the jal, original target, name, detail, startup only, last step of the startup)
 # detail: NONE, EEPROM, CONTROLLERS, HEAP, LEVEL, TEXTS, RETURN (see module.c)
@@ -199,13 +199,25 @@ def main():
         '    /// <summary>RAM address of module_penalty_area (the same when the Jumble Hopper leaves the area).</summary>',
         f'    public const uint PenaltyAreaHookAddress = 0x{symbols["module_penalty_area"]:08X};',
         '',
+        '    /// <summary>RAM address of module_goal_jingle (the jingle when the goal ring or the ball target ends the mission).</summary>',
+        f'    public const uint GoalJingleAddress = 0x{symbols["module_goal_jingle"]:08X};',
+        '',
+        '    /// <summary>RAM address of module_hard_end (sets "hard end reached" and plays the chosen jingle).</summary>',
+        f'    public const uint HardEndAddress = 0x{symbols["module_hard_end"]:08X};',
+        '',
+        '    /// <summary>RAM address of module_hg_music (sndSetMusic of the Hang Glider\'s landing jingle).</summary>',
+        f'    public const uint HangGliderMusicAddress = 0x{symbols["module_hg_music"]:08X};',
+        '',
+        '    /// <summary>RAM address of module_hg_music_state (sndSetMusicState of the same).</summary>',
+        f'    public const uint HangGliderMusicStateAddress = 0x{symbols["module_hg_music_state"]:08X};',
+        '',
+        '    /// <summary>RAM address of module_hud_text (hudDrawStartText, then the countdown of the hard end time).</summary>',
+        f'    public const uint HudTextAddress = 0x{symbols["module_hud_text"]:08X};',
+        '',
         '    /// <summary>RAM address of module_distance_row (jump table entry of result row type 10).</summary>',
         f'    public const uint DistanceRowAddress = 0x{symbols["module_distance_row"]:08X};',
         '',
-        '    /// <summary>Offset of the conditions table (gConditions, 16 bytes per mission) in the image.</summary>',
-        f'    public const int ConditionsTableOffset = 0x{symbols["gConditions"] - LOAD_ADDRESS:X};',
-        '',
-        '    /// <summary>Number of entries the conditions table has room for.</summary>',
+        '    /// <summary>Number of missions the settings table in the data area has room for.</summary>',
         f'    public const int ConditionsCapacity = {CONDITIONS_CAPACITY};',
         '',
         '    /// <summary>The machine code and data, as loaded from the ROM.</summary>',

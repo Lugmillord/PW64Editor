@@ -6,9 +6,16 @@
  * game program starts (loader in the code cave, see CodeArea.cs), then calls module_init().
  *
  * What it does:
+ *   - Expansion Pak check: without the Expansion Pak (only 4 MB of RAM) the module shows a black
+ *     screen with "EXPANSION PAK REQUIRED" and stops (the editor's hacks require 8 MB).
+ *   - Mission settings: the editor writes a table with one entry per mission that needs settings
+ *     into the ROM; the module copies it at the start into the data area in front of the game's
+ *     program block (DATA_AREA, see DataArea.cs).
  *   - Conditions for time points (and "a crash gives 0 points") per mission, combined freely:
- *     the editor writes a table of the missions that need them; the scoring function calls
- *     module_conditions() instead of reading the retail condition mode.
+ *     the scoring function calls module_conditions() instead of reading the retail condition mode.
+ *   - Scoring: time points when the goal ring or the ball target ends the mission, the hard end
+ *     time per mission (scored or 0 points) and, with the game patch "goal objects", the points of
+ *     hopper goals and ball targets (module_conditions); the goal jingle of each vehicle.
  *   - Debug output (only if switched on in the editor):
  *   - Messages go to the IS-Viewer debug port (0xB3FF0000). Emulators show them: ares in its
  *     terminal (start ares with --terminal, or Tools > Tracer "ISViewer"), mupen64plus and
@@ -65,6 +72,8 @@ typedef __builtin_va_list va_list;
 #define FLAG_DEBUG         4u /* debug output at all */
 #define FLAG_SCREEN        8u /* the editor's messages also on the screen */
 #define FLAG_LIVE         16u /* current values during missions (header field live) */
+#define FLAG_REQUIRE_PAK  32u /* stop with a message without the Expansion Pak */
+#define FLAG_GOAL_OBJECTS 64u /* game patch "goal objects": hopper goals and ball targets always count */
 
 /* Values of the live display (header field live). */
 #define LIVE_DISTANCE   1u /* distance flown */
@@ -83,12 +92,35 @@ extern char __bss_end[];
 
 static char sLog[LOG_SIZE];
 
+/* ------------------------------------------------------------------ data area (mission settings) */
+
+/* RAM in front of the game's program block (and of the text tables at 0x801FE000), taken from the
+   heap by the editor (uvMemInitBlocks, uvMemClearRegions; see DataArea.cs). The module fills it at
+   the start from the ROM (header fields dataRom, dataSize). Layout: a header of 0x100 bytes, then
+   one entry of 0x100 bytes per mission with settings. */
+#define DATA_AREA        0x801F5000u
+#define DATA_AREA_END    0x801FE000u
+#define DATA_MAGIC       0x48484D44u /* 'HHMD' */
+#define DATA_ENTRY_SIZE  0x100
+#define MAX_CONDITIONS   128
+
+typedef struct {
+    u32 magic;      /* +0x00 'HHMD' */
+    u32 version;    /* +0x04 layout version (1) */
+    u32 missions;   /* +0x08 entries used */
+    u32 entrySize;  /* +0x0C bytes per entry (0x100) */
+} DataHeader;
+
+#define DATA_HEADER ((volatile DataHeader *)DATA_AREA)
+
 /* ------------------------------------------------------------------ conditions table */
 
 #define COND_CRASH_ZERO 1u /* a crash gives 0 points in total */
 #define COND_ALTITUDE   2u /* time points only if the highest altitude reached "altitude" */
 #define COND_DISTANCE   4u /* time points only if the distance flown reached "distance" */
 #define COND_FUEL       8u /* Rocket Belt, Gyrocopter: the fuel never runs out */
+#define COND_END_SCORED 16u /* hard end time reached: scored like a flight that ends in the air */
+#define COND_END_ZERO   32u /* hard end time reached: 0 points */
 #define COND_POINTS (COND_CRASH_ZERO | COND_ALTITUDE | COND_DISTANCE) /* flags about the points */
 
 /* True if an entry has conditions for the points (an entry may only be there for the fuel). */
@@ -96,22 +128,22 @@ static char sLog[LOG_SIZE];
 
 #define OBJECT_TYPES 7      /* rings, balloons, targets, hover pads, Meca Hawks, ball targets, hopper goals */
 #define REQUIRED_ALL 0xFF
-#define MAX_CONDITIONS 160
-
-/* One mission with conditions (20 bytes). required[type]: 0 = not required, 0xFF = all,
-   otherwise at least this many. Written by the editor (GameModule.cs). */
+/* The settings of one mission (one entry of the data area, 0x100 bytes). required[type]: 0 = not
+   required, 0xFF = all, otherwise at least this many. Written by the editor (DataArea.cs). */
 typedef struct {
-    u8 vehicle;
-    u8 cls;
-    u8 test;
-    u8 flags;
-    u8 required[OBJECT_TYPES];
-    u8 pad;
-    u32 altitude; /* f32 bits, game units above sea level */
-    u32 distance; /* f32 bits, game units */
+    u8 vehicle;   /* +0x00 COMM byte 1 */
+    u8 cls;       /* +0x01 COMM byte 0 */
+    u8 test;      /* +0x02 COMM byte 2 */
+    u8 flags;     /* +0x03 COND_... */
+    u8 required[OBJECT_TYPES]; /* +0x04 */
+    u8 pad;       /* +0x0B */
+    u32 altitude; /* +0x0C f32 bits, game units above sea level */
+    u32 distance; /* +0x10 f32 bits, game units */
+    u8 hardEndMusic; /* +0x14 jingle when the hard end time is reached (music number), 0 = none */
+    u8 reserved[DATA_ENTRY_SIZE - 0x15];
 } Condition;
 
-__attribute__((section(".data"))) Condition gConditions[MAX_CONDITIONS] = { { 0xFF, 0, 0, 0, { 0 }, 0, 0, 0 } };
+#define gConditions ((const Condition *)(DATA_AREA + 0x100))
 
 /* Fixed layout, read by the loader (init), the printf gate (magic, printf) and the editor
    (flags, rom, info). See GameModule.cs. */
@@ -126,17 +158,20 @@ struct Header {
     u32 logSize;        /* +0x1C its size */
     u32 logPos;         /* +0x20 bytes written so far (position = logPos % logSize) */
     u32 version;        /* +0x24 module version */
-    void *conditions;   /* +0x28 table of the missions with conditions (gConditions) */
+    void *conditions;   /* +0x28 table of the missions with settings (in the data area) */
     u32 conditionCount; /* +0x2C entries used, written by the editor */
     char info[96];      /* +0x30 "project ..., built ...", written by the editor */
     u32 live;           /* +0x90 LIVE_... values shown during missions, written by the editor */
     u16 metText[32];    /* +0x94 "Time requirement met" in the game's text codes as in RAM (end 0xFFFF), or 0 */
     u16 digits[10];     /* +0xD4 codes of the bold digits 0-9 (penalty messages), or 0 */
+    u32 dataRom;        /* +0xE8 ROM offset of the data area image, written by the editor */
+    u32 dataSize;       /* +0xEC its size (a multiple of 8, 0 = none), written by the editor */
+    u16 countdown[6][12]; /* +0xF0 "5" ... "1", "Time up!" in the game's text codes (end 0xFFFF), or 0 */
 };
 
 __attribute__((section(".header"), used)) struct Header gHeader = {
     0x4848474D, (void *)module_game_printf, (void *)module_init, 0, 0, 0,
-    sLog, LOG_SIZE, 0, 4, gConditions, 0, "", 0, { 0 }, { 0 },
+    sLog, LOG_SIZE, 0, 6, (void *)(DATA_AREA + 0x100), 0, "", 0, { 0 }, { 0 }, 0, 0, { { 0 } },
 };
 
 /* ------------------------------------------------------------------ low level */
@@ -793,9 +828,14 @@ static u8 *player_flight(void) {
    +0x18, crash at +0x3C). Missions without an entry keep the retail condition mode. */
 /* The table entry of the mission being flown, or 0. */
 static const Condition *current_condition(void) {
-    u8 *comm = GAME_TASK_SCORING() - 0x48;
+    u8 *scoring = GAME_TASK_SCORING();
+    u8 *comm = scoring - 0x48;
     u32 i;
-    for (i = 0; i < gHeader.conditionCount && i < MAX_CONDITIONS; i++) {
+    /* Outside a mission (title screen, menus) there is no mission data: the pointer is not in RAM. */
+    if (DATA_HEADER->magic != DATA_MAGIC || (u32)scoring < 0x80000400u + 0x48 || (u32)scoring >= 0x80800000u) {
+        return 0;
+    }
+    for (i = 0; i < DATA_HEADER->missions && i < MAX_CONDITIONS; i++) {
         if (gConditions[i].cls == comm[0] && gConditions[i].vehicle == comm[1] && gConditions[i].test == comm[2]) {
             return &gConditions[i];
         }
@@ -813,11 +853,52 @@ static int has_required(const Condition *c) {
     return 0;
 }
 
+#define GAME_TASK_GOAL ((u8(*)(void))0x80346468) /* taskGet_80346468: the goal ring or the ball target ended the mission */
+#define SCORE_TIME      0x800u
+#define SCORE_GOALS     0x30000u /* ball target 0x10000, hopper goal 0x20000 */
+#define SCORE_IN_THE_AIR 0x3FFF8u /* everything but landing accuracy (1, 2) and impact (4) */
+#define SCORE_NO_LANDING 0xF7F8u  /* the vehicles' flags after a flight without a good landing */
+
 s32 module_conditions(u8 *result) {
     const Condition *c = current_condition();
     u32 *flags = (u32 *)result;
+    u8 *state = GAME_STATE;
+    int crashed = result[0x3C] != 0;
+    int hardEnd = state != 0 && state[0xA1] != 0;
     u32 i;
     int met = 1;
+
+    message("Scoring: flags 0x%X%s%s%s.\n", *flags, crashed ? ", crash" : "", hardEnd ? ", hard end time" : "",
+            GAME_TASK_GOAL() ? ", goal reached" : "");
+
+    /* Hard end time (the game has set the flags to "objects only"): per mission 0 points or
+       scored like a flight that ends in the air. A crash keeps the crash rules. */
+    if (hardEnd && !crashed && c != 0 && (c->flags & (COND_END_SCORED | COND_END_ZERO))) {
+        if (c->flags & COND_END_ZERO) {
+            message("Hard end time reached: 0 points.\n");
+            *flags = 0;
+            return 0;
+        }
+        *flags = SCORE_IN_THE_AIR;
+        message("Hard end time reached: scored without landing.\n");
+    }
+
+    /* The goal ring or the ball target ended the mission: time points count (0 without a time curve).
+       Hang Glider and Birdman set their flags only when they land, so in the air they are still 0:
+       then the flags of a flight without a good landing (objects, deductions, altitude, distance). */
+    if (!crashed && !hardEnd && GAME_TASK_GOAL()) {
+        if (*flags == 0) {
+            *flags = SCORE_NO_LANDING;
+        }
+        *flags |= SCORE_TIME;
+        message("Goal reached: time points count.\n");
+    }
+
+    /* Game patch "goal objects": the vehicles pass only 16 bits of flags, so these two sources
+       would only count after a crash or the hard end. */
+    if ((gHeader.flags & FLAG_GOAL_OBJECTS) && *flags != 0) {
+        *flags |= SCORE_GOALS;
+    }
 
     if (c == 0 || !HAS_POINT_CONDITIONS(c)) {
         return GAME_TASK_MODE();
@@ -866,6 +947,136 @@ s32 module_conditions(u8 *result) {
     }
     message("Conditions: time points %s.\n", met ? "count" : "do not count");
     return 0;
+}
+
+/* The goal ring or the ball target ends the mission (taskFrameUpdate, game patch "goal objects"):
+   the jingle of the vehicle being flown. The game played the Rocket Belt's for every vehicle (and
+   changed the vehicle to the Rocket Belt, which the patch removes). */
+#define GAME_SND_SET_MUSIC ((void (*)(s32))0x8033F748) /* sndSetMusic */
+static const u8 sGoalJingle[7] = {
+    0x05, /* Hang Glider: landing OK */
+    0x09, /* Rocket Belt: landing OK */
+    0x0D, /* Gyrocopter: landing OK */
+    0x11, /* Cannonball: hit */
+    0x14, /* Sky Diving: landing OK */
+    0x18, /* Jumble Hopper: goal */
+    0x1A, /* Birdman: landing OK */
+};
+
+void module_goal_jingle(s32 music) {
+    u8 *state = GAME_STATE;
+    u32 vehicle = state != 0 ? *(u16 *)(state + 0x0E) : 1;
+    (void)music;
+    GAME_SND_SET_MUSIC(vehicle < 7 ? sGoalJingle[vehicle] : 0x09);
+}
+
+/* The hard end time is reached (game.c, ROM 0x75004: "arg0->unkA1 = 1" goes through here):
+   the game goes straight to the results and plays nothing itself, except the Hang Glider, whose
+   result frames play its landing jingle. Missions with a hard end setting play the jingle chosen
+   in the editor right now (or none), and the Hang Glider's own jingle is skipped. */
+#define GAME_SND_SET_MUSIC_STATE ((void (*)(s32))0x8033F964) /* sndSetMusicState (0 = play) */
+#define GAME_SND_VEHICLE         ((void (*)(s32))0x8033FCD0) /* func_8033FCD0(vehicle) */
+
+static const Condition *hard_end_setting(void) {
+    const Condition *c = current_condition();
+    return c != 0 && (c->flags & (COND_END_SCORED | COND_END_ZERO)) ? c : 0;
+}
+
+void module_hard_end(u8 *state) {
+    const Condition *c;
+    state[0xA1] = 1;
+    c = hard_end_setting();
+    if (c == 0) {
+        return;
+    }
+    if (c->hardEndMusic != 0) {
+        GAME_SND_SET_MUSIC(c->hardEndMusic);
+        GAME_SND_SET_MUSIC_STATE(0);
+        GAME_SND_VEHICLE(*(u16 *)(state + 0x0E));
+    }
+    message("Hard end time reached: jingle %d.\n", c->hardEndMusic);
+}
+
+/* The Hang Glider's landing jingle in its result frames (func_802EEB00): skipped after a hard end
+   with a setting, because module_hard_end has played the chosen one. */
+static int hard_end_music_taken(void) {
+    u8 *state = GAME_STATE;
+    return state != 0 && state[0xA1] != 0 && hard_end_setting() != 0;
+}
+
+void module_hg_music(s32 music) {
+    if (!hard_end_music_taken()) {
+        GAME_SND_SET_MUSIC(music);
+    } else {
+        message("Hang Glider landing jingle %d skipped (hard end time).\n", music);
+    }
+}
+
+void module_hg_music_state(s32 musicState) {
+    if (!hard_end_music_taken()) {
+        GAME_SND_SET_MUSIC_STATE(musicState);
+    }
+}
+
+/* Countdown of the hard end time: in the last 5 seconds a red "5" ... "1" in the middle of the
+   picture, each with the sound of the photo reticle, then "Time up!" with the Jumble Hopper's goal gong. hudMainRender calls hudDrawStartText through here (ROM 0x9FBD4), so the
+   text is drawn with the game's own font (font 6, as the HUD messages) and shows in every emulator. */
+#define GAME_HUD_START_TEXT ((void (*)(void *))0x8031DC00)             /* hudDrawStartText */
+#define GAME_FONT_SET       ((void (*)(s32))0x802194D8)                /* uvFontSet */
+#define GAME_FONT_COLOR     ((void (*)(s32, s32, s32, s32))0x8021956C) /* uvFontColor */
+#define GAME_FONT_WIDTH16   ((s32(*)(const u16 *))0x802196B0)          /* uvFontStr16Width */
+#define GAME_FONT_PRINT16   ((s32(*)(s32, s32, const u16 *, s32, s32))0x80219874) /* uvFontPrintStr16 */
+#define GAME_FONT_SCALE_X   REG32(0x80248E7C)                          /* sFontScaleX (f32) */
+#define GAME_FONT_SCALE_Y   REG32(0x80248E80)                          /* sFontScaleY (f32) */
+#define GAME_CLOCK          REG32(0x8034F850)                          /* D_8034F850: flight clock (f32 s) */
+#define FLOAT_1 0x3F800000u
+#define FLOAT_2 0x40000000u
+#define GAME_SND_PLAY_SFX   ((void (*)(s32))0x8033F7F8)                /* sndPlaySfx */
+#define SFX_RETICLE 0x43 /* the photo reticle appearing (Z held, hudDrawCamera) */
+#define SFX_GONG    0x11 /* SFX_GOAL_GONG (Jumble Hopper reaching the goal) */
+
+static s32 sCountdownShown = -1; /* text shown last frame, so each one sounds once */
+
+void module_hud_text(void *hud) {
+    const Condition *c;
+    u8 *state = GAME_STATE;
+    const u16 *text;
+    s32 index = -1;
+    s32 width;
+
+    GAME_HUD_START_TEXT(hud);
+    c = hard_end_setting();
+    if (c == 0 || state == 0 || gHeader.countdown[0][0] == 0) {
+        return;
+    }
+    if (state[0xA1]) {
+        index = 5; /* "Time up!" */
+    } else {
+        s32 end = float_to_fixed8(*(s32 *)(GAME_TASK_SCORING() + 0x3C0));
+        s32 left = end - float_to_fixed8((s32)GAME_CLOCK);
+        if (left > 0 && left <= 5 * 256) {
+            index = 5 - ((left + 255) >> 8); /* 5 seconds or less left: "5" ... "1" */
+        }
+    }
+    if (index != sCountdownShown) {
+        sCountdownShown = index;
+        if (index >= 0) {
+            GAME_SND_PLAY_SFX(index == 5 ? SFX_GONG : SFX_RETICLE);
+            message("Countdown: %s (sound %d).\n", index == 5 ? "time up" : "number", index == 5 ? SFX_GONG : SFX_RETICLE);
+        }
+    }
+    if (index < 0) {
+        return;
+    }
+    text = gHeader.countdown[index];
+    GAME_FONT_SET(6);
+    GAME_FONT_COLOR(0xFF, 0x10, 0x10, 0xFF);
+    GAME_FONT_SCALE_X = FLOAT_2;
+    GAME_FONT_SCALE_Y = FLOAT_2;
+    width = GAME_FONT_WIDTH16(text);
+    GAME_FONT_PRINT16(SCREEN_W / 2 - (width - 16) / 2, 70, text, 0x28, 0xFFE);
+    GAME_FONT_SCALE_X = FLOAT_1;
+    GAME_FONT_SCALE_Y = FLOAT_1;
 }
 
 /* "n to go" on the HUD. The ring and target code ask func_8032C080 how many objects are still
@@ -1301,6 +1512,67 @@ static s32 run_hook(int index, s32 a0, s32 a1, s32 a2, s32 a3) {
     return result;
 }
 
+/* ------------------------------------------------------------------ Expansion Pak */
+
+#define GAME_MEDIA_COPY       ((void (*)(void *, u32, u32))0x8022A760) /* _uvMediaCopy(dst, rom, size) */
+#define GAME_VI_BLACK         ((void (*)(u8))0x8023A830)               /* osViBlack */
+#define GAME_VI_SWAP_BUFFER   ((void (*)(void *))0x8023AE20)           /* osViSwapBuffer */
+#define GAME_WRITEBACK_DCACHE ((void (*)(void))0x8023AE70)             /* osWritebackDCacheAll */
+
+/* Frame buffer of the message: heap memory the game has not used yet at this point. */
+#define PAK_FRAME ((u16 *)0x80080000)
+#define PAK_SCALE 2
+#define COLOR_BLACK  0x0001
+#define COLOR_WHITE  0xFFFF
+#define COLOR_YELLOW 0xFFC1
+
+/* One line of text, centred, each pixel of the font drawn as a PAK_SCALE x PAK_SCALE square. */
+static void pak_line(int top, const char *line, u16 color) {
+    int width = 0, col, y, x, dy, dx, left;
+    while (line[width]) {
+        width++;
+    }
+    left = (SCREEN_W - width * 6 * PAK_SCALE) / 2;
+    for (col = 0; col < width; col++) {
+        const u8 *glyph = sFont6x9[line[col] - 32];
+        for (y = 0; y < 9; y++) {
+            for (x = 0; x < 6; x++) {
+                if (!(glyph[y] & (0x20 >> x))) {
+                    continue;
+                }
+                for (dy = 0; dy < PAK_SCALE; dy++) {
+                    u16 *p = PAK_FRAME + (top + y * PAK_SCALE + dy) * SCREEN_W + left + (col * 6 + x) * PAK_SCALE;
+                    for (dx = 0; dx < PAK_SCALE; dx++) {
+                        p[dx] = color;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/* Without the Expansion Pak: a black screen with the message, drawn by the CPU into a frame buffer
+   of its own, then the game stops here (it never starts). The video mode is already set
+   (uvSetVideoMode, before the game program starts); only the frame buffer is handed to the video
+   interface. Emulators with HLE graphics may show only black, real hardware and LLE emulators
+   show the message. */
+static void pak_screen(void) {
+    int i;
+    for (i = 0; i < SCREEN_W * SCREEN_H; i++) {
+        PAK_FRAME[i] = COLOR_BLACK;
+    }
+    pak_line(66, "EXPANSION PAK REQUIRED", COLOR_YELLOW);
+    pak_line(108, "This game needs the", COLOR_WHITE);
+    pak_line(132, "Nintendo 64", COLOR_WHITE);
+    pak_line(156, "Expansion Pak.", COLOR_WHITE);
+    GAME_WRITEBACK_DCACHE();
+    GAME_VI_BLACK(0);
+    GAME_VI_SWAP_BUFFER(PAK_FRAME);
+    message("No Expansion Pak (%d MB of RAM): the game stops.\n", GAME_MEM_SIZE >> 20);
+    for (;;) {
+    }
+}
+
 /* ------------------------------------------------------------------ start */
 
 /* Called by the loader after the module was copied into RAM, right before the game program
@@ -1310,6 +1582,17 @@ void module_init(s32 arg) {
     (void)arg;
     for (p = __bss_start; p < __bss_end; p++) {
         *p = 0;
+    }
+
+    if ((gHeader.flags & FLAG_REQUIRE_PAK) && GAME_MEM_SIZE < 0x800000) {
+        pak_screen();
+    }
+
+    /* The mission settings into the data area (an empty header if there are none). */
+    DATA_HEADER->magic = 0;
+    GAME_WRITEBACK_DCACHE(); /* so the DMA cannot be overwritten by this line later */
+    if (gHeader.dataSize != 0 && gHeader.dataSize <= DATA_AREA_END - DATA_AREA) {
+        GAME_MEDIA_COPY((void *)DATA_AREA, gHeader.dataRom, gHeader.dataSize);
     }
 
     if (!(gHeader.flags & FLAG_DEBUG)) {
@@ -1328,6 +1611,8 @@ void module_init(s32 arg) {
                 APP_BSS_END);
         message("Done: debug module loaded, %d bytes from ROM 0x%06X to 0x%08X.\n", gHeader.imageSize,
                 gHeader.romOffset, (u32)&gHeader);
+        message("Done: mission settings loaded, %d bytes from ROM 0x%06X to 0x%08X (%d missions).\n", gHeader.dataSize,
+                gHeader.dataRom, DATA_AREA, DATA_HEADER->magic == DATA_MAGIC ? (int)DATA_HEADER->missions : 0);
         message("Starting: game program (app_entrypoint)\n");
     }
 }

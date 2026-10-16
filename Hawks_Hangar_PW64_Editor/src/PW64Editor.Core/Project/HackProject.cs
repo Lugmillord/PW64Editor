@@ -70,7 +70,15 @@ public sealed partial class HackProject
         Local.OutputRomPath ?? Path.Combine(Folder, GetOutputBaseName() + ".z64");
 
     /// <summary>The build options stored in the project.</summary>
-    public RomBuildOptions BuildOptions => new(Settings.RelocateAudio, Settings.AllowExpansion, AppliedCodeFixes);
+    public RomBuildOptions BuildOptions => new(Settings.RelocateAudio, Settings.AllowExpansion,
+        [.. AppliedCodeFixes, .. AppliedPatches.Select(p => p.AsCodeFix)]);
+
+    /// <summary>The game patches this project applies, in the editor's order.</summary>
+    public IReadOnlyList<GamePatch> AppliedPatches =>
+        GamePatches.All.Where(p => Settings.AppliedPatches.Contains(p.Id)).ToList();
+
+    /// <summary>True if the project applies this game patch.</summary>
+    public bool HasPatch(GamePatch patch) => Settings.AppliedPatches.Contains(patch.Id);
 
     /// <summary>The code fixes this project applies, in the editor's order.</summary>
     public IReadOnlyList<CodeFix> AppliedCodeFixes =>
@@ -132,10 +140,16 @@ public sealed partial class HackProject
         Directory.CreateDirectory(fullPath);
         Directory.CreateDirectory(Path.Combine(fullPath, FilesFolderName));
 
-        // New projects start with every known code fix.
+        // New projects start with every known code fix and game patch.
         var project = new HackProject(
             fullPath,
-            new ProjectSettings { Name = name, BaseRomSha1 = baseRomSha1, AppliedCodeFixes = [.. CodeFixes.AllIds] },
+            new ProjectSettings
+            {
+                Name = name,
+                BaseRomSha1 = baseRomSha1,
+                AppliedCodeFixes = [.. CodeFixes.AllIds],
+                AppliedPatches = [.. GamePatches.AllIds],
+            },
             new LocalProjectSettings { CleanRomPath = cleanRomPath is null ? null : Path.GetFullPath(cleanRomPath) });
 
         project.Save();
@@ -176,6 +190,14 @@ public sealed partial class HackProject
             throw new ProjectException(
                 CoreText.F("This project uses the code fix '{0}', which this version of the editor does not know. " +
                     "Please update Hawk's Hangar.", unknown));
+        }
+
+        settings.AppliedPatches ??= [];
+        if (settings.AppliedPatches.FirstOrDefault(id => GamePatches.Find(id) is null) is { } unknownPatch)
+        {
+            throw new ProjectException(
+                CoreText.F("This project uses the game patch '{0}', which this version of the editor does not know. " +
+                    "Please update Hawk's Hangar.", unknownPatch));
         }
 
         string localFile = Path.Combine(fullPath, LocalFileName);

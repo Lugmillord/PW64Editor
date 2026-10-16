@@ -47,6 +47,12 @@ public sealed class ProjectSettings
     /// </summary>
     public List<string> AppliedCodeFixes { get; set; } = [];
 
+    /// <summary>
+    /// Ids of the game patches applied to this hack (see <see cref="Code.GamePatches"/>): new features
+    /// of the game. New projects get all of them; they can be applied and undone in the project settings.
+    /// </summary>
+    public List<string> AppliedPatches { get; set; } = [];
+
     /// <summary>Changed instruments and silenced channels of songs (only songs with changes).</summary>
     public List<Audio.SongSettings> Music { get; set; } = [];
 

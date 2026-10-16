@@ -104,7 +104,7 @@ public partial class MissionsTab : UserControl
     private MissionDraft? SelectedDraft => SelectedMission is { } mission ? Draft(mission) : null;
 
     private IEnumerable<TextBox> ValueBoxes =>
-        [FullUntilBox, ZeroAtBox, TargetTimeBox, WindowBox, ZeroDistanceBox, LandNowBox, AltitudeConditionValue, DistanceConditionValue, HitCostBox, OutOfAreaBox, ReactionBox, StartFuelBox];
+        [FullUntilBox, ZeroAtBox, TargetTimeBox, WindowBox, ZeroDistanceBox, LandNowBox, HardEndBox, AltitudeConditionValue, DistanceConditionValue, HitCostBox, OutOfAreaBox, ReactionBox, StartFuelBox];
 
     private IEnumerable<TextEditorPanel> Panels => [TitleEditor, TaskEditor, HintEditor, ScreenTextView, ResultTextView];
 
@@ -734,6 +734,11 @@ public partial class MissionsTab : UserControl
             sources.AddRange(MissionCatalog.AvailableSources(draft.Vehicle)
                 .Where(s => s == row?.Source || !draft.Rows.Contains(s))
                 .Select(s => new SourceItem(s, PointSources.Name(s))));
+            if (row is { } current && current.Source != PointSource.None && sources.All(s => s.Source != current.Source))
+            {
+                // A row of a source that is no longer offered (e.g. landing accuracy of the Jumble Hopper in an older project): keep showing it.
+                sources.Add(new SourceItem(current.Source, PointSources.Name(current.Source)));
+            }
             var box = new ComboBox
             {
                 ItemsSource = sources,
@@ -1062,9 +1067,21 @@ public partial class MissionsTab : UserControl
         }
 
         LandNowBox.Text = FormatNumber(comm.LandNowTime);
-        HardEndText.Text = comm.HardEndTime > 0
-            ? L.F("Hard end time: after {0} the mission ends at once.", FormatTime(comm.HardEndTime))
-            : L.T("Hard end time: off.");
+        HardEndBox.Text = FormatNumber(comm.HardEndTime);
+        HardEndBox.IsEnabled = draft.CanSetHardEnd;
+        HardEndModePanel.Visibility = comm.HardEndTime > 0 ? Visibility.Visible : Visibility.Collapsed;
+        HardEndScoredBox.IsChecked = !draft.Settings.HardEndZero;
+        HardEndZeroBox.IsChecked = draft.Settings.HardEndZero;
+        HardEndJingleOkBox.IsChecked = draft.HardEndJingle == HardEndJingle.LandingOk;
+        HardEndJingleMissBox.IsChecked = draft.HardEndJingle == HardEndJingle.LandingMissed;
+        HardEndJingleNoneBox.IsChecked = draft.HardEndJingle == HardEndJingle.None;
+        HardEndJingleNote.Text = draft.Vehicle switch
+        {
+            Vehicle.JumbleHopper => L.T("The Jumble Hopper plays its goal jingle for a successful landing and the Rocket Belt's for a wrong one (it has none of its own)."),
+            Vehicle.Birdman => L.T("Birdman plays its crash jingle for a wrong landing (it has no other)."),
+            _ => string.Empty,
+        };
+        HardEndJingleNote.Visibility = HardEndJingleNote.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
     }
 
     /// <summary>How the time curve is shown: point by point if chosen so or if it has no simple shape.</summary>
@@ -1409,7 +1426,7 @@ public partial class MissionsTab : UserControl
         FootnoteBox.Text = string.Join("\n", draft.Settings.GenerateTexts
             ? draft.Footnote(OtherComm)
             : automatic
-                ? MissionTextGenerator.SuggestFootnote(comm, draft.TextLines(OtherComm), conditions)
+                ? MissionTextGenerator.SuggestFootnote(comm, draft.TextLines(OtherComm), conditions, draft.Settings.HardEndZero)
                 : draft.CurrentScreenText is { } screen ? MissionTextGenerator.ExtractFootnote(screen) : []);
         FootnoteBox.IsReadOnly = automatic;
         FootnoteBox.IsEnabled = !birdman && draft.Mission.MissionScreenTextName is not null;
@@ -1498,6 +1515,40 @@ public partial class MissionsTab : UserControl
 
         draft.SetUnlimitedFuel(UnlimitedFuelBox.IsChecked == true);
         Changed(draft);
+    }
+
+    /// <summary>What the hard end time gives: the flight's points or 0.</summary>
+    private void OnHardEndModeChanged(object sender, RoutedEventArgs e)
+    {
+        if (_showing || SelectedDraft is not { } draft)
+        {
+            return;
+        }
+
+        bool zero = HardEndZeroBox.IsChecked == true;
+        if (zero != draft.Settings.HardEndZero)
+        {
+            draft.SetHardEndZero(zero);
+            Changed(draft);
+        }
+    }
+
+    /// <summary>The jingle when the hard end time is reached.</summary>
+    private void OnHardEndJingleChanged(object sender, RoutedEventArgs e)
+    {
+        if (_showing || SelectedDraft is not { } draft)
+        {
+            return;
+        }
+
+        HardEndJingle jingle = HardEndJingleMissBox.IsChecked == true ? HardEndJingle.LandingMissed
+            : HardEndJingleNoneBox.IsChecked == true ? HardEndJingle.None
+            : HardEndJingle.LandingOk;
+        if (jingle != draft.HardEndJingle || draft.Settings.HardEndJingle is null)
+        {
+            draft.SetHardEndJingle(jingle);
+            Changed(draft);
+        }
     }
 
     private void OnHideDemoChanged(object sender, RoutedEventArgs e)
@@ -1662,6 +1713,14 @@ public partial class MissionsTab : UserControl
             if (changed)
             {
                 draft.SetLandNowTime(number);
+            }
+        }
+        else if (box == HardEndBox)
+        {
+            changed = number != comm.HardEndTime;
+            if (changed)
+            {
+                draft.SetHardEndTime(number);
             }
         }
         else if (box == StartFuelBox)

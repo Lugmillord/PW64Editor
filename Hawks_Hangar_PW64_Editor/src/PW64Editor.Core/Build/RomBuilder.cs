@@ -77,7 +77,7 @@ public static class RomBuilder
 
         // The game module (new program code) takes the last bytes of the ROM.
         bool withModule = options.GameModule is { IsNeeded: true };
-        int endReserve = withModule ? GameModule.RomReserve : 0;
+        int endReserve = withModule ? GameModule.TotalRomReserve : 0;
         AudioPlacement placement = PlanAudio(baseRom, layout, fileSystemEnd, options, endReserve);
 
         byte[] output = new byte[placement.RomSize];
@@ -210,12 +210,12 @@ public static class RomBuilder
                         fileSystemEnd - layout.FileSystemOffset, layout.FileSystemCapacity, fileSystemEnd - layout.FileSystemLimit));
             }
 
-            if (layout.FileSystemLimit > baseRom.Size - endReserve)
+            if (layout.FileSystemLimit > TargetSize(baseRom, options) - endReserve)
             {
                 throw new FileSystemFullException(CoreText.T("There is no room for the game module at the end of the ROM."));
             }
 
-            return new AudioPlacement(layout.FileSystemLimit, false, baseRom.Size);
+            return new AudioPlacement(layout.FileSystemLimit, false, TargetSize(baseRom, options));
         }
 
         if (audio.SequenceOffset != layout.FileSystemLimit)
@@ -224,14 +224,15 @@ public static class RomBuilder
         }
 
         bool inPlace = fitsInPlace && !options.AlwaysRelocateAudio;
-        if (inPlace && growth == 0 && audio.EndOffset <= baseRom.Size - endReserve)
+        int targetSize = TargetSize(baseRom, options);
+        if (inPlace && growth == 0 && audio.EndOffset <= targetSize - endReserve)
         {
-            return new AudioPlacement(audio.SequenceOffset, false, baseRom.Size);
+            return new AudioPlacement(audio.SequenceOffset, false, targetSize);
         }
 
         int audioOffset = inPlace ? audio.SequenceOffset : AlignUp(fileSystemEnd, AudioLayout.Alignment);
         int requiredSize = audioOffset + audio.Size + growth + endReserve;
-        int romSize = baseRom.Size;
+        int romSize = targetSize;
 
         if (requiredSize > romSize)
         {
@@ -289,6 +290,9 @@ public static class RomBuilder
         int lastAudioStart = (romSize - layout.Audio.Size) / AudioLayout.Alignment * AudioLayout.Alignment;
         return lastAudioStart - fileSystemEnd;
     }
+
+    /// <summary>Size of the ROM before any growth: the base ROM or the minimum size of the options.</summary>
+    private static int TargetSize(N64Rom baseRom, RomBuildOptions options) => Math.Max(baseRom.Size, options.MinimumRomSize);
 
     private static int AlignUp(int value, int alignment) => (value + alignment - 1) / alignment * alignment;
 

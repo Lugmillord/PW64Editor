@@ -65,8 +65,10 @@ public static class MissionCatalog
         Vehicle.SkyDiving => [PointSource.Formation, PointSource.Rings, PointSource.Altitude, PointSource.Distance, PointSource.Time,
             PointSource.LandingAccuracy, PointSource.LandingImpact],
 
-        // The Jumble Hopper does not measure an impact (it would always give the full points).
-        Vehicle.JumbleHopper => [PointSource.Rings, PointSource.Balloons, PointSource.Altitude, PointSource.Distance, PointSource.Time, PointSource.LandingAccuracy],
+        // The Jumble Hopper does not measure an impact (it would always give the full points), and its jumps are far
+        // too imprecise to land on a pad on purpose, so landing accuracy is not offered either (decision of 2026-10-16;
+        // no retail mission uses it, their accuracy curves are empty).
+        Vehicle.JumbleHopper => [PointSource.Rings, PointSource.Balloons, PointSource.Altitude, PointSource.Distance, PointSource.Time],
         _ => [],
     };
 

@@ -61,6 +61,18 @@ public sealed class MissionSettings
     /// <summary>Rocket Belt and Gyrocopter: the fuel never runs out (the game module refills it every frame).</summary>
     public bool UnlimitedFuel { get; set; }
 
+    /// <summary>
+    /// When the hard end time of the mission (COMM, 0 = off) is reached: true = 0 points, false = the
+    /// flight is scored like one that ends in the air (game module).
+    /// </summary>
+    public bool HardEndZero { get; set; }
+
+    /// <summary>
+    /// The jingle when the hard end time is reached, or null for the default (landing OK when the flight is
+    /// scored, landing missed with 0 points).
+    /// </summary>
+    public HardEndJingle? HardEndJingle { get; set; }
+
     /// <summary>The mission these settings belong to.</summary>
     [JsonIgnore]
     public TestId Id => new(Class, (Vehicle)Vehicle, Test);
@@ -68,7 +80,7 @@ public sealed class MissionSettings
     /// <summary>True if the settings change nothing.</summary>
     [JsonIgnore]
     public bool IsEmpty => ResultRows is null && !GenerateTexts && Footnote.Count == 0 && TextPoints.Count == 0
-        && AutoFootnote is null && Conditions is null && !HideDemo && StartFuel is null && !UnlimitedFuel;
+        && AutoFootnote is null && Conditions is null && !HideDemo && StartFuel is null && !UnlimitedFuel && !HardEndZero && HardEndJingle is null;
 
     /// <summary>Empty settings for a mission.</summary>
     public static MissionSettings For(TestId id) => new() { Vehicle = (int)id.Vehicle, Class = id.Class, Test = id.Test };
@@ -88,5 +100,48 @@ public sealed class MissionSettings
         HideDemo = HideDemo,
         StartFuel = StartFuel,
         UnlimitedFuel = UnlimitedFuel,
+        HardEndZero = HardEndZero,
+        HardEndJingle = HardEndJingle,
     };
 }
+
+/// <summary>The jingle the game plays when a mission's hard end time is reached.</summary>
+public enum HardEndJingle
+{
+    /// <summary>The vehicle's "landing OK" jingle (Jumble Hopper: its goal jingle).</summary>
+    LandingOk = 1,
+
+    /// <summary>The vehicle's "landing missed" jingle (Jumble Hopper: the Rocket Belt's, Birdman: its crash jingle).</summary>
+    LandingMissed = 2,
+
+    /// <summary>No jingle.</summary>
+    None = 3,
+}
+
+/// <summary>The music numbers of the hard end jingles per vehicle.</summary>
+public static class HardEndJingles
+{
+    /// <summary>The music number (BGM) of a jingle for a vehicle, 0 for none.</summary>
+    public static byte Music(Vehicle vehicle, HardEndJingle jingle) => (vehicle, jingle) switch
+    {
+        (_, HardEndJingle.None) => 0,
+        (Vehicle.HangGlider, HardEndJingle.LandingOk) => 0x05,
+        (Vehicle.HangGlider, _) => 0x06,
+        (Vehicle.RocketBelt, HardEndJingle.LandingOk) => 0x09,
+        (Vehicle.RocketBelt, _) => 0x0A,
+        (Vehicle.Gyrocopter, HardEndJingle.LandingOk) => 0x0D,
+        (Vehicle.Gyrocopter, _) => 0x0E,
+        (Vehicle.SkyDiving, HardEndJingle.LandingOk) => 0x14,
+        (Vehicle.SkyDiving, _) => 0x15,
+        (Vehicle.JumbleHopper, HardEndJingle.LandingOk) => 0x18, // goal
+        (Vehicle.JumbleHopper, _) => 0x0A,                       // the Rocket Belt's "landing missed" (it has none of its own)
+        (Vehicle.Birdman, HardEndJingle.LandingOk) => 0x1A,
+        (Vehicle.Birdman, _) => 0x1B,                            // crash (it has no "landing missed")
+        _ => 0,
+    };
+
+    /// <summary>The jingle of a mission: as set, or the default for its scoring.</summary>
+    public static HardEndJingle Effective(MissionSettings? settings) =>
+        settings?.HardEndJingle ?? (settings?.HardEndZero == true ? HardEndJingle.LandingMissed : HardEndJingle.LandingOk);
+}
+

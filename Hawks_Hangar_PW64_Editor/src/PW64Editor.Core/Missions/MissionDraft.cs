@@ -102,7 +102,7 @@ public sealed class MissionDraft
     /// <summary>The footnote the mission screen text gets: written from the settings, or as typed in.</summary>
     public IReadOnlyList<string> Footnote(Func<TestId, MissionComm?> otherComm) =>
         Settings.AutoFootnote == true
-            ? MissionTextGenerator.SuggestFootnote(Comm, TextLines(otherComm), Conditions)
+            ? MissionTextGenerator.SuggestFootnote(Comm, TextLines(otherComm), Conditions, Settings.HardEndZero)
             : Settings.Footnote;
 
     /// <summary>The conditions: as set in the editor, or the retail condition of the mission file.</summary>
@@ -315,6 +315,35 @@ public sealed class MissionDraft
         Touch();
     }
 
+    /// <summary>True if the hard end time can be set (not for Cannonball, whose flights end with the shot).</summary>
+    public bool CanSetHardEnd => Vehicle != Vehicle.Cannonball;
+
+    /// <summary>
+    /// Changes the hard end time (0 = off): when it is reached the mission ends at once, scored as
+    /// <see cref="MissionSettings.HardEndZero"/> says (game module).
+    /// </summary>
+    public void SetHardEndTime(float seconds)
+    {
+        Comm.HardEndTime = CanSetHardEnd ? Math.Max(0, seconds) : 0;
+        Touch();
+    }
+
+    /// <summary>Chooses what the hard end time gives: 0 points (true) or the points of the flight so far (false).</summary>
+    public void SetHardEndZero(bool zero)
+    {
+        Settings.HardEndZero = zero;
+        Touch();
+    }
+
+    /// <summary>The jingle at the hard end time: as chosen, or the default for the scoring.</summary>
+    public HardEndJingle HardEndJingle => HardEndJingles.Effective(Settings);
+
+    /// <summary>Chooses the jingle at the hard end time.</summary>
+    public void SetHardEndJingle(HardEndJingle jingle)
+    {
+        Settings.HardEndJingle = jingle;
+    }
+
     /// <summary>Changes the points a hit costs (a positive number; stored as negative).</summary>
     public void SetHitCost(int points)
     {
@@ -441,6 +470,8 @@ public sealed class MissionDraft
             && a.HideDemo == other.HideDemo
             && a.StartFuel == other.StartFuel
             && a.UnlimitedFuel == other.UnlimitedFuel
+            && a.HardEndZero == other.HardEndZero
+            && a.HardEndJingle == other.HardEndJingle
             && (a.Conditions is null ? other.Conditions is null : a.Conditions.SameAs(other.Conditions))
             && a.TextPoints.Count == other.TextPoints.Count
             && a.TextPoints.All(p => other.TextPoints.TryGetValue(p.Key, out int v) && v == p.Value);

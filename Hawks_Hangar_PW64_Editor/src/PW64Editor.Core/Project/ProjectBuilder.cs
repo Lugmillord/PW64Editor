@@ -67,6 +67,7 @@ public static class ProjectBuilder
                 {
                     SequenceFile = BuildMusic(project, cleanRom, layout),
                     DataPatches = MissionPatches(project, cleanRom, layout),
+                    MinimumRomSize = HackRomSize,
                     GameModule = ModuleOptions(project, fileSystem, files),
                     GameModuleInfo = ModuleInfo(project),
                 });
@@ -254,6 +255,18 @@ public static class ProjectBuilder
             }
         }
 
+        IReadOnlyList<IReadOnlyList<ushort>> countdown = [];
+        if (conditions.Any(c => c.HardEnd != HardEndScoring.Retail))
+        {
+            var codec = new Text.TextCodec(Text.TextFont.Load(cleanFileSystem));
+            var texts = CountdownTexts.Select(t => codec.Encode(t)).ToList();
+            if (texts.All(t => t.Success))
+            {
+                // One line each: without the line break in front of the end (it would count as a space when centred).
+                countdown = texts.Select(t => (IReadOnlyList<ushort>)ToRamCodes(t.Codes).Where(c => c != 0x0FFE).ToList()).ToList();
+            }
+        }
+
         IReadOnlyList<ushort> digits = [];
         if (NeedsPenaltyMessages(files))
         {
@@ -267,9 +280,12 @@ public static class ProjectBuilder
 
         return project.Settings.Features.ModuleOptions with
         {
+            RequireExpansionPak = true,
+            GoalObjects = project.HasPatch(GamePatches.GoalObjects),
             Conditions = conditions,
             RequirementMetText = metText,
             PenaltyDigits = digits.Count == 10 ? digits : [],
+            CountdownTexts = countdown,
             DistanceRow = project.Settings.Missions.Any(m => m.ResultRows?.Contains((int)Missions.PointSource.Distance) == true),
         };
     }
@@ -289,41 +305,54 @@ public static class ProjectBuilder
                 _ => false,
             });
 
+    /// <summary>
+    /// Size of every hack ROM built from a project (16 MiB): room for later growth, so the ROM size
+    /// never changes between versions of a hack. Every hack also requires the Expansion Pak.
+    /// </summary>
+    public const int HackRomSize = 16 * 1024 * 1024;
+
+    /// <summary>The countdown of the hard end time (in the game's language, English; bold like the HUD numbers).</summary>
+    public static readonly IReadOnlyList<string> CountdownTexts =
+        ["[b]5[/b]", "[b]4[/b]", "[b]3[/b]", "[b]2[/b]", "[b]1[/b]", "[b]Time up![/b]"];
+
+    /// <summary>Text codes as the game holds them in RAM (textLoadBlock): line break 0xFE -> 0xFFE, end 0xFF -> 0xFFFF.</summary>
+    private static List<ushort> ToRamCodes(IEnumerable<ushort> codes) => codes.Select(c => c switch
+    {
+        Text.TextCodec.CodeLineBreak => (ushort)0x0FFE,
+        Text.TextCodec.CodeEnd => (ushort)0xFFFF,
+        _ => c,
+    }).ToList();
+
     /// <summary>The HUD message when the conditions of the time points are met (in the game's language, English).</summary>
     public const string RequirementMetText = "Time requirement met";
 
     /// <summary>
-    /// The missions whose conditions only the game module can check (combinations the retail
-    /// condition byte cannot express), read from the mission files as they are built.
+    /// The missions with an entry in the game module's table (the data area), read from the mission
+    /// files as they are built: conditions only the module can check (combinations the retail
+    /// condition byte cannot express), unlimited fuel and the scoring of the hard end time.
     /// </summary>
     public static IReadOnlyList<GameModuleCondition> ModuleConditions(HackProject project, IReadOnlyList<GameFile> files)
     {
-        List<Missions.MissionSettings> withConditions = project.Settings.Missions.Where(m => m.Conditions is not null || m.UnlimitedFuel).ToList();
-        if (withConditions.Count == 0)
-        {
-            return [];
-        }
-
         var result = new List<GameModuleCondition>();
         foreach (GameFile file in files.Where(f => f.FileType == Missions.MissionFile.FormType))
         {
             Missions.MissionComm comm = Missions.MissionFile.Parse(file.Data).Comm;
-            if (withConditions.FirstOrDefault(m => m.Id == comm.Id) is not { } settings)
+            Missions.MissionSettings? settings = project.Settings.Missions.FirstOrDefault(m => m.Id == comm.Id);
+            bool fuel = settings?.UnlimitedFuel == true && comm.Id.Vehicle is SaveGame.Vehicle.RocketBelt or SaveGame.Vehicle.Gyrocopter;
+            HardEndScoring hardEnd = comm.HardEndTime <= 0 ? HardEndScoring.Retail
+                : settings?.HardEndZero == true ? HardEndScoring.Zero : HardEndScoring.Scored;
+            byte music = hardEnd == HardEndScoring.Retail ? (byte)0
+                : Missions.HardEndJingles.Music(comm.Id.Vehicle, Missions.HardEndJingles.Effective(settings));
+            if (settings?.Conditions is { } conditions && conditions.NeedsModule(comm))
             {
-                continue;
+                result.Add(conditions.ToModuleCondition(comm) with { UnlimitedFuel = fuel, HardEnd = hardEnd, HardEndMusic = music });
             }
-
-            bool fuel = settings.UnlimitedFuel && comm.Id.Vehicle is SaveGame.Vehicle.RocketBelt or SaveGame.Vehicle.Gyrocopter;
-            if (settings.Conditions is { } conditions && conditions.NeedsModule(comm))
+            else if (fuel || hardEnd != HardEndScoring.Retail)
             {
-                result.Add(conditions.ToModuleCondition(comm) with { UnlimitedFuel = fuel });
-            }
-            else if (fuel)
-            {
-                // Only the fuel: the game's own condition byte keeps counting.
+                // No conditions of its own: the game's condition byte keeps counting.
                 SaveGame.TestId id = comm.Id;
                 result.Add(new GameModuleCondition((byte)id.Class, (byte)id.Vehicle, (byte)id.Test, false, null,
-                    new byte[GameModule.ObjectTypes], null, UnlimitedFuel: true));
+                    new byte[GameModule.ObjectTypes], null, UnlimitedFuel: fuel, HardEnd: hardEnd, HardEndMusic: music));
             }
         }
 

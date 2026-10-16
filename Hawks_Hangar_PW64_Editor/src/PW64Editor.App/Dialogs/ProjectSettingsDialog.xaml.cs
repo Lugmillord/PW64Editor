@@ -30,6 +30,9 @@ public partial class ProjectSettingsDialog : Window
         FixList.ItemsSource = CodeFixes.All
             .Select(f => new CodeFixRow(f, project.Settings.AppliedCodeFixes.Contains(f.Id)))
             .ToList();
+        PatchList.ItemsSource = GamePatches.All
+            .Select(p => new GamePatchRow(p, project.HasPatch(p)))
+            .ToList();
 
         ProjectSettings s = project.Settings;
         NameBox.Text = s.Name;
@@ -42,8 +45,65 @@ public partial class ProjectSettingsDialog : Window
         ShowOutputPath();
     }
 
-    /// <summary>True if a code fix was applied (the hack ROM was rebuilt), even if the dialog is cancelled.</summary>
+    /// <summary>True if a code fix or a game patch was applied or undone (the hack ROM was rebuilt), even if the dialog is cancelled.</summary>
     public bool CodeFixesApplied { get; private set; }
+
+    private async void OnApplyPatch(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not GamePatchRow row || row.IsApplied)
+        {
+            return;
+        }
+
+        await SetPatchAsync(row, true);
+    }
+
+    private async void OnUndoPatch(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is not GamePatchRow row || !row.IsApplied)
+        {
+            return;
+        }
+
+        // Missions that use what the patch adds: say which ones before undoing.
+        IReadOnlyList<string> uses;
+        try
+        {
+            uses = GamePatches.MissionsUsing(row.Patch, _session.LoadMissions().Missions);
+        }
+        catch (Exception ex) when (Ui.IsExpectedError(ex))
+        {
+            uses = [];
+        }
+
+        string question = uses.Count == 0
+            ? L.F("Undo \"{0}\"? No mission uses it at the moment. You can apply it again at any time.", row.Name)
+            : L.F("Undo \"{0}\"? These missions use it and will not work as set without it:\n\n{1}\n\nTheir settings stay, so applying the patch again restores them.",
+                row.Name, string.Join("\n", uses.Take(15).Select(u => "• " + u)) + (uses.Count > 15 ? "\n" + L.F("… and {0} more", uses.Count - 15) : string.Empty));
+        if (!Ui.Confirm(this, question))
+        {
+            return;
+        }
+
+        await SetPatchAsync(row, false);
+    }
+
+    private async Task SetPatchAsync(GamePatchRow row, bool apply)
+    {
+        try
+        {
+            (_, string romPath) = await Ui.RunBusyAsync(this, () => _session.SetGamePatch(row.Patch, apply));
+            row.IsApplied = apply;
+            CodeFixesApplied = true;
+            PatchStatus.Text = apply
+                ? L.F("\"{0}\" applied. Hack ROM rebuilt: {1}", row.Name, romPath)
+                : L.F("\"{0}\" undone. Hack ROM rebuilt: {1}", row.Name, romPath);
+        }
+        catch (Exception ex) when (Ui.IsExpectedError(ex))
+        {
+            Ui.ShowError(this, L.F("The patch could not be changed; the project is unchanged.\n\n{0}", ex.Message));
+        }
+    }
 
     private async void OnApplyFix(object sender, RoutedEventArgs e)
     {

@@ -1,3 +1,4 @@
+using PW64Editor.Core.Code;
 using PW64Editor.Core.FileSystem;
 using PW64Editor.Core.Iff;
 using PW64Editor.Core.Patching;
@@ -12,17 +13,35 @@ public class ProjectBuilderTests
     private static readonly RomLayout Layout = RomLayout.PilotwingsUsa;
 
     [RealRomFact]
-    public void EmptyProject_BuildsOriginalRom()
+    public void EmptyProject_BuildsOriginalRomWithOnlyTheModule()
     {
         using var temp = new TempDirectory();
         N64Rom rom = N64Rom.Load(TestRomLocator.RomPath!);
         HackProject project = HackProject.Create(temp.Combine("p"), "Empty", rom.ComputeSha1(), null);
         project.Settings.AppliedCodeFixes.Clear(); // new projects get the code fixes, which change the code
+        project.Settings.AppliedPatches.Clear(); // and the game patches
 
         ProjectBuildResult result = ProjectBuilder.Build(project, rom, Layout);
+        byte[] built = result.RomBuild.Rom.Data;
 
+        // 16 MiB; files, audio and padding of the original stay byte for byte.
         Assert.Equal(0, result.AppliedOverrides);
-        Assert.Equal(rom.ComputeSha1(), result.RomBuild.Rom.ComputeSha1());
+        Assert.Equal(ProjectBuilder.HackRomSize, built.Length);
+        Assert.True(built.AsSpan(Layout.FileTableOffset, rom.Size - Layout.FileTableOffset)
+            .SequenceEqual(rom.Data.AsSpan(Layout.FileTableOffset)));
+        Assert.True(built.AsSpan(0x40, 0x1000 - 0x40).SequenceEqual(rom.Data.AsSpan(0x40, 0x1000 - 0x40))); // boot code
+
+        // In the game code only the words of the module (loader, memory reservations) differ.
+        int module = built.Length - GameModule.RomReserve;
+        var expected = new HashSet<int>(GameModule.Patches(new GameModuleOptions(false) { RequireExpansionPak = true }, module, GameModuleImage.Image.Length)
+            .SelectMany(p => Enumerable.Range(0, p.Replacement.Length).Select(i => p.RomOffset + (i * 4))));
+        for (int o = 0x1000; o < Layout.FileTableOffset; o += 4)
+        {
+            if (!built.AsSpan(o, 4).SequenceEqual(rom.Data.AsSpan(o, 4)))
+            {
+                Assert.Contains(o, expected);
+            }
+        }
     }
 
     [RealRomFact]

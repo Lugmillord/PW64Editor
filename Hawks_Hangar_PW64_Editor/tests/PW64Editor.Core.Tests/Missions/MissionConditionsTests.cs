@@ -109,14 +109,22 @@ public class MissionConditionsTests
     }
 
     [Fact]
-    public void ModuleImage_ContainsTheConditionsTable()
+    public void DataArea_ContainsTheConditionsTable()
     {
         var condition = new GameModuleCondition(2, (byte)Vehicle.Gyrocopter, 1, true, 50f, [3, 0, GameModule.RequiredAll, 0, 0, 0, 0]);
-        byte[] image = GameModule.CreateImage(new GameModuleOptions(false) { Conditions = [condition] }, 0x7F0000, string.Empty);
-        Span<byte> entry = image.AsSpan(GameModuleImage.ConditionsTableOffset, 16);
+        byte[] data = DataArea.CreateImage([condition]);
+        Assert.Equal(DataArea.HeaderSize + DataArea.MissionEntrySize, data.Length);
+        Assert.Equal(DataArea.Magic, BinaryPrimitives.ReadUInt32BigEndian(data));
+        Assert.Equal(1u, BinaryPrimitives.ReadUInt32BigEndian(data.AsSpan(8)));
+        Span<byte> entry = data.AsSpan(DataArea.HeaderSize, DataArea.MissionEntrySize);
         Assert.Equal(new byte[] { (byte)Vehicle.Gyrocopter, 2, 1, 3, 3, 0, 0xFF, 0, 0, 0, 0, 0 }, entry[..12].ToArray());
         Assert.Equal(50f, BinaryPrimitives.ReadSingleBigEndian(entry[12..]));
+        Assert.All(entry[0x14..].ToArray(), b => Assert.Equal(0, b));
+
+        byte[] image = GameModule.CreateImage(new GameModuleOptions(false) { Conditions = [condition] }, 0x7F0000, string.Empty, 0x7E0000, data.Length);
         Assert.Equal(1u, BinaryPrimitives.ReadUInt32BigEndian(image.AsSpan(0x2C)));
+        Assert.Equal(0x7E0000u, BinaryPrimitives.ReadUInt32BigEndian(image.AsSpan(0xE8)));
+        Assert.Equal((uint)data.Length, BinaryPrimitives.ReadUInt32BigEndian(image.AsSpan(0xEC)));
         Assert.Equal(0u, BinaryPrimitives.ReadUInt32BigEndian(image.AsSpan(0x0C))); // no debug output
 
         Assert.True(new GameModuleOptions(false) { Conditions = [condition] }.IsNeeded);
@@ -174,11 +182,15 @@ public class MissionConditionsTests
         MissionInfo rb = session.LoadMissions().Missions.Single(m => m.Id == new TestId(0, Vehicle.RocketBelt, 0));
         var draft = new MissionDraft(rb, null);
 
-        // Retail-expressible: no module.
+        // Retail-expressible: the module (always there) gets no entry; the scoring function asks it anyway (goal, hard end),
+        // and the module answers with the retail mode.
         draft.SetConditions(new MissionConditions { MinimumAltitude = 100 });
         session.SaveMission(rb, draft.Comm, draft.SettingsToSave());
         byte[] built = session.Build(false).Result.RomBuild.Rom.Data;
-        Assert.NotEqual(GameModule.Magic, BinaryPrimitives.ReadUInt32BigEndian(built.AsSpan(rom.Size - GameModule.RomReserve)));
+        Assert.Equal(GameModule.Magic, BinaryPrimitives.ReadUInt32BigEndian(built.AsSpan(built.Length - GameModule.RomReserve)));
+        Assert.Equal(0u, BinaryPrimitives.ReadUInt32BigEndian(built.AsSpan(built.Length - GameModule.RomReserve + 0x2C)));
+        Assert.Equal(CodeArea.Jal(GameModuleImage.ConditionsHookAddress), BinaryPrimitives.ReadUInt32BigEndian(built.AsSpan(GameModule.ConditionModeCallRomOffset)));
+        Assert.Equal(0x0C0CB020u, BinaryPrimitives.ReadUInt32BigEndian(built.AsSpan(GameModule.RingsLeftCallRomOffset))); // no "n to go" hook
 
         // Combined: the module with one table entry, and the scoring function calls it.
         rb = session.LoadMissions().Missions.Single(m => m.Id == rb.Id);
@@ -186,7 +198,7 @@ public class MissionConditionsTests
         draft.SetConditions(new MissionConditions { MinimumAltitude = 100, Required = { [ConditionObject.Balloons] = MissionConditions.All } });
         session.SaveMission(rb, draft.Comm, draft.SettingsToSave());
         built = session.Build(false).Result.RomBuild.Rom.Data;
-        int module = rom.Size - GameModule.RomReserve;
+        int module = built.Length - GameModule.RomReserve;
         Assert.Equal(GameModule.Magic, BinaryPrimitives.ReadUInt32BigEndian(built.AsSpan(module)));
         Assert.Equal(1u, BinaryPrimitives.ReadUInt32BigEndian(built.AsSpan(module + 0x2C)));
         Assert.Equal(CodeArea.Jal(GameModuleImage.ConditionsHookAddress),
@@ -301,16 +313,16 @@ public class MissionConditionsTests
 
         byte[] built = session.Build(false).Result.RomBuild.Rom.Data;
         uint Word(long offset) => BinaryPrimitives.ReadUInt32BigEndian(built.AsSpan((int)offset));
-        int module = rom.Size - GameModule.RomReserve;
+        int module = built.Length - GameModule.RomReserve;
 
         // Distance row: the result sheet's jump table entry of row type 10.
         Assert.Equal(GameModuleImage.DistanceRowAddress, Word(GameModule.DistanceRowTableRomOffset));
 
         // Distance condition in the table (flags 4, distance at +16) and the HUD text.
-        int entry = module + GameModuleImage.ConditionsTableOffset;
+        int entry = module - DataArea.RomReserve + DataArea.HeaderSize; // first mission of the data area
         Assert.Equal(1, built[entry]); // vehicle
         Assert.Equal(4, built[entry + 3]);
-        Assert.Equal(1000f, BinaryPrimitives.ReadSingleBigEndian(built.AsSpan(entry + 16)));
+        Assert.Equal(1000f, BinaryPrimitives.ReadSingleBigEndian(built.AsSpan(entry + 0x10)));
         Assert.NotEqual(0, BinaryPrimitives.ReadUInt16BigEndian(built.AsSpan(module + 0x94)));
 
         // Live values: flag 16, all four values, the flight frame calls go to the module.
@@ -353,8 +365,8 @@ public class MissionConditionsTests
         Assert.Equal(0.6f, file.StartFuel);
         Assert.Equal(MissionCondition.AllObjects, file.Comm.Condition); // the game's own condition stays
 
-        int module = rom.Size - GameModule.RomReserve;
-        int entry = module + GameModuleImage.ConditionsTableOffset;
+        int module = built.Length - GameModule.RomReserve;
+        int entry = module - DataArea.RomReserve + DataArea.HeaderSize; // first mission of the data area
         Assert.Equal(1u, BinaryPrimitives.ReadUInt32BigEndian(built.AsSpan(module + 0x2C)));
         Assert.Equal(8, built[entry + 3]); // only the fuel flag
         Assert.Equal(CodeArea.Jal(GameModuleImage.FlightFrameHookAddress),
@@ -377,7 +389,7 @@ public class MissionConditionsTests
         session.SaveMission(gc, draft.Comm, draft.SettingsToSave());
 
         byte[] built = session.Build(false).Result.RomBuild.Rom.Data;
-        int module = rom.Size - GameModule.RomReserve;
+        int module = built.Length - GameModule.RomReserve;
         Assert.Equal(GameModule.Magic, BinaryPrimitives.ReadUInt32BigEndian(built.AsSpan(module)));
         // The bold digits 0-9 for the module.
         Assert.Equal(Enumerable.Range(0x60, 10).Select(c => (ushort)c),

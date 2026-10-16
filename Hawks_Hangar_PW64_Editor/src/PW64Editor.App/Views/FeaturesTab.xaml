@@ -20,6 +20,8 @@
         <StackPanel Margin="16,10,16,10" MaxWidth="900" HorizontalAlignment="Left">
             <TextBlock Style="{StaticResource Note}"
                        Text="Additional features that the editor builds into the hack ROM. Every change is saved in the project right away and takes effect with the next build (Ctrl+S)." />
+            <TextBlock Style="{StaticResource Note}" Margin="0,6,0,0"
+                       Text="Game patches, which add new features to the game (for example the goal ring for every vehicle), are in File › Project settings, under &quot;Game patches&quot;." />
 
             <TextBlock Text="Debug output" Style="{StaticResource SectionTitle}" Margin="0,14,0,6" />
             <CheckBox x:Name="DebugBox" Content="Write debug information" Checked="OnChanged" Unchecked="OnChanged" />

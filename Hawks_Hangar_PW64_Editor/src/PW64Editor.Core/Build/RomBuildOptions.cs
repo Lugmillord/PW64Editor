@@ -27,10 +27,16 @@ public sealed record RomBuildOptions(bool AlwaysRelocateAudio = false, bool Allo
     public IReadOnlyList<DataPatch> DataPatches { get; init; } = [];
 
     /// <summary>
-    /// The editor's new program code (debug output), or null for none. It is placed into the last
-    /// <see cref="Code.GameModule.RomReserve"/> bytes of the ROM.
+    /// The editor's new program code, or null for none. It is placed into the last
+    /// <see cref="Code.GameModule.TotalRomReserve"/> bytes of the ROM (with the data area).
     /// </summary>
     public GameModuleOptions? GameModule { get; init; }
+
+    /// <summary>
+    /// The smallest size of the built ROM (0: the size of the base ROM). Hack ROMs of a project are
+    /// always 16 MiB, so there is room to grow without changing the size later.
+    /// </summary>
+    public int MinimumRomSize { get; init; }
 
     /// <summary>A line about the build for the game module's debug output (project, time).</summary>
     public string GameModuleInfo { get; init; } = string.Empty;

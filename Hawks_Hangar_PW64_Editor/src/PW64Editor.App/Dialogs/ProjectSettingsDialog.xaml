@@ -11,7 +11,13 @@
         <converters:InverseBooleanToVisibilityConverter x:Key="InverseBoolToVisibility" />
     </Window.Resources>
 
-    <StackPanel Margin="20">
+    <DockPanel Margin="20">
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
+            <Button Content="Save" Click="OnSave" IsDefault="True" Style="{StaticResource DialogButton}" />
+            <Button Content="Cancel" IsCancel="True" Style="{StaticResource DialogButton}" />
+        </StackPanel>
+        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" MaxHeight="640">
+        <StackPanel Margin="0,0,6,0">
         <Grid>
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
@@ -45,7 +51,9 @@
         <CheckBox x:Name="RelocateBox" Margin="0,16,0,0"
                   Content="Always move the audio data directly behind the game files" />
         <CheckBox x:Name="ExpandBox" Margin="0,8,0,0"
-                  Content="Allow enlarging the ROM (16, 32 or 64 MiB) when the data does not fit" />
+                  Content="Allow enlarging the ROM beyond 16 MiB (32 or 64 MiB) when the data does not fit" />
+        <TextBlock TextWrapping="Wrap" Margin="0,8,0,0" Foreground="{StaticResource MutedTextBrush}"
+                   Text="Every hack ROM is at least 16 MiB and needs the Expansion Pak: without it the game only shows the message &quot;EXPANSION PAK REQUIRED&quot;." />
 
         <!-- Code fixes: corrections of bugs in the game's code. "Apply" acts at once (and rebuilds),
              independent of Save/Cancel. Applied fixes show a check mark on a gray background. -->
@@ -96,9 +104,52 @@
         </ItemsControl>
         <TextBlock x:Name="FixStatus" TextWrapping="Wrap" Margin="0,4,0,0" Foreground="{StaticResource MutedTextBrush}" />
 
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,20,0,0">
-            <Button Content="Save" Click="OnSave" IsDefault="True" Style="{StaticResource DialogButton}" />
-            <Button Content="Cancel" IsCancel="True" Style="{StaticResource DialogButton}" />
+        <!-- Game patches: new features of the game. "Apply" and "Undo" act at once (and rebuild),
+             independent of Save/Cancel. Active patches show a check mark on a gray background. -->
+        <TextBlock Text="Game patches" FontWeight="SemiBold" Margin="0,20,0,2" />
+        <TextBlock TextWrapping="Wrap" Foreground="{StaticResource MutedTextBrush}"
+                   Text="New features of the game. They become part of the hack ROM and its patch. Apply and Undo rebuild the hack ROM right away; the settings of your missions stay when a patch is undone." />
+        <ItemsControl x:Name="PatchList" Margin="0,6,0,0">
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <Border Margin="0,0,0,4" Padding="6,4" BorderBrush="#D5DCE3" BorderThickness="1">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Background" Value="Transparent" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsApplied}" Value="True">
+                                        <Setter Property="Background" Value="#E9ECEF" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <Expander>
+                            <Expander.Header>
+                                <StackPanel Orientation="Horizontal">
+                                    <!-- A check mark while the patch is active, then Apply or Undo. -->
+                                    <TextBlock Text="✔" FontSize="15" FontWeight="Bold" Foreground="#2E7D32" Width="18"
+                                               VerticalAlignment="Center" ToolTip="Active"
+                                               Visibility="{Binding IsApplied, Converter={StaticResource BoolToVisibility}}" />
+                                    <TextBlock Width="18" Visibility="{Binding IsApplied, Converter={StaticResource InverseBoolToVisibility}}" />
+                                    <Grid Width="64">
+                                        <Button Content="Apply" Click="OnApplyPatch" Padding="8,1" HorizontalAlignment="Left"
+                                                ToolTip="Apply this patch and rebuild the hack ROM"
+                                                Visibility="{Binding IsApplied, Converter={StaticResource InverseBoolToVisibility}}" />
+                                        <Button Content="Undo" Click="OnUndoPatch" Padding="8,1" HorizontalAlignment="Left"
+                                                ToolTip="Remove this patch and rebuild the hack ROM"
+                                                Visibility="{Binding IsApplied, Converter={StaticResource BoolToVisibility}}" />
+                                    </Grid>
+                                    <TextBlock Text="{Binding Name}" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </Expander.Header>
+                            <TextBlock Margin="26,6,4,4" TextWrapping="Wrap" Text="{Binding Description, Mode=OneWay}" />
+                        </Expander>
+                    </Border>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+        </ItemsControl>
+        <TextBlock x:Name="PatchStatus" TextWrapping="Wrap" Margin="0,4,0,0" Foreground="{StaticResource MutedTextBrush}" />
         </StackPanel>
-    </StackPanel>
+        </ScrollViewer>
+    </DockPanel>
 </Window>

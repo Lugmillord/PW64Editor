@@ -150,7 +150,9 @@ public class ProjectCodeFixTests
 
         Assert.Equal(CodeFixes.AllIds, project.Settings.AppliedCodeFixes);
         Assert.Empty(project.MissingCodeFixes);
-        Assert.Equal(CodeFixes.All, project.BuildOptions.CodeFixes);
+        Assert.Equal(CodeFixes.All, project.BuildOptions.CodeFixes!.Take(CodeFixes.All.Count));
+        Assert.Equal(GamePatches.AllIds, project.Settings.AppliedPatches); // game patches are built like fixes
+        Assert.Equal(GamePatches.AllIds, project.BuildOptions.CodeFixes!.Skip(CodeFixes.All.Count).Select(f => f.Id));
     }
 
     [Fact]

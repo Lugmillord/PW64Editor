@@ -129,6 +129,33 @@ public sealed class EditorSession
     }
 
     /// <summary>
+    /// Applies or undoes a game patch and builds the hack ROM right away. If the build fails, the
+    /// project stays unchanged.
+    /// </summary>
+    /// <param name="patch">The game patch.</param>
+    /// <param name="apply">True to apply it, false to undo it.</param>
+    /// <returns>The build result and the path of the hack ROM.</returns>
+    public (ProjectBuildResult Result, string RomPath) SetGamePatch(GamePatch patch, bool apply)
+    {
+        List<string> before = [.. Project.Settings.AppliedPatches];
+        Project.Settings.AppliedPatches = GamePatches.AllIds
+            .Where(id => id == patch.Id ? apply : before.Contains(id))
+            .ToList();
+
+        try
+        {
+            (ProjectBuildResult result, string romPath, _) = Build(createRestorePoint: false);
+            Project.Save();
+            return (result, romPath);
+        }
+        catch
+        {
+            Project.Settings.AppliedPatches = before;
+            throw;
+        }
+    }
+
+    /// <summary>
     /// Builds the project fresh and saves a verified BPS patch.
     /// </summary>
     /// <returns>Size of the patch in bytes.</returns>

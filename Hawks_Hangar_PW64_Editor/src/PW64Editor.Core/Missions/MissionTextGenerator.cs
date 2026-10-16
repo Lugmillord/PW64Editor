@@ -136,12 +136,17 @@ public static class MissionTextGenerator
     public const int FootnoteLines = 3;
 
     /// <summary>
-    /// A footnote written from the mission's settings: the time limit, the conditions for the
-    /// time points, the altitude for full altitude points, "a crash gives 0 points" and the photo
-    /// rule. The sentences follow each other, wrapped to <see cref="FootnoteWidth"/> characters; if
+    /// A footnote written from the mission's settings: the time limit, the hard end time, the
+    /// conditions for the time points, the altitude for full altitude points, "a crash gives 0
+    /// points" and the photo rule. The sentences follow each other, wrapped to <see cref="FootnoteWidth"/> characters; if
     /// they need more than <see cref="FootnoteLines"/> lines, the short forms are used.
     /// </summary>
-    public static IReadOnlyList<string> SuggestFootnote(MissionComm comm, IReadOnlyList<PointLine> rows, MissionConditions conditions)
+    /// <param name="comm">The mission's COMM block.</param>
+    /// <param name="rows">The point rows.</param>
+    /// <param name="conditions">The conditions of the time points.</param>
+    /// <param name="hardEndZero">The hard end time (if the mission has one) gives 0 points.</param>
+    public static IReadOnlyList<string> SuggestFootnote(MissionComm comm, IReadOnlyList<PointLine> rows, MissionConditions conditions,
+        bool hardEndZero = false)
     {
         var parts = new List<(string Long, string Short)>();
         bool time = rows.Any(r => r.Source == PointSource.Time && r.Points > 0);
@@ -182,6 +187,13 @@ public static class MissionTextGenerator
             {
                 parts.Add(($"Time points only with {JoinEnglish(needs)}.", $"Time only with {JoinEnglish(needs)}."));
             }
+        }
+
+        if (comm.HardEndTime > 0)
+        {
+            parts.Add(hardEndZero
+                ? ($"The flight ends after {Clock(comm.HardEndTime)} with 0 points.", $"Ends at {Clock(comm.HardEndTime)}: 0 pts.")
+                : ($"The flight ends after {Clock(comm.HardEndTime)}.", $"Ends at {Clock(comm.HardEndTime)}."));
         }
 
         if (rows.Any(r => r.Source == PointSource.Altitude && r.Points > 0))

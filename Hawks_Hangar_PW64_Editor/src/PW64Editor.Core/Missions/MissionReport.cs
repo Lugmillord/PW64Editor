@@ -37,6 +37,7 @@ public static class MissionReport
         Line(text, $"Base ROM:     SHA-1 {settings.BaseRomSha1}, {session.CleanRom.Size} bytes");
         Line(text, $"Build:        relocate audio {YesNo(settings.RelocateAudio)}, allow expansion {YesNo(settings.AllowExpansion)}");
         Line(text, $"Code fixes:   {(settings.AppliedCodeFixes.Count == 0 ? "none" : string.Join(", ", settings.AppliedCodeFixes))}");
+        Line(text, $"Game patches: {(settings.AppliedPatches.Count == 0 ? "none" : string.Join(", ", settings.AppliedPatches))}");
         GameFeatureSettings f = settings.Features;
         Line(text, $"Features:     debug output {YesNo(f.DebugOutput)}, startup info {YesNo(f.StartupInfo)}, "
             + $"developers' messages {YesNo(f.GameMessages)}, on screen {YesNo(f.OnScreen)}, live values {f.LiveMask}");
@@ -78,8 +79,8 @@ public static class MissionReport
             Line(text, $"Problem:      the module table cannot be made: {ex.Message}");
         }
 
-        Line(text, $"Module:       {(f.ModuleOptions.IsNeeded || moduleConditions.Count > 0 ? "built in" : "not built in")}, "
-            + $"{moduleConditions.Count} condition entries (capacity {GameModuleImage.ConditionsCapacity})");
+        Line(text, $"Module:       built in (Expansion Pak required, ROM {ProjectBuilder.HackRomSize >> 20} MiB), "
+            + $"{moduleConditions.Count} mission entries in the data area (capacity {GameModuleImage.ConditionsCapacity})");
 
         List<MissionInfo> changed = catalog.Missions.Where(m => m.FromProject || m.Settings is not null).ToList();
         Line(text, $"Missions:     {catalog.Missions.Count}, changed {changed.Count}");
@@ -176,6 +177,12 @@ public static class MissionReport
         Value(text, "Pilot cheer threshold", comm.ReactionThreshold, original.ReactionThreshold);
         Value(text, "\"Land now\" time (s)", comm.LandNowTime, original.LandNowTime);
         Value(text, "Hard end time (s)", comm.HardEndTime, original.HardEndTime);
+        if (comm.HardEndTime > 0)
+        {
+            Line(text, $"Hard end scoring: {(settings?.HardEndZero == true ? "0 points" : "scored without landing accuracy and impact")}, "
+                + $"jingle {HardEndJingles.Effective(settings)}{(settings?.HardEndJingle is null ? " (default)" : string.Empty)}");
+        }
+
         Value(text, "Out of area deduction", comm.OutOfAreaDeduction, original.OutOfAreaDeduction);
 
         // Conditions.
@@ -218,7 +225,7 @@ public static class MissionReport
             if (moduleConditions.FirstOrDefault(c => c.Id == mission.Id) is { Entry: { } entry })
             {
                 Line(text, $"  module entry: vehicle {entry.Vehicle}, class {entry.Class}, test {entry.Test}, crash zero {YesNo(entry.CrashGivesZero)}, "
-                    + $"altitude {(entry.MinimumAltitude is { } a ? Num(a) : "-")}, distance {(entry.MinimumDistance is { } dd ? Num(dd) : "-")}, unlimited fuel {YesNo(entry.UnlimitedFuel)}, required [{string.Join(" ", entry.Required.Select(b => b.ToString(CultureInfo.InvariantCulture)))}]");
+                    + $"altitude {(entry.MinimumAltitude is { } a ? Num(a) : "-")}, distance {(entry.MinimumDistance is { } dd ? Num(dd) : "-")}, unlimited fuel {YesNo(entry.UnlimitedFuel)}, hard end {entry.HardEnd} (jingle {entry.HardEndMusic}), required [{string.Join(" ", entry.Required.Select(b => b.ToString(CultureInfo.InvariantCulture)))}]");
             }
         }
         else
@@ -226,7 +233,7 @@ public static class MissionReport
             Line(text, "Conditions: those of the condition byte (not changed in the editor)");
             if (moduleConditions.FirstOrDefault(c => c.Id == mission.Id) is { Entry: { } fuelEntry })
             {
-                Line(text, $"  module entry (fuel only): unlimited fuel {YesNo(fuelEntry.UnlimitedFuel)}");
+                Line(text, $"  module entry (no conditions): unlimited fuel {YesNo(fuelEntry.UnlimitedFuel)}, hard end {fuelEntry.HardEnd} (jingle {fuelEntry.HardEndMusic})");
             }
         }
 

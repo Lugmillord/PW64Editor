@@ -252,11 +252,11 @@ public partial class MainWindow : Window
         if (saved)
         {
             UpdateProjectInfo();
-            SetStatus(dialog.CodeFixesApplied ? L.T("Project settings saved, code fix applied.") : L.T("Project settings saved."));
+            SetStatus(dialog.CodeFixesApplied ? L.T("Project settings saved, code fixes or game patches changed.") : L.T("Project settings saved."));
         }
         else if (dialog.CodeFixesApplied)
         {
-            SetStatus(L.T("Code fix applied and hack ROM rebuilt."));
+            SetStatus(L.T("Code fixes or game patches changed and hack ROM rebuilt."));
         }
     }
 
