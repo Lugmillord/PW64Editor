@@ -73,6 +73,19 @@ public sealed class MissionSettings
     /// </summary>
     public HardEndJingle? HardEndJingle { get; set; }
 
+    /// <summary>
+    /// Gyrocopter: its own curve for the touchdown point (the game multiplies it with the landing accuracy
+    /// curve of the resting position), or null: both measurements use the landing accuracy curve, as in the
+    /// original game. In the game's form (distance in game units, points like the curve of the mission file).
+    /// </summary>
+    public List<CurvePoint>? TouchdownCurve { get; set; }
+
+    /// <summary>The landing values of this mission that differ from the original game (stored form, see <see cref="LandingValues"/>).</summary>
+    public Dictionary<LandingValue, float> Landing { get; set; } = [];
+
+    /// <summary>The width of each runway for a good landing (game units, in the order of the mission file), or null for the mission file's.</summary>
+    public List<float>? RunwayWidths { get; set; }
+
     /// <summary>The mission these settings belong to.</summary>
     [JsonIgnore]
     public TestId Id => new(Class, (Vehicle)Vehicle, Test);
@@ -80,7 +93,8 @@ public sealed class MissionSettings
     /// <summary>True if the settings change nothing.</summary>
     [JsonIgnore]
     public bool IsEmpty => ResultRows is null && !GenerateTexts && Footnote.Count == 0 && TextPoints.Count == 0
-        && AutoFootnote is null && Conditions is null && !HideDemo && StartFuel is null && !UnlimitedFuel && !HardEndZero && HardEndJingle is null;
+        && AutoFootnote is null && Conditions is null && !HideDemo && StartFuel is null && !UnlimitedFuel && !HardEndZero && HardEndJingle is null
+        && TouchdownCurve is null && Landing.Count == 0 && RunwayWidths is null;
 
     /// <summary>Empty settings for a mission.</summary>
     public static MissionSettings For(TestId id) => new() { Vehicle = (int)id.Vehicle, Class = id.Class, Test = id.Test };
@@ -102,6 +116,9 @@ public sealed class MissionSettings
         UnlimitedFuel = UnlimitedFuel,
         HardEndZero = HardEndZero,
         HardEndJingle = HardEndJingle,
+        TouchdownCurve = TouchdownCurve is null ? null : [.. TouchdownCurve],
+        Landing = new Dictionary<LandingValue, float>(Landing),
+        RunwayWidths = RunwayWidths is null ? null : [.. RunwayWidths],
     };
 }
 

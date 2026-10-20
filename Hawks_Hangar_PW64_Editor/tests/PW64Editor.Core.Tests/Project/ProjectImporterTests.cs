@@ -104,7 +104,7 @@ public class ProjectImporterTests
         Assert.Contains(report, n => n.Text.StartsWith("The project builds exactly the imported ROM", StringComparison.Ordinal));
         Assert.True(File.Exists(Path.Combine(copy.Project.Folder, ".gitignore")));
         Assert.True(copy.Project.HasImportedSong(3));
-        Assert.Empty(copy.Project.Settings.Missions.Where(m => m.GenerateTexts));
+        Assert.DoesNotContain(copy.Project.Settings.Missions, m => m.GenerateTexts);
     }
 
     [RealRomFact]

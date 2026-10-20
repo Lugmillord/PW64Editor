@@ -115,7 +115,10 @@ public static class MissionCatalog
 
             mission.Settings = settingsById.GetValueOrDefault(mission.Id);
             IReadOnlyList<PointSource> rows = mission.Settings?.ResultRows?.Select(r => (PointSource)r).ToList() ?? mission.OriginalRowSources;
-            mission.Rows = rows.Select(r => Evaluate(r, mission.Id, mission.File, mission.File.Comm, id => byId.GetValueOrDefault(id)?.File.Comm)).ToList();
+            ScoreCurve? touchdown = mission.Settings?.TouchdownCurve is { Count: > 0 } points && mission.Id.Vehicle == Vehicle.Gyrocopter
+                ? ScoreCurve.Create(points)
+                : null;
+            mission.Rows = rows.Select(r => Evaluate(r, mission.Id, mission.File, mission.File.Comm, id => byId.GetValueOrDefault(id)?.File.Comm, touchdown)).ToList();
         }
 
         foreach (MissionInfo mission in missions)
@@ -151,11 +154,14 @@ public static class MissionCatalog
     /// <param name="file">The mission file (for its objects).</param>
     /// <param name="comm">The COMM block to evaluate (may be an edited copy of the file's).</param>
     /// <param name="otherComm">The COMM block of another mission (Cannonball: the other targets of the level), or null.</param>
-    public static MissionPointRow Evaluate(PointSource source, TestId id, MissionFile file, MissionComm comm, Func<TestId, MissionComm?> otherComm)
+    /// <param name="touchdown">The Gyrocopter's own touchdown curve, or null.</param>
+    public static MissionPointRow Evaluate(PointSource source, TestId id, MissionFile file, MissionComm comm, Func<TestId, MissionComm?> otherComm,
+        ScoreCurve? touchdown = null)
     {
         if (PointSources.Curve(source) is { } kind)
         {
-            return new MissionPointRow(source, MissionCurves.ShownPoints(kind, id.Vehicle, comm.GetCurve(kind)), PointValueKind.Curve);
+            return new MissionPointRow(source, MissionCurves.ShownPoints(kind, id.Vehicle, comm.GetCurve(kind),
+                kind == ScoreCurveKind.LandingAccuracy ? touchdown : null), PointValueKind.Curve);
         }
 
         switch (source)

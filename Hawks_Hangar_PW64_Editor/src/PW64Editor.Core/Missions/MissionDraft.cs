@@ -60,7 +60,7 @@ public sealed class MissionDraft
     /// <summary>The rows with their values for the edited data.</summary>
     /// <param name="otherComm">The current COMM block of another mission (Cannonball targets), or null.</param>
     public IReadOnlyList<MissionPointRow> EvaluateRows(Func<TestId, MissionComm?> otherComm) =>
-        Rows.Select(r => MissionCatalog.Evaluate(r, Mission.Id, Mission.File, Comm, otherComm)).ToList();
+        Rows.Select(r => MissionCatalog.Evaluate(r, Mission.Id, Mission.File, Comm, otherComm, TouchdownCurve)).ToList();
 
     /// <summary>
     /// The number a row shows in the point texts: the curve value, or for points from objects and
@@ -110,6 +110,23 @@ public sealed class MissionDraft
 
     /// <summary>True if "a crash gives 0 points" can be set (not for Cannonball: a shot always ends in the water or on a target).</summary>
     public bool CanSetCrashCondition => Vehicle != Vehicle.Cannonball;
+
+    /// <summary>What a crash gives: the original rules, time points too, or 0 points.</summary>
+    public CrashScoring CrashScoring =>
+        Conditions.CrashGivesZero ? CrashScoring.Zero : Conditions.CrashTimePoints ? CrashScoring.TimePoints : CrashScoring.Original;
+
+    /// <summary>
+    /// With time points after a crash: the time points a crash right after the start gives (the time curve at
+    /// 0 s), or 0. The editor shows a hint, since most time curves give their full points at the start.
+    /// </summary>
+    public int EarlyCrashTimePoints =>
+        CrashScoring == CrashScoring.TimePoints && Rows.Contains(PointSource.Time) && Comm.GetCurve(ScoreCurveKind.Time) is { IsUsed: true } curve
+            ? (int)curve.Points[0].Y
+            : 0;
+
+    /// <summary>The Gyrocopter's own touchdown curve, or null (both measurements use the landing accuracy curve).</summary>
+    public ScoreCurve? TouchdownCurve =>
+        Vehicle == Vehicle.Gyrocopter && Settings.TouchdownCurve is { Count: > 0 } points ? ScoreCurve.Create(points) : null;
 
     /// <summary>The generated result sheet text.</summary>
     public string ResultSheetText(Func<TestId, MissionComm?> otherComm) =>
@@ -239,7 +256,14 @@ public sealed class MissionDraft
     public void SetRowPoints(int index, int points, Func<TestId, MissionComm?> otherComm)
     {
         PointSource source = Rows[index];
-        if (PointSources.Curve(source) is { } kind)
+        if (PointSources.Curve(source) == ScoreCurveKind.LandingAccuracy && TouchdownCurve is { } touchdown)
+        {
+            // The Gyrocopter with two curves: both are scaled, so the product gives the points.
+            (ScoreCurve rest, ScoreCurve touch) = MissionCurves.WithShownPoints(Comm.GetCurve(ScoreCurveKind.LandingAccuracy), touchdown, points);
+            Comm.SetCurve(ScoreCurveKind.LandingAccuracy, rest);
+            Settings.TouchdownCurve = [.. touch.Points];
+        }
+        else if (PointSources.Curve(source) is { } kind)
         {
             Comm.SetCurve(kind, MissionCurves.WithShownPoints(kind, Vehicle, Comm.GetCurve(kind), points));
         }
@@ -288,6 +312,12 @@ public sealed class MissionDraft
         if (!CanSetCrashCondition)
         {
             copy.CrashGivesZero = false;
+            copy.CrashTimePoints = false;
+        }
+
+        if (copy.CrashGivesZero)
+        {
+            copy.CrashTimePoints = false;
         }
 
         foreach (ConditionObject type in copy.Required.Keys.ToList())
@@ -306,6 +336,130 @@ public sealed class MissionDraft
         Settings.Conditions = copy;
         copy.ApplyTo(Comm);
         Touch();
+    }
+
+    /// <summary>Chooses what a crash gives (not for Cannonball).</summary>
+    public void SetCrashScoring(CrashScoring scoring)
+    {
+        MissionConditions conditions = Conditions.Clone();
+        conditions.CrashGivesZero = scoring == CrashScoring.Zero;
+        conditions.CrashTimePoints = scoring == CrashScoring.TimePoints;
+        SetConditions(conditions);
+    }
+
+    /// <summary>
+    /// Gyrocopter: switches the own curve of the touchdown point on (it starts as a copy of the landing accuracy
+    /// curve, so nothing changes yet) or off (both measurements use the landing accuracy curve again).
+    /// </summary>
+    public void SetSeparateTouchdown(bool separate)
+    {
+        if (Vehicle != Vehicle.Gyrocopter)
+        {
+            return;
+        }
+
+        if (!separate)
+        {
+            Settings.TouchdownCurve = null;
+        }
+        else if (Settings.TouchdownCurve is null)
+        {
+            // A copy changes no points, so the texts stay as they are.
+            Settings.TouchdownCurve = [.. Comm.GetCurve(ScoreCurveKind.LandingAccuracy).Points];
+            return;
+        }
+
+        Touch();
+    }
+
+    /// <summary>
+    /// Gyrocopter with two curves: replaces the points of one of them, given as percent of the curve's highest
+    /// value (one point must have 100 %, so the points of the row stay).
+    /// </summary>
+    /// <param name="touchdown">True for the touchdown point, false for the resting position (the landing accuracy curve).</param>
+    /// <param name="points">Distance (game units) and percent.</param>
+    /// <returns>Null, or why the points cannot be used.</returns>
+    public string? SetLandingPercentCurve(bool touchdown, IReadOnlyList<CurvePoint> points)
+    {
+        ScoreCurve? current = touchdown ? TouchdownCurve : Comm.GetCurve(ScoreCurveKind.LandingAccuracy);
+        if (current is null || TouchdownCurve is null)
+        {
+            return CoreText.T("The Gyrocopter has no separate touchdown curve.");
+        }
+
+        if (points.Any(p => p.Y is < 0 or > 100))
+        {
+            return CoreText.T("The percentages must be from 0 to 100.");
+        }
+
+        if (!points.Any(p => p.Y >= 100))
+        {
+            return CoreText.T("One point of each curve must have 100 % (the points of the row set the highest value).");
+        }
+
+        float max = current.Maximum;
+        var stored = points.Select(p => new CurvePoint(p.X, MathF.Round(p.Y / 100 * max * 1000) / 1000)).ToList();
+        if (MissionCurves.CheckPoints(stored) is { } problem)
+        {
+            return problem;
+        }
+
+        if (touchdown)
+        {
+            Settings.TouchdownCurve = stored;
+        }
+        else
+        {
+            Comm.SetCurve(ScoreCurveKind.LandingAccuracy, ScoreCurve.Create(stored));
+        }
+
+        Touch();
+        return null;
+    }
+
+    /// <summary>The landing values the editor offers for this mission (pad radius if it has landing pads, the vehicle's speeds).</summary>
+    public IReadOnlyList<LandingValue> LandingValuesShown =>
+        [.. (LandingValues.UsesPads(Vehicle) && Comm.GetObjectCount(MissionObjectKind.LandingPad) > 0 ? [LandingValue.PadRadius] : Array.Empty<LandingValue>()),
+         .. LandingValues.SpeedsOf(Vehicle)];
+
+    /// <summary>A landing value of this mission (stored form): its setting, or the original.</summary>
+    public float LandingValueOf(LandingValue value) => LandingValues.Effective(Settings, value);
+
+    /// <summary>Changes a landing value (stored form); the original value removes the setting.</summary>
+    public void SetLandingValue(LandingValue value, float stored)
+    {
+        if (MathF.Abs(stored - LandingValues.Original(value)) < 0.0005f)
+        {
+            Settings.Landing.Remove(value);
+        }
+        else
+        {
+            Settings.Landing[value] = stored;
+        }
+    }
+
+    /// <summary>The widths of the runways (game units): the settings, or the mission file's.</summary>
+    public IReadOnlyList<float> RunwayWidths
+    {
+        get
+        {
+            IReadOnlyList<float> file = Mission.File.RunwayWidths;
+            return file.Select((w, i) => Settings.RunwayWidths is { } set && i < set.Count ? set[i] : w).ToList();
+        }
+    }
+
+    /// <summary>Changes the width of a runway (game units).</summary>
+    public void SetRunwayWidth(int index, float width)
+    {
+        IReadOnlyList<float> file = Mission.File.RunwayWidths;
+        if (index < 0 || index >= file.Count)
+        {
+            return;
+        }
+
+        List<float> widths = [.. RunwayWidths];
+        widths[index] = Math.Max(0, width);
+        Settings.RunwayWidths = widths.SequenceEqual(file) ? null : widths;
     }
 
     /// <summary>Changes the "Land now" time (0 = off).</summary>
@@ -472,8 +626,24 @@ public sealed class MissionDraft
             && a.UnlimitedFuel == other.UnlimitedFuel
             && a.HardEndZero == other.HardEndZero
             && a.HardEndJingle == other.HardEndJingle
+            && (a.TouchdownCurve ?? []).SequenceEqual(other.TouchdownCurve ?? []) && (a.TouchdownCurve is null) == (other.TouchdownCurve is null)
+            && a.Landing.Count == other.Landing.Count && a.Landing.All(p => other.Landing.TryGetValue(p.Key, out float v) && v == p.Value)
+            && (a.RunwayWidths ?? []).SequenceEqual(other.RunwayWidths ?? []) && (a.RunwayWidths is null) == (other.RunwayWidths is null)
             && (a.Conditions is null ? other.Conditions is null : a.Conditions.SameAs(other.Conditions))
             && a.TextPoints.Count == other.TextPoints.Count
             && a.TextPoints.All(p => other.TextPoints.TryGetValue(p.Key, out int v) && v == p.Value);
     }
+}
+
+/// <summary>What a crash gives in a mission.</summary>
+public enum CrashScoring
+{
+    /// <summary>As the original game: objects, deductions, altitude and distance.</summary>
+    Original,
+
+    /// <summary>The time points count too (with the time of the crash).</summary>
+    TimePoints,
+
+    /// <summary>0 points.</summary>
+    Zero,
 }

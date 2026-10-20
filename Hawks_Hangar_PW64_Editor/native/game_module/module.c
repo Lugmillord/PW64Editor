@@ -74,6 +74,7 @@ typedef __builtin_va_list va_list;
 #define FLAG_LIVE         16u /* current values during missions (header field live) */
 #define FLAG_REQUIRE_PAK  32u /* stop with a message without the Expansion Pak */
 #define FLAG_GOAL_OBJECTS 64u /* game patch "goal objects": hopper goals and ball targets always count */
+#define FLAG_LANDING     128u /* a mission changes a landing: pad radius and speed limits are set in every flight frame */
 
 /* Values of the live display (header field live). */
 #define LIVE_DISTANCE   1u /* distance flown */
@@ -121,7 +122,12 @@ typedef struct {
 #define COND_FUEL       8u /* Rocket Belt, Gyrocopter: the fuel never runs out */
 #define COND_END_SCORED 16u /* hard end time reached: scored like a flight that ends in the air */
 #define COND_END_ZERO   32u /* hard end time reached: 0 points */
-#define COND_POINTS (COND_CRASH_ZERO | COND_ALTITUDE | COND_DISTANCE) /* flags about the points */
+#define COND_CRASH_TIME 64u /* after a crash the time points count too (time of the crash) */
+#define COND_TOUCHDOWN 128u /* Gyrocopter: own curve for the touchdown point (entry +0x18) */
+#define COND_POINTS (COND_CRASH_ZERO | COND_ALTITUDE | COND_DISTANCE | COND_CRASH_TIME) /* flags about the points */
+
+#define LANDING_PAD_RADIUS 1u /* entry +0x6C: radius of the landing pads */
+#define LANDING_LIMITS     2u /* entry +0x70: speed limits of the vehicle */
 
 /* True if an entry has conditions for the points (an entry may only be there for the fuel). */
 #define HAS_POINT_CONDITIONS(c) (((c)->flags & COND_POINTS) || has_required(c))
@@ -140,7 +146,13 @@ typedef struct {
     u32 altitude; /* +0x0C f32 bits, game units above sea level */
     u32 distance; /* +0x10 f32 bits, game units */
     u8 hardEndMusic; /* +0x14 jingle when the hard end time is reached (music number), 0 = none */
-    u8 reserved[DATA_ENTRY_SIZE - 0x15];
+    u8 landing;      /* +0x15 LANDING_... */
+    u8 pad16[2];
+    u8 touchdown[0x54]; /* +0x18 curve of the touchdown point (s32 count, 10 x {f32 x, f32 y}), like the mission file */
+    u32 padRadius;   /* +0x6C f32 bits, game units */
+    u32 limits[4];   /* +0x70 f32 bits: HG landing vertical/forward, good vertical/forward (km/h); GC crash, crash
+                        beside a pad; RB crash, hard landing, hard landing sideways (units per second) */
+    u8 reserved[DATA_ENTRY_SIZE - 0x80];
 } Condition;
 
 #define gConditions ((const Condition *)(DATA_AREA + 0x100))
@@ -815,6 +827,7 @@ static s32 units_to_meters(s32 bits) {
 /* The player's flight data (Unk80362690_Unk0 of the active player): distance flown at +0x0C,
    highest altitude at +0x10, position matrix at +0x2C (x, y, z at +0x5C, +0x60, +0x64). */
 #define GAME_STATE (*(u8 *volatile *)0x80362690) /* D_80362690 */
+#define GAME_RESULT (*(u8 *volatile *)0x8034FBD0) /* D_8034FBD0: the flight result (crash at +0x3C) */
 static u8 *player_flight(void) {
     u8 *state = GAME_STATE;
     if (state == 0) {
@@ -859,17 +872,32 @@ static int has_required(const Condition *c) {
 #define SCORE_IN_THE_AIR 0x3FFF8u /* everything but landing accuracy (1, 2) and impact (4) */
 #define SCORE_NO_LANDING 0xF7F8u  /* the vehicles' flags after a flight without a good landing */
 
+/* The time of the crash of the current flight (f32 bits, the vehicle's flight time at the impact), set by
+   module_flight_frame; sImpactSeen: the vehicle has hit something and is tumbling or has crashed. */
+static u32 sCrashTime;
+static int sCrashTimeSet;
+static int sImpactSeen;
+
 s32 module_conditions(u8 *result) {
     const Condition *c = current_condition();
     u32 *flags = (u32 *)result;
     u8 *state = GAME_STATE;
-    int crashed = result[0x3C] != 0;
+    /* A crash: marked by the game, or an impact while the vehicle still tumbles (the hard end time can come
+       first; the game would then score it like a flight without a crash). */
+    int crashed = result[0x3C] != 0 || sImpactSeen;
     int hardEnd = state != 0 && state[0xA1] != 0;
     u32 i;
     int met = 1;
 
     message("Scoring: flags 0x%X%s%s%s.\n", *flags, crashed ? ", crash" : "", hardEnd ? ", hard end time" : "",
             GAME_TASK_GOAL() ? ", goal reached" : "");
+
+    /* The hard end time came while the vehicle tumbled after an impact: scored as the crash it is. */
+    if (crashed && result[0x3C] == 0) {
+        result[0x3C] = 1;
+        *flags = 0x3F7F8u;
+        message("Crash before the hard end time: scored as a crash.\n");
+    }
 
     /* Hard end time (the game has set the flags to "objects only"): per mission 0 points or
        scored like a flight that ends in the air. A crash keeps the crash rules. */
@@ -908,6 +936,16 @@ s32 module_conditions(u8 *result) {
         message("Conditions: crash, 0 points.\n");
         *flags = 0;
         return 0;
+    }
+    /* Time points after a crash: the time curve gets the time of the crash (recorded in the flight frame;
+       the game would use the time the wreck came to rest). The conditions below still apply. */
+    if ((c->flags & COND_CRASH_TIME) && crashed) {
+        *flags |= SCORE_TIME;
+        if (sCrashTimeSet) {
+            *(u32 *)(result + 0x1C) = sCrashTime;
+        }
+        message("Conditions: crash at %d.%d s, time points count.\n", float_to_fixed8((s32) * (u32 *)(result + 0x1C)) >> 8,
+                ((float_to_fixed8((s32) * (u32 *)(result + 0x1C)) & 0xFF) * 10) >> 8);
     }
     for (i = 0; i < OBJECT_TYPES; i++) {
         s32 cleared, total, need;
@@ -986,8 +1024,8 @@ void module_hard_end(u8 *state) {
     const Condition *c;
     state[0xA1] = 1;
     c = hard_end_setting();
-    if (c == 0) {
-        return;
+    if (c == 0 || sImpactSeen) {
+        return; /* after an impact the mission ends as a crash: no jingle */
     }
     if (c->hardEndMusic != 0) {
         GAME_SND_SET_MUSIC(c->hardEndMusic);
@@ -1047,6 +1085,13 @@ void module_hud_text(void *hud) {
     GAME_HUD_START_TEXT(hud);
     c = hard_end_setting();
     if (c == 0 || state == 0 || gHeader.countdown[0][0] == 0) {
+        return;
+    }
+    /* After the impact of a crash the flight is over: no countdown, no sounds. The vehicle first tumbles for
+       3.75 seconds (flight state 3, the clock keeps running) before the game marks the crash (state 4,
+       result +0x3C); state 5 is the end of a landing. */
+    if (sImpactSeen || (GAME_RESULT != 0 && GAME_RESULT[0x3C] != 0)) {
+        sCountdownShown = -1;
         return;
     }
     if (state[0xA1]) {
@@ -1362,9 +1407,105 @@ static void live_update(u8 *flight) {
    highest altitude and the end of the flight). All arguments are passed on as they came. */
 #define GAME_FLIGHT_FRAME ((void (*)(u32, u32, u32, u32, u32, u32, u32, u32, u32, u32, u32))0x802EDAF0)
 #define FLOAT_1 0x3F800000u
+/* ------------------------------------------------------------------ landing values */
+
+#define GAME_PAD_COUNT   (*(volatile u8 *)0x8036C2B9)  /* gLandingPadCount */
+#define GAME_PADS        ((volatile u8 *)0x8036C2E8)   /* gLandingPads[14], 0x18 bytes: radius +0x10, used +0x14 */
+#define LIVE_LANDING     ((volatile u32 *)(DATA_AREA + 0x40)) /* the Hang Glider's four speed limits (patched code loads them) */
+#define FLOAT_30   0x41F00000u
+#define FLOAT_50   0x42480000u
+#define FLOAT_15   0x41700000u
+
+/* The constants of the Gyrocopter's and the Rocket Belt's landing (RAM copies of the game's data). */
+#define GC_CRASH        (*(volatile u32 *)0x803537C8) /* 12.698 */
+#define GC_CRASH_OFFPAD (*(volatile u32 *)0x803537CC) /* 7.937 */
+#define RB_CRASH_A      (*(volatile u32 *)0x80355434) /* 21.8 */
+#define RB_CRASH_B      (*(volatile u32 *)0x8035543C) /* 21.8 */
+#define RB_HARD         (*(volatile u32 *)0x80355444) /* 7.93, speed into the ground */
+#define RB_HARD_SIDE_A  (*(volatile u32 *)0x80355448) /* 7.93, sideways */
+#define RB_HARD_SIDE_B  (*(volatile u32 *)0x80355458) /* 7.93, sideways */
+
+static void landing_defaults(void) {
+    LIVE_LANDING[0] = FLOAT_50;
+    LIVE_LANDING[1] = FLOAT_50;
+    LIVE_LANDING[2] = FLOAT_15;
+    LIVE_LANDING[3] = FLOAT_15;
+}
+
+/* Sets the landing values of the mission being flown (or the original ones) in every flight frame: the radius
+   of the landing pads (set to 30 when a mission loads), the Hang Glider's speed limits (read by its patched
+   landing code), the Gyrocopter's and the Rocket Belt's constants. */
+static void landing_values(const Condition *c, u32 vehicle) {
+    u32 radius = c != 0 && (c->landing & LANDING_PAD_RADIUS) ? c->padRadius : FLOAT_30;
+    int own = c != 0 && (c->landing & LANDING_LIMITS);
+    u32 n = GAME_PAD_COUNT;
+    u32 i;
+    if (n > 14) {
+        n = 14;
+    }
+    for (i = 0; i < n; i++) {
+        if (GAME_PADS[i * 0x18 + 0x14]) {
+            *(volatile u32 *)(GAME_PADS + i * 0x18 + 0x10) = radius;
+        }
+    }
+
+    if (own && vehicle == 0) {
+        for (i = 0; i < 4; i++) {
+            LIVE_LANDING[i] = c->limits[i];
+        }
+    } else {
+        landing_defaults();
+    }
+
+    GC_CRASH = own && vehicle == 2 ? c->limits[0] : 0x414B2B02u;
+    GC_CRASH_OFFPAD = own && vehicle == 2 ? c->limits[1] : 0x40FDFBE7u;
+    RB_CRASH_A = RB_CRASH_B = own && vehicle == 1 ? c->limits[0] : 0x41AE6666u;
+    RB_HARD = own && vehicle == 1 ? c->limits[1] : 0x40FDC28Fu;
+    RB_HARD_SIDE_A = RB_HARD_SIDE_B = own && vehicle == 1 ? c->limits[2] : 0x40FDC28Fu;
+}
+
+/* The scoring function evaluates the touchdown point of the Gyrocopter (landedDist) through here: with an own
+   curve in the mission's entry that one, otherwise the landing accuracy curve (as the original). The module is
+   built without the FPU, so a small stub keeps the float argument (a1) and the result (f0) of func_80313F08. */
+__attribute__((used)) const void *module_touchdown_select(const void *curve) {
+    const Condition *c = current_condition();
+    return c != 0 && (c->flags & COND_TOUCHDOWN) ? (const void *)c->touchdown : curve;
+}
+
+__asm__(".section .text\n"
+        ".set push\n"
+        ".set noreorder\n"
+        ".globl module_touchdown_curve\n"
+        "module_touchdown_curve:\n"
+        "    addiu $sp, $sp, -24\n"
+        "    sw $ra, 20($sp)\n"
+        "    jal module_touchdown_select\n"
+        "    sw $a1, 16($sp)\n"
+        "    lw $a1, 16($sp)\n"
+        "    lw $ra, 20($sp)\n"
+        "    move $a0, $v0\n"
+        "    j 0x80313F08\n"
+        "    addiu $sp, $sp, 24\n"
+        ".set pop\n");
+
 void module_flight_frame(u32 a0, u32 a1, u32 a2, u32 a3, u32 a4, u32 a5, u32 a6, u32 a7, u32 a8, u32 a9, u32 a10) {
     const Condition *c;
+    u8 *result;
     GAME_FLIGHT_FRAME(a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10);
+
+    /* The time of a crash: the impact (flight state a10 = 3: the vehicle tumbles for 3.75 s; 4: crashed),
+       a6 is the vehicle's flight time of this frame. A new flight (state 1 or 2 without a crash) clears it. */
+    result = GAME_RESULT;
+    if (a10 == 3 || a10 == 4 || (result != 0 && result[0x3C] != 0)) {
+        if (!sCrashTimeSet) {
+            sCrashTimeSet = 1;
+            sCrashTime = a6;
+        }
+        sImpactSeen = 1;
+    } else if (a10 == 1 || a10 == 2) {
+        sCrashTimeSet = 0;
+        sImpactSeen = 0;
+    }
 
     /* Unlimited fuel: fill the tank again after each frame (a1 is the vehicle's matrix at +0x10;
        the fuel is at +0xF8 for the Rocket Belt and +0xD8 for the Gyrocopter, 1.0 = full). */
@@ -1377,6 +1518,9 @@ void module_flight_frame(u32 a0, u32 a1, u32 a2, u32 a3, u32 a4, u32 a5, u32 a6,
         } else if (vehicle == 2) {
             *(u32 *)(data + 0xD8) = FLOAT_1;
         }
+    }
+    if (gHeader.flags & FLAG_LANDING) {
+        landing_values(c, *(u16 *)((u8 *)a0 + 2));
     }
     if (gHeader.flags & FLAG_LIVE) {
         live_update((u8 *)a0);
@@ -1593,6 +1737,9 @@ void module_init(s32 arg) {
     GAME_WRITEBACK_DCACHE(); /* so the DMA cannot be overwritten by this line later */
     if (gHeader.dataSize != 0 && gHeader.dataSize <= DATA_AREA_END - DATA_AREA) {
         GAME_MEDIA_COPY((void *)DATA_AREA, gHeader.dataRom, gHeader.dataSize);
+    }
+    if (gHeader.flags & FLAG_LANDING) {
+        landing_defaults(); /* the Hang Glider's patched landing code reads them from the first flight on */
     }
 
     if (!(gHeader.flags & FLAG_DEBUG)) {

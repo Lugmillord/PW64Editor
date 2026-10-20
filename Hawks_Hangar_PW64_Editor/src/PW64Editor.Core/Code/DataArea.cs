@@ -20,8 +20,17 @@ namespace PW64Editor.Core.Code;
 ///           16 hard end time scored (like a flight ending in the air), 32 hard end time gives 0 points
 /// +0x04 u8[7] required objects per type (0 = no, 0xFF = all, otherwise at least this many)
 /// +0x0C f32 minimum altitude (game units)  +0x10 f32 minimum distance (game units)
+/// +0x03 flags (continued): 64 time points after a crash, 128 own curve of the Gyrocopter's touchdown point
 /// +0x14 u8  jingle when the hard end time is reached (music number, 0 = none)
-/// +0x15 ... reserved (0)
+/// +0x15 u8  landing flags: 1 pad radius, 2 speed limits of the vehicle
+/// +0x18 curve (0x54 bytes, as in the mission file): the Gyrocopter's touchdown point
+/// +0x6C f32 radius of the landing pads (game units)
+/// +0x70 f32[4] speed limits of the vehicle (LandingValues.SpeedsOf; HG km/h, GC and RB units per second)
+/// +0x80 ... reserved (0)
+/// </code>
+/// <para>The header holds behind its first 0x10 bytes the values the game code reads while flying
+/// (written by the module in every flight frame, see <see cref="LiveLandingAddress"/>).</para>
+/// <code>
 /// </code>
 /// <para><b>ROM</b>: the image lies in the <see cref="RomReserve"/> bytes in front of the game module
 /// at the end of the ROM; the module header holds its offset and size.</para>
@@ -51,6 +60,16 @@ public static class DataArea
 
     /// <summary>Room in the ROM for the image, in front of the game module.</summary>
     public const int RomReserve = 0x10000;
+
+    /// <summary>
+    /// RAM address of the Hang Glider's four current speed limits (f32: landing vertical, landing forward,
+    /// good landing vertical, good landing forward, km/h), which its patched landing code loads instead of
+    /// the immediates 50 and 15. The module writes the mission's values (or the original ones) there.
+    /// </summary>
+    public const uint LiveLandingAddress = Start + 0x40;
+
+    /// <summary>Offset of the touchdown curve in an entry.</summary>
+    public const int TouchdownCurveOffset = 0x18;
 
     /// <summary>RAM address of the first mission entry.</summary>
     public const uint MissionTableAddress = Start + HeaderSize;
@@ -93,7 +112,34 @@ public static class DataArea
         entry[2] = c.Test;
         entry[3] = (byte)((c.CrashGivesZero ? 1 : 0) | (c.MinimumAltitude is not null ? 2 : 0)
             | (c.MinimumDistance is not null ? 4 : 0) | (c.UnlimitedFuel ? 8 : 0)
-            | (c.HardEnd == HardEndScoring.Scored ? 16 : 0) | (c.HardEnd == HardEndScoring.Zero ? 32 : 0));
+            | (c.HardEnd == HardEndScoring.Scored ? 16 : 0) | (c.HardEnd == HardEndScoring.Zero ? 32 : 0)
+            | (c.CrashTimePoints ? 64 : 0) | (c.TouchdownCurve is not null ? 128 : 0));
+        entry[0x15] = (byte)((c.PadRadius is not null ? 1 : 0) | (c.VehicleLimits.Count > 0 ? 2 : 0));
+        if (c.TouchdownCurve is { } curve)
+        {
+            if (curve.Count is < 1 or > Missions.ScoreCurve.MaxPoints)
+            {
+                throw new InvalidDataException("A touchdown curve needs 1 to 10 points.");
+            }
+
+            BinaryPrimitives.WriteInt32BigEndian(entry[TouchdownCurveOffset..], curve.Count);
+            for (int i = 0; i < curve.Count; i++)
+            {
+                BinaryPrimitives.WriteSingleBigEndian(entry[(TouchdownCurveOffset + 4 + (i * 8))..], curve[i].X);
+                BinaryPrimitives.WriteSingleBigEndian(entry[(TouchdownCurveOffset + 8 + (i * 8))..], curve[i].Y);
+            }
+        }
+
+        BinaryPrimitives.WriteSingleBigEndian(entry[0x6C..], c.PadRadius ?? 0);
+        if (c.VehicleLimits.Count > 4)
+        {
+            throw new InvalidDataException("A vehicle has at most four speed limits.");
+        }
+
+        for (int i = 0; i < c.VehicleLimits.Count; i++)
+        {
+            BinaryPrimitives.WriteSingleBigEndian(entry[(0x70 + (i * 4))..], c.VehicleLimits[i]);
+        }
         for (int t = 0; t < GameModule.ObjectTypes; t++)
         {
             entry[4 + t] = t < c.Required.Count ? c.Required[t] : (byte)0;
@@ -140,9 +186,39 @@ public static class DataArea
         float altitude = BinaryPrimitives.ReadSingleBigEndian(entry[0x0C..]);
         float distance = BinaryPrimitives.ReadSingleBigEndian(entry[0x10..]);
         HardEndScoring hardEnd = (flags & 32) != 0 ? HardEndScoring.Zero : (flags & 16) != 0 ? HardEndScoring.Scored : HardEndScoring.Retail;
+        bool full = entry.Length >= 0x80; // entries of module versions before 6 end at 0x14
+        byte landing = full ? entry[0x15] : (byte)0;
+        List<Missions.CurvePoint>? curve = null;
+        if (full && (flags & 128) != 0)
+        {
+            int count = Math.Clamp(BinaryPrimitives.ReadInt32BigEndian(entry[TouchdownCurveOffset..]), 0, Missions.ScoreCurve.MaxPoints);
+            curve = [];
+            for (int i = 0; i < count; i++)
+            {
+                curve.Add(new Missions.CurvePoint(BinaryPrimitives.ReadSingleBigEndian(entry[(TouchdownCurveOffset + 4 + (i * 8))..]),
+                    BinaryPrimitives.ReadSingleBigEndian(entry[(TouchdownCurveOffset + 8 + (i * 8))..])));
+            }
+        }
+
+        var limits = new List<float>();
+        if ((landing & 2) != 0)
+        {
+            int count = Missions.LandingValues.SpeedsOf((SaveGame.Vehicle)entry[0]).Count;
+            for (int i = 0; i < count; i++)
+            {
+                limits.Add(BinaryPrimitives.ReadSingleBigEndian(entry[(0x70 + (i * 4))..]));
+            }
+        }
+
         return new GameModuleCondition(entry[1], entry[0], entry[2], (flags & 1) != 0,
             (flags & 2) != 0 ? altitude : null, required, (flags & 4) != 0 ? distance : null,
-            UnlimitedFuel: (flags & 8) != 0, HardEnd: hardEnd, HardEndMusic: entry.Length > 0x14 ? entry[0x14] : (byte)0);
+            UnlimitedFuel: (flags & 8) != 0, HardEnd: hardEnd, HardEndMusic: entry.Length > 0x14 ? entry[0x14] : (byte)0)
+        {
+            CrashTimePoints = full && (flags & 64) != 0,
+            TouchdownCurve = curve,
+            PadRadius = (landing & 1) != 0 ? BinaryPrimitives.ReadSingleBigEndian(entry[0x6C..]) : null,
+            VehicleLimits = limits,
+        };
     }
 
     /// <summary>

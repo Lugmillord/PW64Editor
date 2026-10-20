@@ -214,6 +214,11 @@ public static class MissionReport
                 parts.Add("\"please land\" when reached");
             }
 
+            if (conditions.CrashTimePoints)
+            {
+                parts.Add("time points also after a crash");
+            }
+
             Line(text, $"Conditions: {(parts.Count == 0 ? "none" : string.Join("; ", parts))}");
             MissionCondition? retail = conditions.RetailMode(comm);
             Line(text, $"  checked by: {(retail is { } mode ? $"the game (condition {mode})" : "the game module")}");
@@ -225,7 +230,7 @@ public static class MissionReport
             if (moduleConditions.FirstOrDefault(c => c.Id == mission.Id) is { Entry: { } entry })
             {
                 Line(text, $"  module entry: vehicle {entry.Vehicle}, class {entry.Class}, test {entry.Test}, crash zero {YesNo(entry.CrashGivesZero)}, "
-                    + $"altitude {(entry.MinimumAltitude is { } a ? Num(a) : "-")}, distance {(entry.MinimumDistance is { } dd ? Num(dd) : "-")}, unlimited fuel {YesNo(entry.UnlimitedFuel)}, hard end {entry.HardEnd} (jingle {entry.HardEndMusic}), required [{string.Join(" ", entry.Required.Select(b => b.ToString(CultureInfo.InvariantCulture)))}]");
+                    + $"crash time points {YesNo(entry.CrashTimePoints)}, landing values {YesNo(entry.HasLandingValues)}, altitude {(entry.MinimumAltitude is { } a ? Num(a) : "-")}, distance {(entry.MinimumDistance is { } dd ? Num(dd) : "-")}, unlimited fuel {YesNo(entry.UnlimitedFuel)}, hard end {entry.HardEnd} (jingle {entry.HardEndMusic}), required [{string.Join(" ", entry.Required.Select(b => b.ToString(CultureInfo.InvariantCulture)))}]");
             }
         }
         else
@@ -233,7 +238,8 @@ public static class MissionReport
             Line(text, "Conditions: those of the condition byte (not changed in the editor)");
             if (moduleConditions.FirstOrDefault(c => c.Id == mission.Id) is { Entry: { } fuelEntry })
             {
-                Line(text, $"  module entry (no conditions): unlimited fuel {YesNo(fuelEntry.UnlimitedFuel)}, hard end {fuelEntry.HardEnd} (jingle {fuelEntry.HardEndMusic})");
+                Line(text, $"  module entry (no conditions): unlimited fuel {YesNo(fuelEntry.UnlimitedFuel)}, hard end {fuelEntry.HardEnd} (jingle {fuelEntry.HardEndMusic}), "
+                    + $"landing values {YesNo(fuelEntry.HasLandingValues)}");
             }
         }
 
@@ -259,6 +265,23 @@ public static class MissionReport
             if (DemoButton.HasButton(mission.Id))
             {
                 Line(text, $"\"View Demo\" button: {(settings.HideDemo ? "hidden" : "shown")}");
+            }
+
+            if (settings.TouchdownCurve is { } touchdown)
+            {
+                Line(text, $"Touchdown curve (Gyrocopter): {string.Join(" ", touchdown.Select(p => $"({Num(p.X)}, {Num(p.Y)})"))}");
+            }
+
+            foreach ((LandingValue value, float stored) in settings.Landing.OrderBy(l => l.Key))
+            {
+                Line(text, $"Landing: {value} {Num(stored)} (shown {Num(LandingValues.Shown(value, stored))} {LandingValues.Unit(value)}, "
+                    + $"original {Num(LandingValues.Shown(value, LandingValues.Original(value)))})");
+            }
+
+            if (settings.RunwayWidths is { } widths)
+            {
+                Line(text, $"Runway widths: {string.Join(", ", widths.Select(w => $"{Num(w)} units = {Num(GameUnits.ToMeters(w))} m"))} "
+                    + $"(mission file: {string.Join(", ", mission.File.RunwayWidths.Select(Num))})");
             }
 
             Line(text, $"Texts written by the editor: {YesNo(settings.GenerateTexts)}, footnote automatic: "
@@ -377,6 +400,11 @@ public static class MissionReport
             if (s.StartFuel is not null || s.UnlimitedFuel)
             {
                 yield return "fuel";
+            }
+
+            if (s.TouchdownCurve is not null || s.Landing.Count > 0 || s.RunwayWidths is not null)
+            {
+                yield return "landing";
             }
         }
     }

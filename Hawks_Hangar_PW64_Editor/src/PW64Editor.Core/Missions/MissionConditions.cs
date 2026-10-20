@@ -38,6 +38,12 @@ public sealed class MissionConditions
     /// <summary>A crash gives 0 points in total.</summary>
     public bool CrashGivesZero { get; set; }
 
+    /// <summary>
+    /// After a crash the time points count too (the time of the crash goes into the time curve; the
+    /// conditions of the time points still apply). Excludes <see cref="CrashGivesZero"/>. Game module only.
+    /// </summary>
+    public bool CrashTimePoints { get; set; }
+
     /// <summary>Time points only if this altitude was reached; null: no altitude condition.</summary>
     public float? MinimumAltitude { get; set; }
 
@@ -56,12 +62,12 @@ public sealed class MissionConditions
 
     /// <summary>True if <see cref="LandWhenReached"/> is possible with these conditions in this mission.</summary>
     public bool CanLandWhenReached(MissionComm comm) =>
-        !CrashGivesZero && MinimumAltitude is null && MinimumDistance is null && Required.Count == 1
+        !CrashGivesZero && !CrashTimePoints && MinimumAltitude is null && MinimumDistance is null && Required.Count == 1
         && Required.First() is var (type, count) && type != ConditionObject.Balloons && count != All
         && Enum.GetValues<ConditionObject>().Where(t => t != ConditionObject.Balloons && comm.GetObjectCount(Kind(t)) > 0).SequenceEqual([type]);
 
     /// <summary>True if no condition is set.</summary>
-    public bool IsEmpty => !CrashGivesZero && MinimumAltitude is null && MinimumDistance is null && Required.Count == 0;
+    public bool IsEmpty => !CrashGivesZero && !CrashTimePoints && MinimumAltitude is null && MinimumDistance is null && Required.Count == 0;
 
     /// <summary>True if the time points have a condition.</summary>
     public bool HasTimeConditions => MinimumAltitude is not null || MinimumDistance is not null || Required.Count > 0;
@@ -94,6 +100,7 @@ public sealed class MissionConditions
     public MissionConditions Clone() => new()
     {
         CrashGivesZero = CrashGivesZero,
+        CrashTimePoints = CrashTimePoints,
         MinimumAltitude = MinimumAltitude,
         MinimumDistance = MinimumDistance,
         LandWhenReached = LandWhenReached,
@@ -104,6 +111,7 @@ public sealed class MissionConditions
     public bool SameAs(MissionConditions? other) =>
         other is not null
         && CrashGivesZero == other.CrashGivesZero
+        && CrashTimePoints == other.CrashTimePoints
         && LandWhenReached == other.LandWhenReached
         && MinimumAltitude == other.MinimumAltitude
         && MinimumDistance == other.MinimumDistance
@@ -154,6 +162,12 @@ public sealed class MissionConditions
         if (IsEmpty)
         {
             return MissionCondition.None;
+        }
+
+        // The retail game never gives time points after a crash.
+        if (CrashTimePoints)
+        {
+            return null;
         }
 
         if (CrashGivesZero)
@@ -222,6 +236,9 @@ public sealed class MissionConditions
             required[(int)type] = count == All ? GameModule.RequiredAll : (byte)Math.Clamp(count, 1, 254);
         }
 
-        return new GameModuleCondition((byte)id.Class, (byte)id.Vehicle, (byte)id.Test, CrashGivesZero, MinimumAltitude, required, MinimumDistance);
+        return new GameModuleCondition((byte)id.Class, (byte)id.Vehicle, (byte)id.Test, CrashGivesZero, MinimumAltitude, required, MinimumDistance)
+        {
+            CrashTimePoints = CrashTimePoints && !CrashGivesZero,
+        };
     }
 }

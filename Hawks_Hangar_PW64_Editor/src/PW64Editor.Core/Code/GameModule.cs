@@ -32,8 +32,26 @@ public sealed record GameModuleCondition(byte Class, byte Vehicle, byte Test, bo
     IReadOnlyList<byte> Required, float? MinimumDistance = null, bool UnlimitedFuel = false,
     HardEndScoring HardEnd = HardEndScoring.Retail, byte HardEndMusic = 0)
 {
+    /// <summary>After a crash the time points count too, with the time of the crash (conditions still apply).</summary>
+    public bool CrashTimePoints { get; init; }
+
+    /// <summary>Gyrocopter: the curve of the touchdown point (game form), or null for the landing accuracy curve.</summary>
+    public IReadOnlyList<Missions.CurvePoint>? TouchdownCurve { get; init; }
+
+    /// <summary>Radius of the landing pads for a good landing (game units), or null for the original 30.</summary>
+    public float? PadRadius { get; init; }
+
+    /// <summary>
+    /// The speed limits of the mission's vehicle in the order of <see cref="Missions.LandingValues.SpeedsOf"/>
+    /// (stored form, unset ones with the original value), or empty for the original ones.
+    /// </summary>
+    public IReadOnlyList<float> VehicleLimits { get; init; } = [];
+
     /// <summary>True if the entry has conditions for the points (otherwise the game's own condition counts).</summary>
-    public bool HasConditions => CrashGivesZero || MinimumAltitude is not null || MinimumDistance is not null || Required.Any(r => r != 0);
+    public bool HasConditions => CrashGivesZero || CrashTimePoints || MinimumAltitude is not null || MinimumDistance is not null || Required.Any(r => r != 0);
+
+    /// <summary>True if the entry changes a landing (touchdown curve, pad radius or speed limits).</summary>
+    public bool HasLandingValues => TouchdownCurve is not null || PadRadius is not null || VehicleLimits.Count > 0;
 }
 
 /// <summary>How a mission is scored when its hard end time is reached (game module).</summary>
@@ -177,6 +195,9 @@ public static class GameModule
     /// <summary>Header flag: the game patch "goal objects" is applied.</summary>
     private const uint FlagGoalObjects = 64;
 
+    /// <summary>Header flag: a mission changes the pad radius or the speed limits of a landing (set in every flight frame).</summary>
+    private const uint FlagLanding = 128;
+
     /// <summary>jal hudWarningText.</summary>
     private const uint HudWarningCall = 0x0C0C766E;
 
@@ -229,6 +250,53 @@ public static class GameModule
     /// <summary>"All objects of this type" in <see cref="GameModuleCondition.Required"/>.</summary>
     public const byte RequiredAll = 0xFF;
 
+    /// <summary>ROM offset of "jal func_80313F08" for the touchdown point (landedDist, result +0x0C) in the scoring function.</summary>
+    public const int TouchdownCurveCallRomOffset = 0xB2C88;
+
+    /// <summary>jal func_80313F08 (evaluates a score curve).</summary>
+    private const uint CurveCall = 0x0C0C4FC2;
+
+    /// <summary>
+    /// The constants of the Gyrocopter's and the Rocket Belt's landing (ROM offset, original f32 bits): the module
+    /// writes the mission's values into their RAM copies (ROM + 0x80278AD0) in every flight frame.
+    /// </summary>
+    public static readonly IReadOnlyList<(int Offset, uint Original, string Name)> SpeedConstants =
+    [
+        (0xDACF8, 0x414B2B02, "Gyrocopter crash 12.698"),
+        (0xDACFC, 0x40FDFBE7, "Gyrocopter crash beside a pad 7.937"),
+        (0xDC964, 0x41AE6666, "Rocket Belt crash 21.8"),
+        (0xDC96C, 0x41AE6666, "Rocket Belt crash 21.8"),
+        (0xDC974, 0x40FDC28F, "Rocket Belt hard landing 7.93"),
+        (0xDC978, 0x40FDC28F, "Rocket Belt hard landing sideways 7.93"),
+        (0xDC988, 0x40FDC28F, "Rocket Belt hard landing sideways 7.93"),
+    ];
+
+    /// <summary>
+    /// The Hang Glider's landing check (hangGlider_802F3A80): "lui at, 0x4248 / 0x4170" and the "mtc1 at, fN" that use them
+    /// become "lui at, 0x801F" and "lwc1 fN, …(at)" from <see cref="DataArea.LiveLandingAddress"/> (landing vertical,
+    /// landing forward, good vertical, good forward).
+    /// </summary>
+    private static IEnumerable<WordPatch> HangGliderLimitPatches()
+    {
+        uint hi = (DataArea.LiveLandingAddress + 0x8000) >> 16;
+        uint lo = DataArea.LiveLandingAddress & 0xFFFF;
+        uint Lui() => 0x3C010000 | hi;
+        uint Lwc1(int ft, uint offset) => 0xC4200000 | ((uint)ft << 16) | ((lo + offset) & 0xFFFF);
+        string name = "Hang Glider landing speeds, hangGlider_802F3A80";
+        return
+        [
+            new WordPatch(name, 0x7B1F8, [0x3C014248], [Lui()]),
+            new WordPatch(name, 0x7B208, [0x44814000], [Lwc1(8, 0)]),
+            new WordPatch(name, 0x7B218, [0x44814000], [Lwc1(8, 0)]),
+            new WordPatch(name, 0x7B21C, [0x3C014248], [Lui()]),
+            new WordPatch(name, 0x7B230, [0x44815000], [Lwc1(10, 4)]),
+            new WordPatch(name, 0x7B2D0, [0x3C014170], [Lui()]),
+            new WordPatch(name, 0x7B2D4, [0x44813000], [Lwc1(6, 8)]),
+            new WordPatch(name, 0x7B2D8, [0x3C014170], [Lui()]),
+            new WordPatch(name, 0x7B2EC, [0x44814000], [Lwc1(8, 12)]),
+        ];
+    }
+
     /// <summary>ROM offset of "jal taskGet_80346364" in the scoring function (func_8032B560).</summary>
     public const int ConditionModeCallRomOffset = 0xB2AE4;
 
@@ -266,7 +334,8 @@ public static class GameModule
         bool live = options.DebugOutput && options.Live != LiveValues.None;
         uint flags = (options.StartupInfo ? 1u : 0) | (options.GameMessages ? 2u : 0)
             | (options.DebugOutput ? 4u : 0) | (options.OnScreen ? 8u : 0) | (live ? 16u : 0)
-            | (options.RequireExpansionPak ? FlagRequirePak : 0) | (options.GoalObjects ? FlagGoalObjects : 0);
+            | (options.RequireExpansionPak ? FlagRequirePak : 0) | (options.GoalObjects ? FlagGoalObjects : 0)
+            | (options.Conditions.Any(c => c.PadRadius is not null || c.VehicleLimits.Count > 0) ? FlagLanding : 0);
         BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(FlagsOffset), flags);
         BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(LiveOffset), live ? (uint)options.Live : 0);
         if (options.RequirementMetText.Count > MetTextLength)
@@ -448,8 +517,11 @@ public static class GameModule
                 [ObjectsLeftCall], [CodeArea.Jal(GameModuleImage.TargetsLeftHookAddress)]));
         }
 
-        // Live values and unlimited fuel: the vehicles' flight frame goes through the module.
-        if ((options.DebugOutput && options.Live != LiveValues.None) || options.Conditions.Any(c => c.UnlimitedFuel))
+        // Live values, unlimited fuel, the time of a crash (also to stop the hard end countdown at the impact) and the
+        // landing values: the vehicles' flight frame goes through the module.
+        if ((options.DebugOutput && options.Live != LiveValues.None)
+            || options.Conditions.Any(c => c.UnlimitedFuel || c.CrashTimePoints || c.PadRadius is not null || c.VehicleLimits.Count > 0
+                || c.HardEnd != HardEndScoring.Retail))
         {
             foreach (uint call in FlightFrameCalls)
             {
@@ -465,6 +537,28 @@ public static class GameModule
             {
                 patches.Add(new WordPatch($"fuel gauge, hudDrawFuel call at 0x{call:X8}", (int)(call - 0x80278AD0),
                     [HudFuelCall], [CodeArea.Jal(GameModuleImage.HudFuelHookAddress)]));
+            }
+        }
+
+        // The Gyrocopter's own touchdown curve: the scoring function evaluates the touchdown point through the module.
+        if (options.Conditions.Any(c => c.TouchdownCurve is not null))
+        {
+            patches.Add(new WordPatch("touchdown curve, func_8032B560", TouchdownCurveCallRomOffset,
+                [CurveCall], [CodeArea.Jal(GameModuleImage.TouchdownCurveAddress)]));
+        }
+
+        // Speed limits of a landing: the Hang Glider loads them from the data area instead of its immediates; for the
+        // Gyrocopter and the Rocket Belt the module overwrites the game's constants, which are checked here.
+        if (options.Conditions.Any(c => c.Vehicle == 0 && c.VehicleLimits.Count > 0))
+        {
+            patches.AddRange(HangGliderLimitPatches());
+        }
+
+        if (options.Conditions.Any(c => c.Vehicle is 1 or 2 && c.VehicleLimits.Count > 0))
+        {
+            foreach ((int offset, uint original, string name) in SpeedConstants)
+            {
+                patches.Add(new WordPatch($"landing constant ({name})", offset, [original], [original]));
             }
         }
 

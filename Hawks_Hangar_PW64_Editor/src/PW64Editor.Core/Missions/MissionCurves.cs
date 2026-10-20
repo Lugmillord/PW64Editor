@@ -53,12 +53,16 @@ public static class MissionCurves
     /// The value of a curve as the score sheet shows it. The Gyrocopter multiplies its two landing
     /// measurements, which share the accuracy curve, so its shown value is the square of the curve's maximum.
     /// </summary>
-    public static int ShownPoints(ScoreCurveKind kind, Vehicle vehicle, ScoreCurve curve)
+    /// <param name="kind">The curve.</param>
+    /// <param name="vehicle">The vehicle.</param>
+    /// <param name="curve">The curve of the mission file.</param>
+    /// <param name="touchdown">The Gyrocopter's own touchdown curve, or null (it uses <paramref name="curve"/> twice).</param>
+    public static int ShownPoints(ScoreCurveKind kind, Vehicle vehicle, ScoreCurve curve, ScoreCurve? touchdown = null)
     {
         float max = curve.Maximum;
         return kind switch
         {
-            ScoreCurveKind.LandingAccuracy when vehicle == Vehicle.Gyrocopter => (int)((max * max) + 0.5f),
+            ScoreCurveKind.LandingAccuracy when vehicle == Vehicle.Gyrocopter => (int)((max * (touchdown?.Maximum ?? max)) + 0.5f),
             ScoreCurveKind.Time => (int)max,
             _ => (int)(max + 0.001f),
         };
@@ -84,6 +88,25 @@ public static class MissionCurves
 
         float factor = target / max;
         return ScoreCurve.Create(curve.Points.Select(p => new CurvePoint(p.X, Round(p.Y * factor))));
+    }
+
+    /// <summary>
+    /// The Gyrocopter's two landing curves with another number of shown points: both are scaled by the same
+    /// factor, so their shapes (and the share of each) stay.
+    /// </summary>
+    /// <returns>The new resting position curve and touchdown curve.</returns>
+    public static (ScoreCurve Resting, ScoreCurve Touchdown) WithShownPoints(ScoreCurve rest, ScoreCurve touchdown, int points)
+    {
+        float shown = rest.Maximum * touchdown.Maximum;
+        if (points <= 0 || shown <= 0)
+        {
+            ScoreCurve both = WithShownPoints(ScoreCurveKind.LandingAccuracy, Vehicle.Gyrocopter, rest, points);
+            return (both, both);
+        }
+
+        float factor = MathF.Sqrt(points / shown);
+        ScoreCurve Scale(ScoreCurve c) => ScoreCurve.Create(c.Points.Select(p => new CurvePoint(p.X, Round(p.Y * factor))));
+        return (Scale(rest), Scale(touchdown));
     }
 
     /// <summary>

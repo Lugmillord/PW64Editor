@@ -153,40 +153,20 @@
                         </StackPanel>
                         </Expander>
 
-                        <!-- Only for missions with altitude points. -->
-                        <Expander x:Name="AltitudePanel" Style="{StaticResource Section}">
-                            <Expander.Header><TextBlock Text="Altitude points" Style="{StaticResource SectionHeader}" /></Expander.Header>
-                            <StackPanel Margin="18,0,0,0">
-                            <TextBlock Style="{StaticResource Note}"
-                                       Text="The highest altitude of the flight gives the points of this curve. Between two points the points rise or fall evenly; below the first point the first one counts, above the last point the last one. Two points at the same altitude make a step. Altitudes are in meters above sea level, the number the HUD shows under &quot;SEA LEVEL&quot; (the altimeter shows the height above the ground): a flight from a tower or a mountain starts with that height." />
-                            <StackPanel x:Name="AltitudeCurvePanel" Margin="0,6,0,0" />
-                        </StackPanel>
-                        </Expander>
-
-                        <!-- Only for missions with distance points. -->
-                        <Expander x:Name="DistancePanel" Style="{StaticResource Section}">
-                            <Expander.Header><TextBlock Text="Distance points" Style="{StaticResource SectionHeader}" /></Expander.Header>
-                            <StackPanel Margin="18,0,0,0">
-                            <TextBlock Style="{StaticResource Note}"
-                                       Text="The distance flown (the whole way, also up and down) gives the points of this curve. Distances are in meters as the game counts them. Between two points the points rise or fall evenly; beyond the last point the last one counts. The original result sheet has no line for these points: the editor's game code adds it." />
-                            <StackPanel x:Name="DistanceCurvePanel" Margin="0,6,0,0" />
-                        </StackPanel>
-                        </Expander>
-
-                        <!-- Only for missions with landing accuracy points (and the Cannonball targets). -->
-                        <Expander x:Name="LandingPanel" Style="{StaticResource Section}">
-                            <Expander.Header><TextBlock x:Name="LandingTitle" Text="Landing accuracy" Style="{StaticResource SectionHeader}" /></Expander.Header>
-                            <StackPanel Margin="18,0,0,0">
-                            <TextBlock x:Name="LandingNote" Style="{StaticResource Note}" />
-                            <StackPanel x:Name="LandingCurvePanel" Margin="0,6,0,0" />
-                        </StackPanel>
-                        </Expander>
-
                         <Expander x:Name="ConditionsExpander" Style="{StaticResource Section}">
                             <Expander.Header><TextBlock Text="Conditions and deductions" Style="{StaticResource SectionHeader}" /></Expander.Header>
                             <StackPanel Margin="18,0,0,0">
                         <StackPanel x:Name="ConditionsSection">
-                            <CheckBox x:Name="CrashZeroBox" Content="A crash gives 0 points in total" Click="OnConditionsChanged" />
+                            <StackPanel x:Name="CrashPanel">
+                                <TextBlock Text="After a crash:" FontWeight="SemiBold" Margin="0,0,0,2" />
+                                <RadioButton x:Name="CrashOriginalBox" GroupName="Crash" Click="OnConditionsChanged"
+                                             Content="as in the original game (objects, deductions, altitude and distance count)" />
+                                <RadioButton x:Name="CrashTimeBox" GroupName="Crash" Click="OnConditionsChanged" Margin="0,2,0,0"
+                                             Content="the time points count too (with the time of the crash)" />
+                                <RadioButton x:Name="CrashZeroBox" GroupName="Crash" Click="OnConditionsChanged" Margin="0,2,0,0"
+                                             Content="0 points in total" />
+                                <TextBlock x:Name="CrashTimeNote" Style="{StaticResource Note}" Margin="22,2,0,0" />
+                            </StackPanel>
                             <TextBlock Text="Time points only if:" FontWeight="SemiBold" Margin="0,10,0,2" />
                             <TextBlock x:Name="TimeConditionsNote" Style="{StaticResource Note}" />
                             <!-- One line per object type of the mission; filled in code. -->
@@ -231,16 +211,52 @@
                         </StackPanel>
                         </Expander>
 
-
-                        <Expander Style="{StaticResource Section}">
-                            <Expander.Header><TextBlock Text="Footnote" Style="{StaticResource SectionHeader}" /></Expander.Header>
+                        <!-- Only for missions with landing accuracy points (and the Cannonball targets). -->
+                        <Expander x:Name="LandingPanel" Style="{StaticResource Section}">
+                            <Expander.Header><TextBlock x:Name="LandingTitle" Text="Landing accuracy" Style="{StaticResource SectionHeader}" /></Expander.Header>
                             <StackPanel Margin="18,0,0,0">
-                        <TextBlock Style="{StaticResource Note}"
-                                   Text="Shown below the total on the mission screen, with a * in front. One line per line of the text box." />
-                        <CheckBox x:Name="AutoFootnoteBox" Margin="0,4,0,0" Click="OnAutoFootnoteChanged"
-                                  Content="Write the footnote from the settings (time limit, conditions, altitude points, crash)" />
-                        <TextBox x:Name="FootnoteBox" Height="70" Margin="0,4,0,0" AcceptsReturn="True" TextWrapping="NoWrap" FontFamily="Consolas"
-                                 LostKeyboardFocus="OnFootnoteCommitted" />
+                            <TextBlock x:Name="LandingNote" Style="{StaticResource Note}" />
+                            <!-- Only for the Gyrocopter. -->
+                            <CheckBox x:Name="SeparateTouchdownBox" Margin="0,6,0,0" Click="OnSeparateTouchdownChanged"
+                                      Content="Own curve for the touchdown point" />
+                            <StackPanel x:Name="LandingCurvePanel" Margin="0,6,0,0" />
+                        </StackPanel>
+                        </Expander>
+
+                        <!-- Pad radius, runway widths and the vehicle's speed limits; filled in code. -->
+                        <Expander x:Name="GoodLandingPanel" Style="{StaticResource Section}">
+                            <Expander.Header><TextBlock Text="Good landing" Style="{StaticResource SectionHeader}" /></Expander.Header>
+                            <StackPanel Margin="18,0,0,0">
+                            <TextBlock Style="{StaticResource Note}"
+                                       Text="What decides a good landing (and a crash) in this mission. Speeds are in km/h like the speedometer of the HUD, distances in meters as the game counts them. The editor's game code sets the values while the mission is flown; the original values are those of every mission of the game." />
+                            <Grid x:Name="GoodLandingGrid" Margin="0,6,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                            </Grid>
+                        </StackPanel>
+                        </Expander>
+
+                        <!-- Only for missions with altitude points. -->
+                        <Expander x:Name="AltitudePanel" Style="{StaticResource Section}">
+                            <Expander.Header><TextBlock Text="Altitude points" Style="{StaticResource SectionHeader}" /></Expander.Header>
+                            <StackPanel Margin="18,0,0,0">
+                            <TextBlock Style="{StaticResource Note}"
+                                       Text="The highest altitude of the flight gives the points of this curve. Between two points the points rise or fall evenly; below the first point the first one counts, above the last point the last one. Two points at the same altitude make a step. Altitudes are in meters above sea level, the number the HUD shows under &quot;SEA LEVEL&quot; (the altimeter shows the height above the ground): a flight from a tower or a mountain starts with that height." />
+                            <StackPanel x:Name="AltitudeCurvePanel" Margin="0,6,0,0" />
+                        </StackPanel>
+                        </Expander>
+
+                        <!-- Only for missions with distance points. -->
+                        <Expander x:Name="DistancePanel" Style="{StaticResource Section}">
+                            <Expander.Header><TextBlock Text="Distance points" Style="{StaticResource SectionHeader}" /></Expander.Header>
+                            <StackPanel Margin="18,0,0,0">
+                            <TextBlock Style="{StaticResource Note}"
+                                       Text="The distance flown (the whole way, also up and down) gives the points of this curve. Distances are in meters as the game counts them. Between two points the points rise or fall evenly; beyond the last point the last one counts. The original result sheet has no line for these points: the editor's game code adds it." />
+                            <StackPanel x:Name="DistanceCurvePanel" Margin="0,6,0,0" />
                         </StackPanel>
                         </Expander>
 
@@ -257,6 +273,18 @@
                                       Content="Unlimited fuel (the tank is filled again all the time)" />
                             <TextBlock x:Name="FuelNote" Style="{StaticResource Note}" Margin="22,2,0,0"
                                        Text="The editor's game code fills the tank in every frame of the flight. The fuel gauge and its &quot;FUEL&quot; label are not shown, and there is no &quot;Low fuel&quot;." />
+                        </StackPanel>
+                        </Expander>
+
+                        <Expander Style="{StaticResource Section}">
+                            <Expander.Header><TextBlock Text="Footnote" Style="{StaticResource SectionHeader}" /></Expander.Header>
+                            <StackPanel Margin="18,0,0,0">
+                        <TextBlock Style="{StaticResource Note}"
+                                   Text="Shown below the total on the mission screen, with a * in front. One line per line of the text box." />
+                        <CheckBox x:Name="AutoFootnoteBox" Margin="0,4,0,0" Click="OnAutoFootnoteChanged"
+                                  Content="Write the footnote from the settings (time limit, conditions, altitude points, crash)" />
+                        <TextBox x:Name="FootnoteBox" Height="70" Margin="0,4,0,0" AcceptsReturn="True" TextWrapping="NoWrap" FontFamily="Consolas"
+                                 LostKeyboardFocus="OnFootnoteCommitted" />
                         </StackPanel>
                         </Expander>
 

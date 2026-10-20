@@ -678,6 +678,26 @@ public static class ProjectImporter
                 {
                     mission.HardEndJingle = JingleOf(id.Vehicle, entry.HardEndMusic, mission, notes);
                 }
+
+                // Landing: the Gyrocopter's touchdown curve, the pad radius and the vehicle's speed limits.
+                if (entry.TouchdownCurve is { Count: > 0 } touchdown && id.Vehicle == Vehicle.Gyrocopter)
+                {
+                    mission.TouchdownCurve = [.. touchdown];
+                }
+
+                if (entry.PadRadius is { } radius && radius != LandingValues.Original(LandingValue.PadRadius))
+                {
+                    mission.Landing[LandingValue.PadRadius] = radius;
+                }
+
+                IReadOnlyList<LandingValue> speeds = LandingValues.SpeedsOf(id.Vehicle);
+                for (int i = 0; i < speeds.Count && i < entry.VehicleLimits.Count; i++)
+                {
+                    if (entry.VehicleLimits[i] != LandingValues.Original(speeds[i]))
+                    {
+                        mission.Landing[speeds[i]] = entry.VehicleLimits[i];
+                    }
+                }
             }
 
             if (cleanTables is not null && hackTables is not null)
@@ -728,6 +748,7 @@ public static class ProjectImporter
         var conditions = new MissionConditions
         {
             CrashGivesZero = entry.CrashGivesZero,
+            CrashTimePoints = entry.CrashTimePoints,
             MinimumAltitude = entry.MinimumAltitude,
             MinimumDistance = entry.MinimumDistance,
         };

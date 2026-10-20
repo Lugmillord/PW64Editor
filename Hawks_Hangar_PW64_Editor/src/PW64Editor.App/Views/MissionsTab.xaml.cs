@@ -523,6 +523,7 @@ public partial class MissionsTab : UserControl
             ShowAltitude(draft);
             ShowDistance(draft);
             ShowLanding(draft);
+            ShowGoodLanding(draft);
             ShowConditions(draft);
             DemoPanel.Visibility = draft.CanHideDemo ? Visibility.Visible : Visibility.Collapsed;
             FuelPanel.Visibility = draft.CanSetFuel ? Visibility.Visible : Visibility.Collapsed;
@@ -554,6 +555,7 @@ public partial class MissionsTab : UserControl
             .Concat(CurveBoxes(TimeCurvePanel))
             .Concat(CurveBoxes(AltitudeCurvePanel))
             .Concat(CurveBoxes(LandingCurvePanel))
+            .Concat(GoodLandingGrid.Children.OfType<TextBox>())
             .Concat(CurveBoxes(DistanceCurvePanel))
             .Concat(ObjectConditionsGrid.Children.OfType<TextBox>());
         if (boxes.FirstOrDefault(b => Equals(b.Tag, tag)) is { } target)
@@ -1133,15 +1135,228 @@ public partial class MissionsTab : UserControl
 
         bool gyrocopter = draft.Vehicle == Vehicle.Gyrocopter;
         LandingTitle.Text = cannonball ? L.T("Target accuracy") : L.T("Landing accuracy");
+        bool separate = gyrocopter && draft.TouchdownCurve is not null;
         LandingNote.Text = (cannonball
                 ? L.T("The distance of the cannonball's landing point from the centre of the target gives the points of this curve.")
-                : L.T("The distance of the resting position from the centre of the nearest landing pad (or from the centre line of a runway) gives the points of this curve. A good landing needs the resting position on the pad (within 21 m of its centre)."))
-            + " " + L.T("Distances are in meters as the game counts them. Between two points the points fall or rise evenly; beyond the last point the last one counts. Two points at the same distance make a step.")
-            + (gyrocopter
-                ? " " + L.T("The Gyrocopter measures twice, at the touchdown point and at the resting position, and multiplies the two values of the curve. The points shown are those for a landing with both at this distance.")
-                : string.Empty);
-        LandingCurvePanel.Children.Add(CurveEditor(draft, ScoreCurveKind.LandingAccuracy, L.T("Distance (m)"), 5, "landing",
+                : gyrocopter
+                    ? L.T("The Gyrocopter's landing is measured at two points: the touchdown point T (first wheel contact) and the resting point R (where it stops). Both are used for the points. Both distances (dT, dR) are measured sideways from the centre line of the runway. For a good landing, T and R must both be on the runway, as close to the centre line as possible.")
+                        + " " + (separate ? L.T("Full points need 100 % at both distances.") : L.T("Both distances use the same curve."))
+                    : L.T("The distance of the resting position from the centre of the nearest landing pad (or from the centre line of a runway) gives the points of this curve. A good landing needs the resting position on the pad (within 21 m of its centre)."))
+            + (gyrocopter ? string.Empty
+                : " " + L.T("Distances are in meters as the game counts them. Between two points the points fall or rise evenly; beyond the last point the last one counts. Two points at the same distance make a step."));
+        SeparateTouchdownBox.Visibility = gyrocopter ? Visibility.Visible : Visibility.Collapsed;
+        SeparateTouchdownBox.IsChecked = draft.TouchdownCurve is not null;
+        // The Gyrocopter: the curve editors on the left, a drawing of T, R, dT and dR on the right.
+        Panel editors = LandingCurvePanel;
+        if (gyrocopter)
+        {
+            var grid = new Grid();
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            var left = new StackPanel();
+            UIElement drawing = GyrocopterLandingDrawing();
+            Grid.SetColumn(drawing, 1);
+            grid.Children.Add(left);
+            grid.Children.Add(drawing);
+            LandingCurvePanel.Children.Add(grid);
+            editors = left;
+        }
+
+        if (separate && draft.TouchdownCurve is { } touchdown)
+        {
+            // Two curves in percent of their highest value: the points of the row are reached with 100 % at both.
+            ScoreCurve rest = draft.Comm.GetCurve(ScoreCurveKind.LandingAccuracy);
+            editors.Children.Add(new TextBlock { Text = L.T("Touchdown point T (first wheel contact)"), FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 0, 2) });
+            editors.Children.Add(CurveEditor(draft, ScoreCurveKind.LandingAccuracy, L.T("Distance dT (m)"), 5, "touchdown",
+                GameUnits.MetersPerUnit, custom: (Percent(touchdown), "%", points => draft.SetLandingPercentCurve(true, points))));
+            editors.Children.Add(new TextBlock { Text = L.T("Resting point R"), FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 12, 0, 2) });
+            editors.Children.Add(CurveEditor(draft, ScoreCurveKind.LandingAccuracy, L.T("Distance dR (m)"), 5, "landing",
+                GameUnits.MetersPerUnit, custom: (Percent(rest), "%", points => draft.SetLandingPercentCurve(false, points))));
+            return;
+        }
+
+        editors.Children.Add(CurveEditor(draft, ScoreCurveKind.LandingAccuracy, L.T("Distance (m)"), 5, "landing",
             GameUnits.MetersPerUnit, squaredPoints: gyrocopter));
+    }
+
+    /// <summary>
+    /// The runway from above with the touchdown point T, the resting point R and their distances dT and dR
+    /// from the centre line (the letters of the note of the Gyrocopter's landing accuracy).
+    /// </summary>
+    private static UIElement GyrocopterLandingDrawing()
+    {
+        static System.Windows.Media.Brush Rgb(byte r, byte g, byte b) => new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(r, g, b));
+        System.Windows.Media.Brush blue = Rgb(0x2E, 0x6D, 0xA4), red = Rgb(0xC0, 0x39, 0x2B), dark = Rgb(0x1D, 0x2A, 0x36);
+        var canvas = new Canvas { Width = 280, Height = 140, Margin = new Thickness(24, 0, 0, 0), VerticalAlignment = VerticalAlignment.Top };
+
+        void Place(UIElement element, double x, double y)
+        {
+            Canvas.SetLeft(element, x);
+            Canvas.SetTop(element, y);
+            canvas.Children.Add(element);
+        }
+
+        void Line(double x1, double y1, double x2, double y2, System.Windows.Media.Brush brush, double thickness, double[]? dashes = null)
+        {
+            var line = new System.Windows.Shapes.Line { X1 = x1, Y1 = y1, X2 = x2, Y2 = y2, Stroke = brush, StrokeThickness = thickness };
+            if (dashes is not null)
+            {
+                line.StrokeDashArray = new System.Windows.Media.DoubleCollection(dashes);
+            }
+
+            canvas.Children.Add(line);
+        }
+
+        void Arrow(params double[] xy)
+        {
+            var head = new System.Windows.Shapes.Polygon { Fill = blue };
+            for (int i = 0; i < xy.Length; i += 2)
+            {
+                head.Points.Add(new Point(xy[i], xy[i + 1]));
+            }
+
+            canvas.Children.Add(head);
+        }
+
+        void Label(string text, double x, double y, System.Windows.Media.Brush brush, double size) =>
+            Place(new TextBlock { Text = text, Foreground = brush, FontSize = size, FontWeight = FontWeights.Bold }, x, y);
+
+        void Dimension(double x, double y1, double y2, string text, double labelY)
+        {
+            Line(x, y1, x, y2, red, 1.5);
+            Line(x - 4, y1, x + 4, y1, red, 1.5);
+            Line(x - 4, y2, x + 4, y2, red, 1.5);
+            Label(text, x + 5, labelY, red, 11);
+        }
+
+        // The runway and its centre line.
+        Place(new System.Windows.Shapes.Rectangle { Width = 240, Height = 70, RadiusX = 3, RadiusY = 3, Fill = Rgb(0xB9, 0xC0, 0xC7), Stroke = Rgb(0x7D, 0x87, 0x90), StrokeThickness = 1 }, 20, 35);
+        Line(28, 70, 252, 70, System.Windows.Media.Brushes.White, 2.5, [6, 4]);
+        Place(new TextBlock { Text = "centre line", FontSize = 10, Foreground = Rgb(0x4A, 0x53, 0x5C) }, 196, 51);
+
+        // The approach, then rolling from T to R.
+        Line(2, 52, 62, 52, blue, 1.5, [2, 2]);
+        Arrow(62, 48, 70, 52, 62, 56);
+        var roll = new System.Windows.Shapes.Polyline { Stroke = blue, StrokeThickness = 1.5, StrokeDashArray = new System.Windows.Media.DoubleCollection([3, 2]) };
+        for (int i = 0; i <= 16; i++)
+        {
+            double t = i / 16.0; // quadratic curve from T (86, 52) over (140, 52) to (186, 84)
+            roll.Points.Add(new Point(((1 - t) * (1 - t) * 86) + (2 * (1 - t) * t * 140) + (t * t * 186), ((1 - t) * (1 - t) * 52) + (2 * (1 - t) * t * 52) + (t * t * 84)));
+        }
+
+        canvas.Children.Add(roll);
+        Arrow(183, 78, 191, 88, 180, 86);
+
+        // T and R with their distances from the centre line.
+        Place(new System.Windows.Shapes.Ellipse { Width = 10, Height = 10, Fill = blue }, 81, 47);
+        Label("T", 81, 28, dark, 13);
+        Dimension(98, 52, 70, "dT", 53);
+        Place(new System.Windows.Shapes.Ellipse { Width = 10, Height = 10, Fill = blue }, 191, 85);
+        Label("R", 191, 106, dark, 13);
+        Dimension(208, 70, 90, "dR", 73);
+        return canvas;
+    }
+
+    /// <summary>A curve's points in percent of its highest value.</summary>
+    private static List<CurvePoint> Percent(ScoreCurve curve)
+    {
+        float max = curve.Maximum;
+        return curve.Points.Select(p => new CurvePoint(p.X, max > 0 ? MathF.Round(p.Y / max * 1000) / 10 : 0)).ToList();
+    }
+
+    /// <summary>The Gyrocopter's own curve for the touchdown point was switched on or off.</summary>
+    private void OnSeparateTouchdownChanged(object sender, RoutedEventArgs e)
+    {
+        if (_showing || SelectedDraft is not { } draft)
+        {
+            return;
+        }
+
+        draft.SetSeparateTouchdown(SeparateTouchdownBox.IsChecked == true);
+        Changed(draft);
+    }
+
+    // ----------------------------------------------------------------- good landing
+
+    /// <summary>The pad radius, the widths of the runways and the speed limits of the vehicle.</summary>
+    private void ShowGoodLanding(MissionDraft draft)
+    {
+        GoodLandingGrid.Children.Clear();
+        GoodLandingGrid.RowDefinitions.Clear();
+        IReadOnlyList<LandingValue> values = draft.LandingValuesShown;
+        IReadOnlyList<float> runways = LandingValues.UsesPads(draft.Vehicle) ? draft.RunwayWidths : [];
+        GoodLandingPanel.Visibility = values.Count > 0 || runways.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+
+        void AddRow(string name, string tag, float shown, string unit, float original, Action<float> commit, float maximum)
+        {
+            int row = GoodLandingGrid.RowDefinitions.Count;
+            GoodLandingGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            var label = new TextBlock { Text = name, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 2, 10, 2), TextWrapping = TextWrapping.Wrap, MaxWidth = 380 };
+            string text = FormatMeters(shown);
+            var box = new TextBox { Text = text, Width = 60, Margin = new Thickness(0, 2, 6, 2), Tag = tag };
+            var unitText = new TextBlock { Text = unit, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 2, 10, 2) };
+            var originalText = new TextBlock
+            {
+                Text = L.F("(original: {0} {1})", FormatMeters(original), unit),
+                VerticalAlignment = VerticalAlignment.Center,
+                Foreground = (System.Windows.Media.Brush)FindResource("MutedTextBrush"),
+            };
+
+            void Commit()
+            {
+                if (_showing || box.Text.Trim() == text)
+                {
+                    return;
+                }
+
+                if (!TryParseNumber(box.Text, out double value) || value < 0 || value > maximum)
+                {
+                    Ui.ShowError(Window.GetWindow(this)!, L.F("\"{0}\" is not a number from 0 to {1}.", box.Text.Trim(), FormatMeters(maximum)));
+                    ShowMission(draft.Mission);
+                    return;
+                }
+
+                commit((float)value);
+                Changed(draft);
+            }
+
+            box.LostKeyboardFocus += (_, e) =>
+            {
+                _focusAfterRefresh = (e.NewFocus as FrameworkElement)?.Tag as string;
+                Commit();
+            };
+            box.KeyDown += (_, e) =>
+            {
+                if (e.Key == Key.Enter)
+                {
+                    Commit();
+                }
+            };
+
+            UIElement[] cells = [label, box, unitText, originalText];
+            for (int c = 0; c < cells.Length; c++)
+            {
+                Grid.SetRow(cells[c], row);
+                Grid.SetColumn(cells[c], c);
+                GoodLandingGrid.Children.Add(cells[c]);
+            }
+        }
+
+        foreach (LandingValue value in values)
+        {
+            AddRow(LandingValues.Name(value), $"landing{(int)value}", LandingValues.Shown(value, draft.LandingValueOf(value)), LandingValues.Unit(value),
+                LandingValues.Shown(value, LandingValues.Original(value)),
+                shown => draft.SetLandingValue(value, LandingValues.Stored(value, shown)), LandingValues.MaximumShown(value));
+        }
+
+        IReadOnlyList<float> fileWidths = draft.Mission.File.RunwayWidths;
+        for (int i = 0; i < runways.Count; i++)
+        {
+            int index = i;
+            AddRow(runways.Count == 1 ? L.T("Width of the runway for a good landing") : L.F("Width of runway {0} for a good landing", i + 1),
+                $"runway{i}", GameUnits.ToMeters(runways[i]), "m", GameUnits.ToMeters(fileWidths[i]),
+                shown => draft.SetRunwayWidth(index, GameUnits.FromMeters(shown)), 10000);
+        }
     }
 
     // ----------------------------------------------------------------- curve points
@@ -1158,10 +1373,11 @@ public partial class MissionsTab : UserControl
     /// <param name="xScale">Shown measured value per stored one (heights and distances: meters per game unit).</param>
     /// <param name="squaredPoints">The points shown are the square of the stored ones (Gyrocopter landing:
     /// the game multiplies two values of the same curve).</param>
+    /// <param name="custom">Other points than the curve's (for example in percent), the header of their column and how they are stored.</param>
     private UIElement CurveEditor(MissionDraft draft, ScoreCurveKind kind, string valueHeader, float step, string tagPrefix, float xScale = 1,
-        bool squaredPoints = false)
+        bool squaredPoints = false, (List<CurvePoint> Points, string Header, Func<List<CurvePoint>, string?> Apply)? custom = null)
     {
-        List<CurvePoint> points = [.. draft.Comm.GetCurve(kind).Points];
+        List<CurvePoint> points = custom is { } own ? own.Points : [.. draft.Comm.GetCurve(kind).Points];
         string ShowX(float x) => xScale == 1 ? FormatNumber(x) : FormatMeters(x * xScale);
         string ShowY(float y) => squaredPoints ? FormatMeters(y * y) : FormatNumber(y);
         var panel = new StackPanel();
@@ -1179,7 +1395,7 @@ public partial class MissionsTab : UserControl
         }
 
         grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        string[] headers = [L.T("Point"), valueHeader, L.T("Points"), string.Empty];
+        string[] headers = [L.T("Point"), valueHeader, custom?.Header ?? L.T("Points"), string.Empty];
         for (int c = 0; c < headers.Length; c++)
         {
             Add(new TextBlock { Text = headers[c], FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 2, 14, 4) }, 0, c);
@@ -1228,7 +1444,7 @@ public partial class MissionsTab : UserControl
 
         void Apply(List<CurvePoint> changed)
         {
-            if (draft.SetCurvePoints(kind, changed) is { } problem)
+            if ((custom is { } c ? c.Apply(changed) : draft.SetCurvePoints(kind, changed)) is { } problem)
             {
                 Ui.ShowError(Window.GetWindow(this)!, problem);
                 ShowMission(draft.Mission);
@@ -1356,8 +1572,17 @@ public partial class MissionsTab : UserControl
 
         // Cannonball: a shot always ends in the water or on a target, and there are no time points.
         ConditionsSection.Visibility = cannonball || draft.Mission.IsBirdman ? Visibility.Collapsed : Visibility.Visible;
-        CrashZeroBox.IsChecked = conditions.CrashGivesZero;
-        CrashZeroBox.Visibility = draft.CanSetCrashCondition ? Visibility.Visible : Visibility.Collapsed;
+        CrashOriginalBox.IsChecked = draft.CrashScoring == CrashScoring.Original;
+        CrashTimeBox.IsChecked = draft.CrashScoring == CrashScoring.TimePoints;
+        CrashZeroBox.IsChecked = draft.CrashScoring == CrashScoring.Zero;
+        CrashPanel.Visibility = draft.CanSetCrashCondition ? Visibility.Visible : Visibility.Collapsed;
+        CrashTimeNote.Text = draft.CrashScoring != CrashScoring.TimePoints
+            ? string.Empty
+            : !draft.Rows.Contains(PointSource.Time)
+                ? L.T("This mission has no time points, so this changes nothing yet.")
+                : draft.EarlyCrashTimePoints > 0
+                    ? L.F("Note: a crash right after the start gives {0} time points (the time curve at 0 seconds). Combine this with conditions, or use a time curve that rises with the time.", draft.EarlyCrashTimePoints)
+                    : L.T("The conditions of the time points below apply after a crash too.");
         TimeConditionsNote.Text = draft.Rows.Contains(PointSource.Time)
             ? L.T("All checked conditions must be met; otherwise the time points are 0.")
             : L.T("This mission has no time points: these conditions only matter once \"Time\" is one of its rows.");
@@ -1572,6 +1797,7 @@ public partial class MissionsTab : UserControl
         var conditions = new MissionConditions
         {
             CrashGivesZero = CrashZeroBox.IsChecked == true,
+            CrashTimePoints = CrashTimeBox.IsChecked == true,
             LandWhenReached = LandWhenReachedBox.Visibility == Visibility.Visible && LandWhenReachedBox.IsChecked == true,
         };
         foreach (ObjectConditionRow row in _objectRows.Where(r => r.Check.IsChecked == true))

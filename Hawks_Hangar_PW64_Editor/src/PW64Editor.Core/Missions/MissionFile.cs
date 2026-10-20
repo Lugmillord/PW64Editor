@@ -123,6 +123,46 @@ public sealed class MissionFile
         return result;
     }
 
+    /// <summary>Size of a runway (TaskLSTP) in the LSTP chunk.</summary>
+    public const int RunwaySize = 0x24;
+
+    /// <summary>Offset of the width (landingAlignment, game units) in a runway.</summary>
+    public const int RunwayWidthOffset = 0x20;
+
+    /// <summary>The width of each runway for a good landing (game units; the game counts half of it to each side of the centre line).</summary>
+    public IReadOnlyList<float> RunwayWidths
+    {
+        get
+        {
+            ReadOnlySpan<byte> data = GetObjectData(MissionObjectKind.Runway);
+            int count = Math.Min(Comm.GetObjectCount(MissionObjectKind.Runway), data.Length / RunwaySize);
+            var widths = new List<float>(count);
+            for (int i = 0; i < count; i++)
+            {
+                widths.Add(System.Buffers.Binary.BinaryPrimitives.ReadSingleBigEndian(data[((i * RunwaySize) + RunwayWidthOffset)..]));
+            }
+
+            return widths;
+        }
+    }
+
+    /// <summary>The file with other runway widths (in order; extra values are ignored, missing ones keep the file's).</summary>
+    public byte[] WithRunwayWidths(IReadOnlyList<float> widths)
+    {
+        byte[] result = (byte[])_file.Clone();
+        if (_chunks.TryGetValue("LSTP", out IffChunk? chunk))
+        {
+            int count = Math.Min(Math.Min(Comm.GetObjectCount(MissionObjectKind.Runway), chunk.DataSize / RunwaySize), widths.Count);
+            for (int i = 0; i < count; i++)
+            {
+                System.Buffers.Binary.BinaryPrimitives.WriteSingleBigEndian(
+                    result.AsSpan(chunk.DataOffset + (i * RunwaySize) + RunwayWidthOffset), widths[i]);
+            }
+        }
+
+        return result;
+    }
+
     private static string ReadString(byte[] file, IffChunk? chunk)
     {
         if (chunk is null)

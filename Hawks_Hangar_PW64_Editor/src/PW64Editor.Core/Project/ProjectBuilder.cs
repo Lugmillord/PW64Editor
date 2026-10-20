@@ -190,11 +190,12 @@ public static class ProjectBuilder
     /// Writes the mission settings that live in the mission files: the condition byte of every
     /// mission with conditions (so the file always matches them; projects saved by earlier
     /// versions may still have the game's "at least N" mode there, which would make the game say
-    /// "please land" and remove the other objects) and the start fuel.
+    /// "please land" and remove the other objects), the start fuel and the widths of the runways.
     /// </summary>
     public static void ApplyMissionSettings(HackProject project, List<GameFile> files)
     {
-        List<Missions.MissionSettings> withConditions = project.Settings.Missions.Where(m => m.Conditions is not null || m.StartFuel is not null).ToList();
+        List<Missions.MissionSettings> withConditions = project.Settings.Missions
+            .Where(m => m.Conditions is not null || m.StartFuel is not null || m.RunwayWidths is not null).ToList();
         if (withConditions.Count == 0)
         {
             return;
@@ -227,6 +228,12 @@ public static class ProjectBuilder
             if (settings.StartFuel is { } fuel && mission.StartFuel != fuel)
             {
                 files[i] = files[i] with { Data = mission.WithStartFuel(fuel) };
+                mission = Missions.MissionFile.Parse(files[i].Data);
+            }
+
+            if (settings.RunwayWidths is { } widths && !mission.RunwayWidths.SequenceEqual(widths.Take(mission.RunwayWidths.Count)))
+            {
+                files[i] = files[i] with { Data = mission.WithRunwayWidths(widths) };
             }
         }
     }
@@ -343,16 +350,45 @@ public static class ProjectBuilder
                 : settings?.HardEndZero == true ? HardEndScoring.Zero : HardEndScoring.Scored;
             byte music = hardEnd == HardEndScoring.Retail ? (byte)0
                 : Missions.HardEndJingles.Music(comm.Id.Vehicle, Missions.HardEndJingles.Effective(settings));
+            // Landing: the Gyrocopter's touchdown curve, the pad radius and the speed limits of the vehicle.
+            SaveGame.Vehicle vehicle = comm.Id.Vehicle;
+            IReadOnlyList<Missions.CurvePoint>? touchdown = vehicle == SaveGame.Vehicle.Gyrocopter && settings?.TouchdownCurve is { Count: > 0 } curve
+                ? curve
+                : null;
+            float? padRadius = settings is not null && settings.Landing.TryGetValue(Missions.LandingValue.PadRadius, out float radius)
+                && Missions.LandingValues.UsesPads(vehicle)
+                ? radius
+                : null;
+            IReadOnlyList<Missions.LandingValue> speeds = Missions.LandingValues.SpeedsOf(vehicle);
+            IReadOnlyList<float> limits = settings is not null && speeds.Any(settings.Landing.ContainsKey)
+                ? speeds.Select(v => Missions.LandingValues.Effective(settings, v)).ToList()
+                : [];
+
+            GameModuleCondition entry;
             if (settings?.Conditions is { } conditions && conditions.NeedsModule(comm))
             {
-                result.Add(conditions.ToModuleCondition(comm) with { UnlimitedFuel = fuel, HardEnd = hardEnd, HardEndMusic = music });
+                entry = conditions.ToModuleCondition(comm);
             }
-            else if (fuel || hardEnd != HardEndScoring.Retail)
+            else
             {
                 // No conditions of its own: the game's condition byte keeps counting.
                 SaveGame.TestId id = comm.Id;
-                result.Add(new GameModuleCondition((byte)id.Class, (byte)id.Vehicle, (byte)id.Test, false, null,
-                    new byte[GameModule.ObjectTypes], null, UnlimitedFuel: fuel, HardEnd: hardEnd, HardEndMusic: music));
+                entry = new GameModuleCondition((byte)id.Class, (byte)id.Vehicle, (byte)id.Test, false, null,
+                    new byte[GameModule.ObjectTypes], null);
+            }
+
+            entry = entry with
+            {
+                UnlimitedFuel = fuel,
+                HardEnd = hardEnd,
+                HardEndMusic = music,
+                TouchdownCurve = touchdown,
+                PadRadius = padRadius,
+                VehicleLimits = limits,
+            };
+            if (entry.HasConditions || fuel || hardEnd != HardEndScoring.Retail || entry.HasLandingValues)
+            {
+                result.Add(entry);
             }
         }
 

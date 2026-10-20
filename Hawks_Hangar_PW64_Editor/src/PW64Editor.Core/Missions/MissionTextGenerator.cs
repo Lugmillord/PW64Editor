@@ -214,6 +214,10 @@ public static class MissionTextGenerator
         {
             parts.Add(("A crash gives 0 points.", "Crash: 0 pts."));
         }
+        else if (conditions.CrashTimePoints && time)
+        {
+            parts.Add(("Time points also count after a crash.", "Crash: time pts. count."));
+        }
 
         if (rows.Any(r => r.Source == PointSource.Photo))
         {
