@@ -10,6 +10,9 @@
     <DockPanel>
         <Menu DockPanel.Dock="Top" Padding="2">
             <MenuItem Header="_File">
+                <!-- Closes the project and shows the start window again. -->
+                <MenuItem Header="Back to the s_tart screen" Click="OnCloseProject" />
+                <Separator />
                 <MenuItem Header="_New project…" InputGestureText="Ctrl+N" Click="OnNewProject" />
                 <MenuItem Header="_Open project…" InputGestureText="Ctrl+O" Click="OnOpenProject" />
                 <MenuItem x:Name="RecentMenu" Header="Recent projects" SubmenuOpened="OnRecentMenuOpened">
@@ -17,7 +20,10 @@
                     <MenuItem Header="(none)" IsEnabled="False" />
                 </MenuItem>
                 <MenuItem Header="Open project _folder" Click="OnOpenProjectFolder" />
-                <MenuItem Header="_Close project" Click="OnCloseProject" />
+                <Separator />
+                <MenuItem Header="_Copy project…" Click="OnCopyProject" />
+                <MenuItem Header="Project from RO_M…" Click="OnProjectFromRom" />
+                <MenuItem Header="Project from _patch…" Click="OnProjectFromPatch" />
                 <Separator />
                 <MenuItem Header="Project _settings…" Click="OnProjectSettings" />
                 <MenuItem Header="_Game files…" InputGestureText="Ctrl+G" Click="OnGameFiles" />

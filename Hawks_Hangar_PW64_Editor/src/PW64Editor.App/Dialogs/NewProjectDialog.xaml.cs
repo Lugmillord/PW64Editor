@@ -8,7 +8,8 @@ namespace PW64Editor.App.Dialogs;
 
 /// <summary>
 /// Asks for the name and location of a new project. The project gets its own folder,
-/// named after the hack, inside the chosen location.
+/// named after the hack, inside the chosen location. Also used for copies and for projects
+/// made from a ROM or a patch (<see cref="Configure"/>).
 /// </summary>
 public partial class NewProjectDialog : Window
 {
@@ -18,6 +19,29 @@ public partial class NewProjectDialog : Window
         LocationBox.Text = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "Hawk's Hangar Projects");
         NameBox.Focus();
+        UpdatePreview();
+    }
+
+    /// <summary>
+    /// Adapts the dialog to another way of creating a project.
+    /// </summary>
+    /// <param name="title">Window title (translated).</param>
+    /// <param name="button">Text of the create button (translated).</param>
+    /// <param name="name">The suggested name.</param>
+    /// <param name="prepareForGit">Whether the Git box starts checked.</param>
+    /// <param name="location">The suggested location, or null for the default.</param>
+    public void Configure(string title, string button, string name, bool prepareForGit, string? location = null)
+    {
+        Title = title;
+        CreateButton.Content = button;
+        NameBox.Text = name;
+        NameBox.SelectAll();
+        GitBox.IsChecked = prepareForGit;
+        if (location is not null)
+        {
+            LocationBox.Text = location;
+        }
+
         UpdatePreview();
     }
 

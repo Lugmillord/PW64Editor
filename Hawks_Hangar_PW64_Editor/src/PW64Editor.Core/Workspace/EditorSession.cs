@@ -89,6 +89,44 @@ public sealed class EditorSession
     }
 
     /// <summary>
+    /// Copies the open project into a new folder and opens the copy (see <see cref="HackProject.CopyTo"/>).
+    /// </summary>
+    /// <exception cref="ProjectException">The folder is not empty or lies inside the project.</exception>
+    public EditorSession CopyTo(string folder, string name, bool prepareForGit) =>
+        new(Project.CopyTo(folder, name, prepareForGit), CleanRom, Layout);
+
+    /// <summary>
+    /// Creates a project from a hack ROM (see <see cref="ProjectImporter"/>), builds it and compares the build with the ROM.
+    /// </summary>
+    /// <param name="import">What <see cref="ProjectImporter.Analyze"/> found in the ROM.</param>
+    /// <param name="hackRom">The imported ROM.</param>
+    /// <param name="folder">Project folder (new or empty).</param>
+    /// <param name="name">Name of the project.</param>
+    /// <param name="prepareForGit">Whether to add a .gitignore.</param>
+    /// <param name="cleanRom">The verified clean ROM.</param>
+    /// <param name="cleanRomPath">Where that ROM is stored.</param>
+    /// <returns>The open project and the report: what was taken over and where the rebuilt ROM differs.</returns>
+    /// <exception cref="ProjectException">The folder is not empty.</exception>
+    public static (EditorSession Session, IReadOnlyList<ImportNote> Report) CreateFromImport(RomImport import, N64Rom hackRom,
+        string folder, string name, bool prepareForGit, N64Rom cleanRom, string cleanRomPath)
+    {
+        HackProject project = ProjectImporter.CreateProject(import, folder, name, cleanRomPath, prepareForGit);
+        var session = new EditorSession(project, cleanRom, RomLayout.PilotwingsUsa);
+        var report = new List<ImportNote>(import.Notes);
+        try
+        {
+            (ProjectBuildResult result, _, _) = session.Build(createRestorePoint: false);
+            report.AddRange(ProjectImporter.Compare(result.RomBuild, hackRom.Data, session.Layout, import.Module));
+        }
+        catch (Exception ex) when (ex is ProjectException or FileSystemFullException or InvalidDataException or IOException)
+        {
+            report.Add(new ImportNote(ImportNoteKind.Warning, CoreText.F("The new project could not be built: {0}", ex.Message)));
+        }
+
+        return (session, report);
+    }
+
+    /// <summary>
     /// Builds the project and overwrites the hack ROM.
     /// </summary>
     /// <param name="createRestorePoint">Create a restore point after building.</param>

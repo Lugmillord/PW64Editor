@@ -330,6 +330,90 @@ public static class GameModule
         return image;
     }
 
+    /// <summary>
+    /// Reads the header of the game module in a ROM built by the editor (the last <see cref="RomReserve"/>
+    /// bytes), or null if the ROM has no module.
+    /// </summary>
+    public static GameModuleHeader? ReadHeader(ReadOnlySpan<byte> rom)
+    {
+        int offset = rom.Length - RomReserve;
+        if (offset < 0 || BinaryPrimitives.ReadUInt32BigEndian(rom[offset..]) != Magic)
+        {
+            return null;
+        }
+
+        ReadOnlySpan<byte> h = rom[offset..];
+        ReadOnlySpan<byte> infoField = h.Slice(InfoOffset, InfoLength);
+        int end = infoField.IndexOf((byte)0);
+        string info = Encoding.ASCII.GetString(end < 0 ? infoField : infoField[..end]);
+        uint version = BinaryPrimitives.ReadUInt32BigEndian(h[0x24..]);
+        return new GameModuleHeader(
+            offset,
+            version,
+            BinaryPrimitives.ReadUInt32BigEndian(h[FlagsOffset..]),
+            (LiveValues)BinaryPrimitives.ReadUInt32BigEndian(h[LiveOffset..]),
+            info,
+            (int)BinaryPrimitives.ReadUInt32BigEndian(h[ImageSizeOffset..]),
+            BinaryPrimitives.ReadUInt32BigEndian(h[0x28..]),
+            (int)BinaryPrimitives.ReadUInt32BigEndian(h[ConditionCountOffset..]),
+            (int)BinaryPrimitives.ReadUInt32BigEndian(h[DataRomOffset..]),
+            (int)BinaryPrimitives.ReadUInt32BigEndian(h[DataSizeOffset..]));
+    }
+
+    /// <summary>ROM range of the information line in the module header (it holds the build time, so it differs in every build).</summary>
+    public static (int Offset, int Length) InfoRange(int romLength) => (romLength - RomReserve + InfoOffset, InfoLength);
+
+    /// <summary>Version of the game module this editor builds (header +0x24).</summary>
+    public static uint CurrentVersion => BinaryPrimitives.ReadUInt32BigEndian(GameModuleImage.Image.AsSpan(0x24));
+
+    /// <summary>The first module version that keeps the mission settings in the data area (earlier ones: in the module).</summary>
+    public const uint DataAreaVersion = 6;
+
+    /// <summary>Bytes per entry of the conditions table of module versions before <see cref="DataAreaVersion"/>.</summary>
+    private const int OldConditionSize = 0x14;
+
+    /// <summary>
+    /// The mission settings of a ROM built by the editor: from the data area, or (module versions before
+    /// <see cref="DataAreaVersion"/>) from the table inside the module.
+    /// </summary>
+    /// <exception cref="InvalidDataException">The table cannot be read.</exception>
+    public static IReadOnlyList<GameModuleCondition> ReadConditions(ReadOnlySpan<byte> rom, GameModuleHeader header)
+    {
+        // The data area (some test builds of module version 5 had it already, so it is recognised by its magic number).
+        bool dataArea = header.DataSize > 0 && header.DataRomOffset > 0 && (long)header.DataRomOffset + header.DataSize <= rom.Length
+            && BinaryPrimitives.ReadUInt32BigEndian(rom[header.DataRomOffset..]) == DataArea.Magic;
+        if (dataArea)
+        {
+            return DataArea.ReadImage(rom.Slice(header.DataRomOffset, header.DataSize));
+        }
+
+        if (header.Version >= DataAreaVersion)
+        {
+            if (header.DataSize == 0)
+            {
+                return [];
+            }
+
+            throw new InvalidDataException("The data area of the game module cannot be read.");
+        }
+
+        // Older modules: the table is part of the module image, at the address the header names.
+        int tableOffset = header.RomOffset + (int)(header.ConditionsAddress - GameModuleImage.LoadAddress);
+        if (header.ConditionCount < 0 || header.ConditionCount > GameModuleImage.ConditionsCapacity
+            || tableOffset < header.RomOffset || tableOffset + (header.ConditionCount * OldConditionSize) > rom.Length)
+        {
+            throw new InvalidDataException("The conditions table of the game module cannot be read.");
+        }
+
+        var result = new List<GameModuleCondition>();
+        for (int i = 0; i < header.ConditionCount; i++)
+        {
+            result.Add(DataArea.ReadEntry(rom.Slice(tableOffset + (i * OldConditionSize), OldConditionSize)));
+        }
+
+        return result;
+    }
+
     /// <summary>Size of the image as loaded (rounded up to 8 bytes for the DMA).</summary>
     public static int AlignedSize(int length) => (length + 7) & ~7;
 
@@ -476,6 +560,56 @@ public static class GameModule
         foreach (WordPatch patch in patches)
         {
             patch.Write(rom);
+        }
+    }
+}
+
+/// <summary>The header of the game module in a built ROM (see <see cref="GameModule.ReadHeader"/>).</summary>
+/// <param name="RomOffset">Where the module lies in the ROM.</param>
+/// <param name="Version">Module version (header +0x24).</param>
+/// <param name="Flags">The flags the editor wrote (+0x0C).</param>
+/// <param name="Live">The live values (+0x90).</param>
+/// <param name="Info">The information line: "project "name" version, built date".</param>
+/// <param name="ImageSize">Size of the module image.</param>
+/// <param name="ConditionsAddress">RAM address of the conditions table (+0x28).</param>
+/// <param name="ConditionCount">Number of missions in the table (+0x2C).</param>
+/// <param name="DataRomOffset">ROM offset of the data area image (not used before module version 6).</param>
+/// <param name="DataSize">Size of the data area image.</param>
+public sealed record GameModuleHeader(int RomOffset, uint Version, uint Flags, LiveValues Live, string Info, int ImageSize,
+    uint ConditionsAddress, int ConditionCount, int DataRomOffset, int DataSize)
+{
+    /// <summary>Debug output is on.</summary>
+    public bool DebugOutput => (Flags & 4) != 0;
+
+    /// <summary>The steps of the startup are reported.</summary>
+    public bool StartupInfo => (Flags & 1) != 0;
+
+    /// <summary>The developers' messages are passed on.</summary>
+    public bool GameMessages => (Flags & 2) != 0;
+
+    /// <summary>The messages are shown on the screen too.</summary>
+    public bool OnScreen => (Flags & 8) != 0;
+
+    /// <summary>Live values are shown during missions.</summary>
+    public bool LiveValuesShown => (Flags & 16) != 0;
+
+    /// <summary>
+    /// Project name and version from the information line ("project "name" 1.0, built …"), or null if the
+    /// line has another form.
+    /// </summary>
+    public (string Name, string Version)? Project
+    {
+        get
+        {
+            const string prefix = "project \"";
+            int built = Info.LastIndexOf(", built ", StringComparison.Ordinal);
+            int quote = built < 0 ? -1 : Info.LastIndexOf("\" ", built, StringComparison.Ordinal);
+            if (!Info.StartsWith(prefix, StringComparison.Ordinal) || quote < prefix.Length)
+            {
+                return null;
+            }
+
+            return (Info[prefix.Length..quote], Info[(quote + 2)..built]);
         }
     }
 }

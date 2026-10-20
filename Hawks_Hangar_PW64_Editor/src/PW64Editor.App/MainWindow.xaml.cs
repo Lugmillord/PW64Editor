@@ -188,6 +188,41 @@ public partial class MainWindow : Window
 
     private void OnOpenProjectFolder(object sender, RoutedEventArgs e) => Ui.OpenFolder(_session.Project.Folder);
 
+    private async void OnCopyProject(object sender, RoutedEventArgs e)
+    {
+        // The copy is made from the saved project: unsaved edits are saved first (or discarded).
+        if (await ConfirmUnsavedChangesAsync("copying the project"))
+        {
+            SwitchTo(await ProjectOpener.CopyAsync(this, _session));
+        }
+    }
+
+    private async void OnProjectFromRom(object sender, RoutedEventArgs e)
+    {
+        if (await ConfirmUnsavedChangesAsync("opening another project"))
+        {
+            ShowImported(await ProjectOpener.FromRomAsync(this));
+        }
+    }
+
+    private async void OnProjectFromPatch(object sender, RoutedEventArgs e)
+    {
+        if (await ConfirmUnsavedChangesAsync("opening another project"))
+        {
+            ShowImported(await ProjectOpener.FromPatchAsync(this));
+        }
+    }
+
+    /// <summary>Switches to a project made from a ROM and shows the report of the import.</summary>
+    private void ShowImported((EditorSession Session, string Report)? imported)
+    {
+        if (imported is { } result)
+        {
+            SwitchTo(result.Session);
+            ProjectOpener.ShowReport(this, result.Report);
+        }
+    }
+
     private async void OnCloseProject(object sender, RoutedEventArgs e)
     {
         if (!await ConfirmUnsavedChangesAsync("closing the project"))

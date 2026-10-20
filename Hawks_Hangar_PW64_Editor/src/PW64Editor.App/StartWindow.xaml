@@ -2,7 +2,7 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Hawk's Hangar"
-        Width="720" Height="440"
+        Width="720" Height="500"
         ResizeMode="CanMinimize"
         WindowStartupLocation="CenterScreen"
         Loaded="OnLoaded">
@@ -24,7 +24,13 @@
 
                 <StackPanel DockPanel.Dock="Bottom" VerticalAlignment="Bottom">
                     <Button Content="New project…" Click="OnNewProject" Padding="10,8" Margin="0,0,0,10" IsDefault="True" />
-                    <Button Content="Open project…" Click="OnOpenProject" Padding="10,8" Margin="0,0,0,10" />
+                    <Button Content="Open project…" Click="OnOpenProject" Padding="10,8" Margin="0,0,0,18" />
+                    <Button Content="Copy project…" Click="OnCopyProject" Padding="10,8" Margin="0,0,0,10"
+                            ToolTip="Copies a project folder under a new name and opens the copy." />
+                    <Button Content="Project from ROM…" Click="OnProjectFromRom" Padding="10,8" Margin="0,0,0,10"
+                            ToolTip="Makes a project from a hack ROM: changed game files, songs, code fixes and, for hacks built with Hawk's Hangar, their settings." />
+                    <Button Content="Project from patch…" Click="OnProjectFromPatch" Padding="10,8" Margin="0,0,0,18"
+                            ToolTip="Applies a BPS patch to the clean ROM and makes a project from the result." />
                     <Button Content="Exit" Click="OnExit" Padding="10,8" />
                 </StackPanel>
             </DockPanel>

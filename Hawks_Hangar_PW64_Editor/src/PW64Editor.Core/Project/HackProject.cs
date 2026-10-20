@@ -129,7 +129,26 @@ public sealed partial class HackProject
     /// <param name="prepareForGit">If true, a .gitignore is created that keeps local settings,
     /// backups and ROM files out of version control.</param>
     /// <exception cref="ProjectException">The folder already contains files.</exception>
-    public static HackProject Create(string folder, string name, string baseRomSha1, string? cleanRomPath, bool prepareForGit = false)
+    public static HackProject Create(string folder, string name, string baseRomSha1, string? cleanRomPath, bool prepareForGit = false) =>
+        // New projects start with every known code fix and game patch.
+        Create(folder, new ProjectSettings
+        {
+            Name = name,
+            BaseRomSha1 = baseRomSha1,
+            AppliedCodeFixes = [.. CodeFixes.AllIds],
+            AppliedPatches = [.. GamePatches.AllIds],
+        }, cleanRomPath, prepareForGit);
+
+    /// <summary>
+    /// Creates a new project with the given settings in an empty or not yet existing folder (used when a
+    /// project is copied or made from a ROM).
+    /// </summary>
+    /// <param name="folder">Project folder.</param>
+    /// <param name="settings">The shared settings (name, base ROM SHA-1, …); taken over as they are.</param>
+    /// <param name="cleanRomPath">Where the clean ROM is stored on this computer (optional).</param>
+    /// <param name="prepareForGit">If true, a .gitignore is created.</param>
+    /// <exception cref="ProjectException">The folder already contains files.</exception>
+    public static HackProject Create(string folder, ProjectSettings settings, string? cleanRomPath, bool prepareForGit)
     {
         string fullPath = Path.GetFullPath(folder);
         if (Directory.Exists(fullPath) && Directory.EnumerateFileSystemEntries(fullPath).Any())
@@ -140,16 +159,9 @@ public sealed partial class HackProject
         Directory.CreateDirectory(fullPath);
         Directory.CreateDirectory(Path.Combine(fullPath, FilesFolderName));
 
-        // New projects start with every known code fix and game patch.
         var project = new HackProject(
             fullPath,
-            new ProjectSettings
-            {
-                Name = name,
-                BaseRomSha1 = baseRomSha1,
-                AppliedCodeFixes = [.. CodeFixes.AllIds],
-                AppliedPatches = [.. GamePatches.AllIds],
-            },
+            settings,
             new LocalProjectSettings { CleanRomPath = cleanRomPath is null ? null : Path.GetFullPath(cleanRomPath) });
 
         project.Save();
@@ -208,6 +220,59 @@ public sealed partial class HackProject
         Directory.CreateDirectory(Path.Combine(fullPath, FilesFolderName));
         return new HackProject(fullPath, settings, local);
     }
+
+    /// <summary>
+    /// Copies the project into a new folder under a new name: the settings, the files folder (replacement
+    /// files, imported songs and anything else kept there) and, if wanted, the .gitignore. Restore points and
+    /// built ROMs are not copied; the copy writes its hack ROM to its own folder.
+    /// </summary>
+    /// <param name="folder">The new project folder (new or empty, not inside this project).</param>
+    /// <param name="name">Name of the copy.</param>
+    /// <param name="prepareForGit">Give the copy a .gitignore (this project's, or the default one if it has none).</param>
+    /// <returns>The copy.</returns>
+    /// <exception cref="ProjectException">The folder is not empty or lies inside this project.</exception>
+    public HackProject CopyTo(string folder, string name, bool prepareForGit)
+    {
+        string fullPath = Path.GetFullPath(folder);
+        string source = Folder.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        if (string.Equals(fullPath.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar,
+                source, StringComparison.OrdinalIgnoreCase)
+            || fullPath.StartsWith(source, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ProjectException(CoreText.T("The copy cannot be placed inside the project it is copied from."));
+        }
+
+        // A deep copy of the settings through JSON, so the two projects share nothing.
+        ProjectSettings settings = JsonSerializer.Deserialize<ProjectSettings>(JsonSerializer.Serialize(Settings, JsonOptions), JsonOptions)!;
+        settings.Name = name;
+
+        bool hasGitIgnore = File.Exists(Path.Combine(Folder, GitIgnoreFileName));
+        HackProject copy = Create(fullPath, settings, Local.CleanRomPath, prepareForGit && !hasGitIgnore);
+        CopyFolder(FilesFolder, copy.FilesFolder);
+        if (prepareForGit && hasGitIgnore)
+        {
+            File.Copy(Path.Combine(Folder, GitIgnoreFileName), Path.Combine(fullPath, GitIgnoreFileName));
+        }
+
+        return copy;
+    }
+
+    private static void CopyFolder(string source, string target)
+    {
+        Directory.CreateDirectory(target);
+        foreach (string file in Directory.EnumerateFiles(source))
+        {
+            File.Copy(file, Path.Combine(target, Path.GetFileName(file)));
+        }
+
+        foreach (string directory in Directory.EnumerateDirectories(source))
+        {
+            CopyFolder(directory, Path.Combine(target, Path.GetFileName(directory)));
+        }
+    }
+
+    /// <summary>True if the project folder has a .gitignore (it was prepared for Git).</summary>
+    public bool HasGitIgnore => File.Exists(Path.Combine(Folder, GitIgnoreFileName));
 
     /// <summary>Writes project.json and project.user.json.</summary>
     public void Save()

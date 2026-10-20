@@ -7,7 +7,8 @@ using PW64Editor.Core.Workspace;
 namespace PW64Editor.App;
 
 /// <summary>
-/// The first window: create a project, open one (also from the recent list), or exit.
+/// The first window: create a project, open one (also from the recent list), copy one, make one from a
+/// hack ROM or a BPS patch, or exit.
 /// </summary>
 public partial class StartWindow : Window
 {
@@ -50,6 +51,26 @@ public partial class StartWindow : Window
 
     private void OnOpenProject(object sender, RoutedEventArgs e) => ShowEditor(ProjectOpener.OpenWithDialog(this));
 
+    private async void OnCopyProject(object sender, RoutedEventArgs e) => ShowEditor(await ProjectOpener.CopyAsync(this, null));
+
+    private async void OnProjectFromRom(object sender, RoutedEventArgs e) => ShowImported(await ProjectOpener.FromRomAsync(this));
+
+    private async void OnProjectFromPatch(object sender, RoutedEventArgs e) => ShowImported(await ProjectOpener.FromPatchAsync(this));
+
+    /// <summary>Opens the editor for a project made from a ROM and shows the report of the import there.</summary>
+    private void ShowImported((EditorSession Session, string Report)? imported)
+    {
+        if (imported is not { } result)
+        {
+            return;
+        }
+
+        if (ShowEditor(result.Session) is { } editor)
+        {
+            ProjectOpener.ShowReport(editor, result.Report);
+        }
+    }
+
     private void OnExit(object sender, RoutedEventArgs e) => Close();
 
     private void OnRecentDoubleClick(object sender, MouseButtonEventArgs e) => OpenSelectedRecent();
@@ -84,16 +105,18 @@ public partial class StartWindow : Window
     }
 
     /// <summary>Opens the main window for a project and closes the start window.</summary>
-    private void ShowEditor(EditorSession? session)
+    /// <returns>The main window, or null without a project.</returns>
+    private MainWindow? ShowEditor(EditorSession? session)
     {
         if (session is null)
         {
-            return;
+            return null;
         }
 
         var editor = new MainWindow(session);
         Application.Current.MainWindow = editor;
         editor.Show();
         Close();
+        return editor;
     }
 }

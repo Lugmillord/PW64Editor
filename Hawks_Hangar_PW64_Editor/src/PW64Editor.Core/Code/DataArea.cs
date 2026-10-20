@@ -104,6 +104,47 @@ public static class DataArea
         entry[0x14] = c.HardEndMusic;
     }
 
+    /// <summary>Reads the mission entries of an image made by <see cref="CreateImage"/>.</summary>
+    /// <exception cref="InvalidDataException">Not a data area image.</exception>
+    public static IReadOnlyList<GameModuleCondition> ReadImage(ReadOnlySpan<byte> image)
+    {
+        if (image.Length < HeaderSize || BinaryPrimitives.ReadUInt32BigEndian(image) != Magic)
+        {
+            throw new InvalidDataException("This is not an image of the data area.");
+        }
+
+        int count = (int)BinaryPrimitives.ReadUInt32BigEndian(image[0x08..]);
+        int entrySize = (int)BinaryPrimitives.ReadUInt32BigEndian(image[0x0C..]);
+        if (count < 0 || count > MissionCapacity || entrySize < 0x15 || HeaderSize + ((long)count * entrySize) > image.Length)
+        {
+            throw new InvalidDataException("The mission table of the data area is damaged.");
+        }
+
+        var result = new List<GameModuleCondition>(count);
+        for (int i = 0; i < count; i++)
+        {
+            result.Add(ReadEntry(image.Slice(HeaderSize + (i * entrySize), entrySize)));
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Reads one mission entry (the reverse of WriteEntry). Also reads the shorter entries of older module
+    /// versions (0x14 bytes, without the jingle).
+    /// </summary>
+    public static GameModuleCondition ReadEntry(ReadOnlySpan<byte> entry)
+    {
+        byte flags = entry[3];
+        byte[] required = entry.Slice(4, GameModule.ObjectTypes).ToArray();
+        float altitude = BinaryPrimitives.ReadSingleBigEndian(entry[0x0C..]);
+        float distance = BinaryPrimitives.ReadSingleBigEndian(entry[0x10..]);
+        HardEndScoring hardEnd = (flags & 32) != 0 ? HardEndScoring.Zero : (flags & 16) != 0 ? HardEndScoring.Scored : HardEndScoring.Retail;
+        return new GameModuleCondition(entry[1], entry[0], entry[2], (flags & 1) != 0,
+            (flags & 2) != 0 ? altitude : null, required, (flags & 4) != 0 ? distance : null,
+            UnlimitedFuel: (flags & 8) != 0, HardEnd: hardEnd, HardEndMusic: entry.Length > 0x14 ? entry[0x14] : (byte)0);
+    }
+
     /// <summary>
     /// The changes of the memory manager that keep the heap out of the data area. They work on the
     /// original game code and on the code of <see cref="CodeFixes.ExpandedTexts"/>.
