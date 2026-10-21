@@ -1159,5 +1159,16 @@
   "Touchdown point T (first wheel contact)": "Point de contact T (premier contact des roues)",
   "Distance dT (m)": "Distance dT (m)",
   "Resting point R": "Point de repos R",
-  "Distance dR (m)": "Distance dR (m)"
+  "Distance dR (m)": "Distance dR (m)",
+  "opening the project settings": "d'ouvrir les paramètres du projet",
+  "The stage is open when the points of the license tests and bonus games reach the game's limits.": "L'étape est débloquée quand les points des épreuves de licence et des jeux bonus atteignent les seuils du jeu.",
+  "Birdman, mission {0}": "Birdman, mission {0}",
+  "Points of the Birdman mission (game patch \"Bonus games and Birdman\"), 0 to 100, or \"–\" (empty) for no result.": "Points de la mission Birdman (patch du jeu « Jeux bonus et Birdman »), 0 à 100, ou « – » (vide) pour aucun résultat.",
+  "The game patch \"{0}\" adds texts and needs the code fix \"{1}\". Apply it first.": "Le patch du jeu « {0} » ajoute des textes et nécessite la correction du code « {1} ». Appliquez-la d'abord.",
+  "Bonus games and Birdman": "Jeux bonus et Birdman",
+  "Every Sky Diving level gets its own mission screen and result sheet, every Jumble Hopper level its own result sheet (the game shares one text for all levels; the editor adds the texts as copies). The Birdman gets medal limits (280/320/360 points per stage) and the game saves its stage 4 too, so the photos of a save file lie at another place than without the patch. The original missions do not change.": "Chaque niveau de Sky Diving reçoit son propre écran de mission et sa propre feuille de résultats, chaque niveau du Jumble Hopper sa propre feuille de résultats (le jeu partage un seul texte pour tous les niveaux ; l'éditeur ajoute les textes sous forme de copies). Le Birdman reçoit des seuils de médailles (280/320/360 points par étape) et le jeu sauvegarde aussi son étape 4 ; les photos d'un fichier de sauvegarde se trouvent donc à un autre endroit que sans le patch. Les missions d'origine ne changent pas.",
+  "{0}: own texts {1} (without the patch the game shows the shared text again; the texts stay in the project)": "{0} : textes propres {1} (sans le patch, le jeu affiche de nouveau le texte commun ; les textes restent dans le projet)",
+  "Added by the game patch \"Bonus games and Birdman\" as a copy of the text shared by all levels. The game shows it for this level.": "Ajouté par le patch du jeu « Jeux bonus et Birdman » comme copie du texte commun à tous les niveaux. Le jeu l'affiche pour ce niveau.",
+  "{0} texts from the original game and {1} added by a game patch (marked +; they are written into the project when you save a text). Edited texts are marked ● until saved.": "{0} textes du jeu d'origine et {1} ajoutés par un patch du jeu (marqués +, ils sont écrits dans le projet dès que vous enregistrez un texte). Les textes modifiés sont marqués ● jusqu'à l'enregistrement.",
+  "Added by a game patch": "Ajouté par un patch du jeu"
 }

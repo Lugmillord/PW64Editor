@@ -1159,5 +1159,16 @@
   "Touchdown point T (first wheel contact)": "接地点T（最初の車輪接地）",
   "Distance dT (m)": "距離dT (m)",
   "Resting point R": "静止点R",
-  "Distance dR (m)": "距離dR (m)"
+  "Distance dR (m)": "距離dR (m)",
+  "opening the project settings": "プロジェクト設定を開く",
+  "The stage is open when the points of the license tests and bonus games reach the game's limits.": "ライセンステストとボーナスゲームの得点がゲームの基準に達するとステージが開放されます。",
+  "Birdman, mission {0}": "Birdman ミッション{0}",
+  "Points of the Birdman mission (game patch \"Bonus games and Birdman\"), 0 to 100, or \"–\" (empty) for no result.": "Birdmanミッションの得点（ゲームパッチ「ボーナスゲームとBirdman」）、0～100点、または結果なしは「–」(空欄)。",
+  "The game patch \"{0}\" adds texts and needs the code fix \"{1}\". Apply it first.": "ゲームパッチ「{0}」はテキストを追加するため、コード修正「{1}」が必要です。先に適用してください。",
+  "Bonus games and Birdman": "ボーナスゲームとBirdman",
+  "Every Sky Diving level gets its own mission screen and result sheet, every Jumble Hopper level its own result sheet (the game shares one text for all levels; the editor adds the texts as copies). The Birdman gets medal limits (280/320/360 points per stage) and the game saves its stage 4 too, so the photos of a save file lie at another place than without the patch. The original missions do not change.": "Sky Divingの各レベルに専用のミッション画面と結果画面を、Jumble Hopperの各レベルに専用の結果画面を用意します（ゲームでは全レベルで1つのテキストを共有しています。エディターがテキストをコピーとして追加します）。Birdmanにメダル基準（ステージごとに280/320/360点）を設け、ステージ4も保存されるようにします。そのため、セーブファイルの写真の位置がパッチなしの場合と異なります。元のミッションは変わりません。",
+  "{0}: own texts {1} (without the patch the game shows the shared text again; the texts stay in the project)": "{0}：専用テキスト{1}（パッチがないとゲームは共通のテキストを再び表示します。テキストはプロジェクトに残ります）",
+  "Added by the game patch \"Bonus games and Birdman\" as a copy of the text shared by all levels. The game shows it for this level.": "ゲームパッチ「ボーナスゲームとBirdman」が全レベル共通のテキストのコピーとして追加しました。ゲームはこのレベルでこのテキストを表示します。",
+  "{0} texts from the original game and {1} added by a game patch (marked +; they are written into the project when you save a text). Edited texts are marked ● until saved.": "元のゲームのテキスト{0}件と、ゲームパッチが追加したテキスト{1}件（+で表示。テキストを保存するとプロジェクトに書き込まれます）。編集したテキストは保存するまで●で表示されます。",
+  "Added by a game patch": "ゲームパッチで追加"
 }

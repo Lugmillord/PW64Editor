@@ -178,7 +178,11 @@ public partial class GameFilesWindow : Window
         }
     }
 
-    private void OnOpenFolder(object sender, RoutedEventArgs e) => Ui.OpenFolder(_session.Project.FilesFolder);
+    private void OnOpenFolder(object sender, RoutedEventArgs e)
+    {
+        _session.Project.EnsureFilesFolder();
+        Ui.OpenFolder(_session.Project.FilesFolder);
+    }
 
     private void OnClose(object sender, RoutedEventArgs e) => Close();
 }

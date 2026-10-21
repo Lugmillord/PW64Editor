@@ -61,7 +61,8 @@ public readonly record struct TestId(int Class, Vehicle Vehicle, int Test);
 
 /// <summary>
 /// Where the results lie in a saved game. The game stores one 7-bit value per test, in this order:
-/// for every vehicle, for every class (3 for the bonus vehicles, 4 for the others), for every test.
+/// for every vehicle, for every class (4 for the license vehicles, 3 for all others; with the game patch
+/// "Bonus games and Birdman" 4 for the Birdman too), for every test.
 /// How many tests a class has comes from the mission files (UPWT), so a hack with other missions
 /// has another layout (saveFileWrite / saveFileLoad in src/app/save.c).
 /// </summary>
@@ -89,8 +90,9 @@ public sealed class SaveGameLayout
     private readonly int[,] _testCounts = new int[MaxClasses, Vehicles.Count];
     private readonly Dictionary<TestId, int> _index = new();
 
-    private SaveGameLayout(IEnumerable<TestId> tasks)
+    private SaveGameLayout(IEnumerable<TestId> tasks, bool birdmanStage4 = false)
     {
+        BirdmanStage4 = birdmanStage4;
         var defined = new bool[MaxClasses, MaxTests, Vehicles.Count];
         foreach (TestId task in tasks)
         {
@@ -120,7 +122,7 @@ public sealed class SaveGameLayout
         var saved = new List<TestId>();
         for (int v = 0; v < Vehicles.Count; v++)
         {
-            int classes = Vehicles.IsMain((Vehicle)v) ? 4 : 3;
+            int classes = Vehicles.IsMain((Vehicle)v) || (birdmanStage4 && (Vehicle)v == Vehicle.Birdman) ? 4 : 3;
             for (int c = 0; c < classes; c++)
             {
                 for (int t = 0; t < _testCounts[c, v]; t++)
@@ -139,6 +141,9 @@ public sealed class SaveGameLayout
                 $"The missions of this ROM need {DataEndBit} bits in a saved game, but only {DataBytes * 8} fit.");
         }
     }
+
+    /// <summary>True if the Birdman's stage 4 is saved too (game patch "Bonus games and Birdman").</summary>
+    public bool BirdmanStage4 { get; }
 
     /// <summary>The tests whose results are saved, in their order in the saved game.</summary>
     public IReadOnlyList<TestId> SavedTests { get; }
@@ -162,14 +167,21 @@ public sealed class SaveGameLayout
     /// <summary>The layout of the retail game (US): 57 results, among them no Birdman stage 4.</summary>
     public static SaveGameLayout Retail { get; } = new(RetailTasks());
 
+    /// <summary>The layout of the retail missions with the game patch "Bonus games and Birdman" (61 results).</summary>
+    public static SaveGameLayout RetailWithBirdmanStage4 { get; } = new(RetailTasks(), birdmanStage4: true);
+
     /// <summary>Builds the layout from a list of tests, as the game builds its task table.</summary>
-    public static SaveGameLayout FromTasks(IEnumerable<TestId> tasks) => new(tasks);
+    /// <param name="tasks">The tests.</param>
+    /// <param name="birdmanStage4">The game saves the Birdman's stage 4 (game patch "Bonus games and Birdman").</param>
+    public static SaveGameLayout FromTasks(IEnumerable<TestId> tasks, bool birdmanStage4 = false) => new(tasks, birdmanStage4);
 
     /// <summary>
     /// Builds the layout from the mission files (UPWT, block COMM: class, vehicle, test) of a ROM.
     /// </summary>
+    /// <param name="fileSystem">The game files.</param>
+    /// <param name="birdmanStage4">The game saves the Birdman's stage 4 (game patch "Bonus games and Birdman").</param>
     /// <exception cref="InvalidDataException">A mission file is damaged, or the results do not fit.</exception>
-    public static SaveGameLayout FromGameFiles(GameFileSystem fileSystem)
+    public static SaveGameLayout FromGameFiles(GameFileSystem fileSystem, bool birdmanStage4 = false)
     {
         var tasks = new List<TestId>();
         foreach (GameFile file in fileSystem.Files.Where(f => f.FileType == "UPWT"))
@@ -185,7 +197,7 @@ public sealed class SaveGameLayout
             tasks.Add(new TestId(data[comm.DataOffset], (Vehicle)data[comm.DataOffset + 1], data[comm.DataOffset + 2]));
         }
 
-        return new SaveGameLayout(tasks);
+        return new SaveGameLayout(tasks, birdmanStage4);
     }
 
     /// <summary>The 61 missions of the retail game (class, vehicle, number of tests).</summary>

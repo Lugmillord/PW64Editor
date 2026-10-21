@@ -164,7 +164,26 @@ public static class ProjectImporter
             throw new ProjectException(CoreText.F("The game files of the ROM cannot be read: {0}", ex.Message), ex);
         }
 
-        List<GameFile> changed = CompareFiles(cleanFs, hackFs, notes);
+        // With the game patch "Bonus games and Birdman" the build adds the level texts to the text file; a text file that
+        // differs from the original only by them is not a change of its own.
+        (int Index, byte[] Data)? patchTexts = null;
+        if (GamePatches.BonusGames.AsCodeFix.GetState(hack, CodeFixes.CodeStart, CodeFixes.CodeEnd(layout)) == CodeFixState.Applied)
+        {
+            try
+            {
+                GameFile cleanText = Text.GameTextFile.FindFile(cleanFs);
+                if (ResultTables.AddLevelTexts(cleanText.Data) is { } built)
+                {
+                    patchTexts = (cleanText.TableIndex, built);
+                }
+            }
+            catch (InvalidDataException)
+            {
+                // not the retail layout (test data)
+            }
+        }
+
+        List<GameFile> changed = CompareFiles(cleanFs, hackFs, notes, patchTexts);
         List<GameFile> hackFiles = cleanFs.Files.Select(f => changed.FirstOrDefault(c => c.TableIndex == f.TableIndex) ?? f).ToList();
 
         // Music, and where the audio data lies.
@@ -418,7 +437,12 @@ public static class ProjectImporter
     }
 
     /// <summary>The game files of the hack that differ from the clean ROM (with the clean ROM's table index and name).</summary>
-    private static List<GameFile> CompareFiles(GameFileSystem clean, GameFileSystem hack, List<ImportNote> notes)
+    /// <param name="clean">The clean ROM's files.</param>
+    /// <param name="hack">The hack's files.</param>
+    /// <param name="notes">The report.</param>
+    /// <param name="builtTextFile">The text file a build makes from the original one by itself (game patch "Bonus games and
+    /// Birdman"), or null: the hack's text file is no change if it is this one.</param>
+    private static List<GameFile> CompareFiles(GameFileSystem clean, GameFileSystem hack, List<ImportNote> notes, (int Index, byte[] Data)? builtTextFile = null)
     {
         var changed = new List<GameFile>();
         int otherType = 0;
@@ -434,7 +458,8 @@ public static class ProjectImporter
             {
                 otherType++;
             }
-            else if (!original.Data.AsSpan().SequenceEqual(file.Data))
+            else if (!original.Data.AsSpan().SequenceEqual(file.Data)
+                && !(builtTextFile is { } text && text.Index == file.TableIndex && text.Data.AsSpan().SequenceEqual(file.Data)))
             {
                 changed.Add(original with { Data = file.Data });
             }

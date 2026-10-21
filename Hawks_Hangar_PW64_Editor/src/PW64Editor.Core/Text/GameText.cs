@@ -15,6 +15,13 @@ public sealed record GameText(GameTextEntry Entry, string Markup, TextCategory C
     /// <summary>True for texts added by the user (number at or above the original text count).</summary>
     public bool IsCustom { get; init; }
 
+    /// <summary>
+    /// True for a custom text that a game patch needs (the level texts of "Bonus games and Birdman",
+    /// <see cref="Missions.ResultTables.NewTexts"/>): the game shows it, it is sorted where it appears, and removing it
+    /// makes no sense (the build adds it again).
+    /// </summary>
+    public bool IsPatchText { get; init; }
+
     /// <summary>True for a free slot left by a removed custom text (see <see cref="GameTextEntry.IsFree"/>).</summary>
     public bool IsFree => Entry.IsFree;
 }
@@ -61,7 +68,9 @@ public sealed class GameTextLibrary
         var codec = new TextCodec(font);
         List<GameText> texts = file.Entries
             .Select(e => e.Index >= originalCount
-                ? new GameText(e, codec.Decode(e.Data), CustomTexts.Category(e.Name)) { IsCustom = true }
+                ? Missions.ResultTables.IsLevelText(e.Name)
+                    ? new GameText(e, codec.Decode(e.Data), TextCatalog.Categorize(e.Name)) { IsCustom = true, IsPatchText = true }
+                    : new GameText(e, codec.Decode(e.Data), CustomTexts.Category(e.Name)) { IsCustom = true }
                 : new GameText(e, codec.Decode(e.Data), TextCatalog.Categorize(e.Name)))
             .ToList();
         return new GameTextLibrary(font, file, texts, fromProject) { OriginalCount = originalCount };

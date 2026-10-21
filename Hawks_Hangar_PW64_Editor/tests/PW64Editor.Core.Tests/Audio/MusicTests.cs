@@ -178,6 +178,7 @@ public class MusicTests
         using var temp = new TempDirectory();
         N64Rom rom = N64Rom.Load(TestRomLocator.RomPath!);
         EditorSession session = EditorSession.Create(temp.Combine("hack"), "Music Test", false, rom, TestRomLocator.RomPath!);
+        session.Project.Settings.AppliedPatches.Remove(GamePatches.BonusGames.Id); // its level texts make the files longer, which moves the music
         session.SaveSong(new SongSettings { Song = 4, Instruments = [new InstrumentChange(3, 27, 10)] });
 
         (_, string romPath, _) = session.Build(createRestorePoint: false);

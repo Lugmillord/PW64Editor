@@ -253,7 +253,9 @@ public sealed class SaveSlotView : UserControl
             int stage = l;
             var cell = new StackPanel { Margin = new Thickness(0, 4, 0, 4) };
             var check = new CheckBox { Content = L.T("Opened"), IsEnabled = false,
-                ToolTip = L.T("Birdman has no points. The stage is open when the points below reach the game's limits.") };
+                ToolTip = _slot.Layout.BirdmanStage4
+                    ? L.T("The stage is open when the points of the license tests and bonus games reach the game's limits.")
+                    : L.T("Birdman has no points. The stage is open when the points below reach the game's limits.") };
             string needs = stage == 0
                 ? L.T("Raises the Beginner test of all three license vehicles to 80 points (a silver medal).")
                 : L.F("Raises the {0} tests of all three license vehicles to a silver medal ({1} points each), and every level of {2} to 80 points.",
@@ -269,6 +271,34 @@ public sealed class SaveSlotView : UserControl
                 open.Visibility = Show(_progress.CanOpenBirdmanStage(stage));
             });
             Place(grid, cell, row, l + 1);
+        }
+
+        // With the game patch "Bonus games and Birdman" the Birdman's results are points, and stage 4 is saved too.
+        if (_slot.Layout.BirdmanStage4)
+        {
+            int missions = Enumerable.Range(0, SaveProgress.BirdmanStages).Max(s => _slot.Layout.TestCount(s, Vehicle.Birdman));
+            for (int t = 0; t < missions; t++)
+            {
+                row = AddRow(grid);
+                Place(grid, new TextBlock { Text = L.F("Birdman, mission {0}", t + 1), Margin = new Thickness(0, 3, 0, 3), VerticalAlignment = VerticalAlignment.Center }, row, 0);
+                for (int l = 0; l < SaveProgress.BirdmanStages; l++)
+                {
+                    int stage = l;
+                    var id = new TestId(stage, Vehicle.Birdman, t);
+                    if (!_slot.Layout.IsSaved(id))
+                    {
+                        continue;
+                    }
+
+                    var box = new ScoreBox(() => _slot.GetResult(id), value => _slot.SetResult(id, value), OnChanged)
+                    {
+                        Margin = new Thickness(0, 2, 0, 2),
+                        ToolTip = L.T("Points of the Birdman mission (game patch \"Bonus games and Birdman\"), 0 to 100, or \"–\" (empty) for no result."),
+                    };
+                    _refreshers.Add(() => box.Update(_progress.IsBirdmanStageOpen(stage)));
+                    Place(grid, box, row, l + 1);
+                }
+            }
         }
 
         foreach (Vehicle game in Vehicles.BonusGames)

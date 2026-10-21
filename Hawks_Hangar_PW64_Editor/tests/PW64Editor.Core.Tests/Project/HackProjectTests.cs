@@ -23,6 +23,22 @@ public class HackProjectTests
     }
 
     [Fact]
+    public void MissingFilesFolder_IsCreatedAgain()
+    {
+        using var temp = new TempDirectory();
+        HackProject project = HackProject.Create(temp.Combine("MyHack"), "My Hack", Sha1, cleanRomPath: null);
+        Directory.Delete(project.FilesFolder); // removed outside the editor (or not kept by Git)
+
+        Assert.Empty(project.GetOverrides());
+        Assert.True(Directory.Exists(project.FilesFolder));
+
+        Directory.Delete(project.FilesFolder);
+        Assert.Empty(HackProject.Load(project.Folder).GetOverrides());
+        Directory.Delete(project.FilesFolder);
+        Assert.NotNull(ProjectBackups.Create(project));
+    }
+
+    [Fact]
     public void Create_WithGitPreparation_WritesGitIgnore()
     {
         using var temp = new TempDirectory();

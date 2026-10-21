@@ -61,6 +61,7 @@ public static class ProjectBackups
 
         Directory.CreateDirectory(folder);
         File.Copy(Path.Combine(project.Folder, HackProject.ProjectFileName), Path.Combine(folder, HackProject.ProjectFileName));
+        project.EnsureFilesFolder();
         CopyDirectory(project.FilesFolder, Path.Combine(folder, HackProject.FilesFolderName));
 
         if (File.Exists(project.OutputRomPath))

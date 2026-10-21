@@ -83,7 +83,7 @@ public sealed partial class TextRow : INotifyPropertyChanged
     public string StatusMark => IsUnsaved ? "●" : IsCustom ? "+" : DiffersFromOriginal ? "✎" : string.Empty;
 
     public string? StatusText => IsNew ? L.T("Added, not saved yet") : IsUnsaved ? L.T("Changed, not saved yet")
-        : IsCustom ? L.T("Added text") : DiffersFromOriginal ? L.T("Changed compared to the original game") : null;
+        : Text.IsPatchText ? L.T("Added by a game patch") : IsCustom ? L.T("Added text") : DiffersFromOriginal ? L.T("Changed compared to the original game") : null;
 
     /// <summary>
     /// Most lines this text may have: the room the game's screen offers (see TextLimits),

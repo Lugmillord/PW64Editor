@@ -16,8 +16,9 @@ public class GamePatchTests
     [Fact]
     public void GamePatches_HaveUniqueStableIds()
     {
-        Assert.Equal(["goal-objects-v1"], GamePatches.AllIds);
+        Assert.Equal(["goal-objects-v1", "bonus-birdman-v1"], GamePatches.AllIds);
         Assert.Same(GamePatches.GoalObjects, GamePatches.Find("goal-objects-v1"));
+        Assert.Same(GamePatches.BonusGames, GamePatches.Find("bonus-birdman-v1"));
         Assert.Null(GamePatches.Find("unknown"));
     }
 
@@ -71,7 +72,8 @@ public class GamePatchTests
         string json = File.ReadAllText(path);
         Assert.Contains("goal-objects-v1", json);
 
-        File.WriteAllText(path, json.Replace("\"goal-objects-v1\"", string.Empty));
+        Assert.Contains("bonus-birdman-v1", json);
+        File.WriteAllText(path, json.Replace("\"goal-objects-v1\",", string.Empty).Replace("\"bonus-birdman-v1\"", string.Empty));
         Assert.Empty(HackProject.Load(project.Folder).Settings.AppliedPatches);
 
         File.WriteAllText(path, json.Replace("\"goal-objects-v1\"", "\"from-the-future-v9\""));

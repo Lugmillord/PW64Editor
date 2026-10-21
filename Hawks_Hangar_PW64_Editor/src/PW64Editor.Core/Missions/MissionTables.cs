@@ -20,22 +20,30 @@ public sealed class MissionTables
 {
     private readonly byte[] _rom;
     private readonly MissionLayout _layout;
+    private readonly bool _bonusGames;
 
     /// <summary>Reads the tables from a ROM (a copy of the needed bytes is not made; do not change the array).</summary>
-    public MissionTables(byte[] rom, MissionLayout layout)
+    /// <param name="rom">The ROM (the clean one: the editor's changes are not read back from a built ROM).</param>
+    /// <param name="layout">Where the tables are.</param>
+    /// <param name="bonusGames">The game patch <see cref="Code.GamePatches.BonusGames"/> is applied: the levels of Sky
+    /// Diving and the Jumble Hopper have texts of their own and the Birdman has medal limits.</param>
+    public MissionTables(byte[] rom, MissionLayout layout, bool bonusGames = false)
     {
         _rom = rom;
         _layout = layout;
+        _bonusGames = bonusGames;
     }
 
     /// <summary>
     /// Name of the text of the mission screen ("…_S1", points without slash), or null if the game
     /// has none for this test.
     /// </summary>
-    public string? MissionScreenTextName(TestId test) => ReadName(_layout.MissionScreenNamesOffset, test);
+    public string? MissionScreenTextName(TestId test) =>
+        (_bonusGames ? ResultTables.LevelTextName(test, false) : null) ?? ReadName(_layout.MissionScreenNamesOffset, test);
 
     /// <summary>Name of the text of the result sheet ("…_S2", with slash), or null if the game has none.</summary>
-    public string? ResultSheetTextName(TestId test) => ReadName(_layout.ResultSheetNamesOffset, test);
+    public string? ResultSheetTextName(TestId test) =>
+        (_bonusGames ? ResultTables.LevelTextName(test, true) : null) ?? ReadName(_layout.ResultSheetNamesOffset, test);
 
     /// <summary>
     /// The point rows of the result sheet, bottom row first, as stored. Empty rows are 0; the list
@@ -63,7 +71,13 @@ public sealed class MissionTables
             ? _rom[_layout.ClassIslandsOffset + ((int)vehicle * 4) + classIndex]
             : null;
 
-    /// <summary>The eight entries of the medal table.</summary>
+    /// <summary>Entry of the Birdman in the medal table (medal index = vehicle + 1 for all but the main vehicles).</summary>
+    public const int BirdmanMedalEntry = 7;
+
+    /// <summary>The Birdman's medal limits with the game patch <see cref="Code.GamePatches.BonusGames"/> (the game has 0/0/0).</summary>
+    public static MedalLimits BirdmanMedalLimits { get; } = new(280, 320, 360);
+
+    /// <summary>The eight entries of the medal table (with the game patch <see cref="Code.GamePatches.BonusGames"/>: as it sets them).</summary>
     public IReadOnlyList<MedalLimits> MedalLimits()
     {
         var limits = new List<MedalLimits>(MissionLayout.MedalEntries);
@@ -74,6 +88,11 @@ public sealed class MissionTables
                 BinaryPrimitives.ReadUInt16BigEndian(entry),
                 BinaryPrimitives.ReadUInt16BigEndian(entry[2..]),
                 BinaryPrimitives.ReadUInt16BigEndian(entry[4..])));
+        }
+
+        if (_bonusGames && limits.Count > BirdmanMedalEntry)
+        {
+            limits[BirdmanMedalEntry] = BirdmanMedalLimits;
         }
 
         return limits;

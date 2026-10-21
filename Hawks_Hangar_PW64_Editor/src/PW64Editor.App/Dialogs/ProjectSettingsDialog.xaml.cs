@@ -48,6 +48,9 @@ public partial class ProjectSettingsDialog : Window
     /// <summary>True if a code fix or a game patch was applied or undone (the hack ROM was rebuilt), even if the dialog is cancelled.</summary>
     public bool CodeFixesApplied { get; private set; }
 
+    /// <summary>True if a game patch was applied or undone (it can add texts and change the missions' texts).</summary>
+    public bool GamePatchesChanged { get; private set; }
+
     private async void OnApplyPatch(object sender, RoutedEventArgs e)
     {
         if ((sender as FrameworkElement)?.DataContext is not GamePatchRow row || row.IsApplied)
@@ -95,6 +98,7 @@ public partial class ProjectSettingsDialog : Window
             (_, string romPath) = await Ui.RunBusyAsync(this, () => _session.SetGamePatch(row.Patch, apply));
             row.IsApplied = apply;
             CodeFixesApplied = true;
+            GamePatchesChanged = true;
             PatchStatus.Text = apply
                 ? L.F("\"{0}\" applied. Hack ROM rebuilt: {1}", row.Name, romPath)
                 : L.F("\"{0}\" undone. Hack ROM rebuilt: {1}", row.Name, romPath);

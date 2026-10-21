@@ -63,6 +63,12 @@ public sealed partial class HackProject
     public string FilesFolder => Path.Combine(Folder, FilesFolderName);
 
     /// <summary>
+    /// Creates the "files" folder again if it is missing (it can be removed outside the editor, and Git does not keep
+    /// an empty folder, so a fresh clone of a project without replacement files has none).
+    /// </summary>
+    public void EnsureFilesFolder() => Directory.CreateDirectory(FilesFolder);
+
+    /// <summary>
     /// Where the built hack ROM is written: the path from the local settings, or by default
     /// a file named after the hack inside the project folder.
     /// </summary>
@@ -248,6 +254,7 @@ public sealed partial class HackProject
 
         bool hasGitIgnore = File.Exists(Path.Combine(Folder, GitIgnoreFileName));
         HackProject copy = Create(fullPath, settings, Local.CleanRomPath, prepareForGit && !hasGitIgnore);
+        EnsureFilesFolder();
         CopyFolder(FilesFolder, copy.FilesFolder);
         if (prepareForGit && hasGitIgnore)
         {
@@ -290,6 +297,7 @@ public sealed partial class HackProject
     {
         var overrides = new List<FileOverride>();
         var seen = new Dictionary<int, string>();
+        EnsureFilesFolder();
 
         IEnumerable<string> candidates = Directory.EnumerateFiles(FilesFolder)
             .Where(p => string.Equals(Path.GetExtension(p), OverrideExtension, StringComparison.OrdinalIgnoreCase))

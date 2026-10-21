@@ -355,7 +355,8 @@ public class SessionTextTests
         GameTextLibrary library = session.LoadTexts();
 
         Assert.True(library.FromProject);
-        Assert.Equal(439, library.Texts.Count);
+        Assert.Equal(439 + 9, library.Texts.Count); // with the level texts of the game patch "Bonus games and Birdman"
+        Assert.Equal(439, GameTextFile.Parse(File.ReadAllBytes(session.Project.GetOverrides().Single().Path)).Entries.Count);
     }
 }
 

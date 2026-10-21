@@ -160,6 +160,7 @@ public class SessionCustomTextTests
     {
         N64Rom rom = N64Rom.Load(TestRomLocator.RomPath!);
         EditorSession session = EditorSession.Create(temp.Combine("p"), "Texts", false, rom, TestRomLocator.RomPath!);
+        session.Project.Settings.AppliedPatches.Remove(GamePatches.BonusGames.Id); // its level texts would take numbers 439-447
         if (!withFix)
         {
             session.Project.Settings.AppliedCodeFixes.Remove(CodeFixes.ExpandedTexts.Id);

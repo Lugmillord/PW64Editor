@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Win32;
 using PW64Editor.App.Services;
+using PW64Editor.Core.Code;
 using PW64Editor.Core.SaveGame;
 using PW64Editor.Core.Workspace;
 
@@ -62,19 +63,21 @@ public partial class SaveFileTab : UserControl
     public bool HasUnsavedChanges => _file?.IsModified == true;
 
     /// <summary>
-    /// Takes the layout of the saved results from the game (it depends on the missions). The
-    /// missions cannot be edited yet, so the clean ROM's missions are used.
+    /// Takes the layout of the saved results from the game (it depends on the missions and on the game patch
+    /// "Bonus games and Birdman", which saves the Birdman's stage 4). New missions cannot be added yet, so the
+    /// clean ROM's missions are used.
     /// </summary>
     public void Load(EditorSession session)
     {
+        bool birdmanStage4 = session.Project.HasPatch(GamePatches.BonusGames);
         try
         {
-            _layout = SaveGameLayout.FromGameFiles(session.CleanFileSystem);
+            _layout = SaveGameLayout.FromGameFiles(session.CleanFileSystem, birdmanStage4);
         }
         catch (Exception ex) when (ex is InvalidDataException or ArgumentException or IndexOutOfRangeException)
         {
             // Damaged mission files: the retail layout is the best guess.
-            _layout = SaveGameLayout.Retail;
+            _layout = birdmanStage4 ? SaveGameLayout.RetailWithBirdmanStage4 : SaveGameLayout.Retail;
         }
 
         // An open file without changes is read again with the new layout.

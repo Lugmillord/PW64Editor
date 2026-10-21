@@ -176,6 +176,12 @@ public sealed class EditorSession
     public (ProjectBuildResult Result, string RomPath) SetGamePatch(GamePatch patch, bool apply)
     {
         List<string> before = [.. Project.Settings.AppliedPatches];
+        if (apply && patch.Id == GamePatches.BonusGames.Id && !CanAddTexts)
+        {
+            throw new ProjectException(CoreText.F("The game patch \"{0}\" adds texts and needs the code fix \"{1}\". Apply it first.",
+                CoreText.T(patch.Name), CoreText.T(CodeFixes.ExpandedTexts.Name)));
+        }
+
         Project.Settings.AppliedPatches = GamePatches.AllIds
             .Where(id => id == patch.Id ? apply : before.Contains(id))
             .ToList();
@@ -246,7 +252,8 @@ public sealed class EditorSession
 
     /// <summary>
     /// Loads all game texts in their current version (project copy of the text file if the
-    /// project has one, otherwise the original).
+    /// project has one, otherwise the original). With the game patch <see cref="GamePatches.BonusGames"/> the texts of
+    /// the levels are added if the file lacks them (<see cref="ResultTables.AddLevelTexts"/>).
     /// </summary>
     /// <exception cref="InvalidDataException">The text file or the font is damaged.</exception>
     public GameTextLibrary LoadTexts()
@@ -254,6 +261,14 @@ public sealed class EditorSession
         TextFont font = TextFont.Load(CleanFileSystem);
         GameFile textFile = GameTextFile.FindFile(CleanFileSystem);
         byte[] data = GetCurrentFileData(textFile.TableIndex, out bool fromProject);
+
+        // The game patch "Bonus games and Birdman" needs texts of its own for the levels: until a text is saved they
+        // exist only here (and in the build, which adds them the same way).
+        if (Project.HasPatch(GamePatches.BonusGames) && ResultTables.AddLevelTexts(data) is { } withTexts)
+        {
+            data = withTexts;
+        }
+
         return GameTextLibrary.Create(font, data, fromProject, OriginalTextCount);
     }
 
@@ -694,7 +709,7 @@ public sealed class EditorSession
             sources.Add(new MissionSource(file.TableIndex, file.GroupIndex, data, fromProject));
         }
 
-        MissionTables? tables = Layout.Missions is { } layout ? new MissionTables(CleanRom.Data, layout) : null;
+        MissionTables? tables = Layout.Missions is { } layout ? new MissionTables(CleanRom.Data, layout, Project.HasPatch(GamePatches.BonusGames)) : null;
         MissionCatalogResult result = MissionCatalog.Build(sources, tables, Project.Settings.Missions);
         return problems.Count == 0 ? result : result with { Problems = [.. problems, .. result.Problems] };
     }
@@ -742,7 +757,7 @@ public sealed class EditorSession
 
     /// <summary>The medal limits of the game (from the clean ROM), or empty if unknown.</summary>
     public IReadOnlyList<MedalLimits> LoadMedalLimits() =>
-        Layout.Missions is { } layout ? new MissionTables(CleanRom.Data, layout).MedalLimits() : [];
+        Layout.Missions is { } layout ? new MissionTables(CleanRom.Data, layout, Project.HasPatch(GamePatches.BonusGames)).MedalLimits() : [];
 
     // ----------------------------------------------------------------- features
 

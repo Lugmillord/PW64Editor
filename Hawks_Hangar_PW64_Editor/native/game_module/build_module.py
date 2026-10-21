@@ -217,6 +217,8 @@ def main():
         '    /// <summary>RAM address of module_distance_row (jump table entry of result row type 10).</summary>',
         f'    public const uint DistanceRowAddress = 0x{symbols["module_distance_row"]:08X};',
         '',
+        '    /// <summary>RAM address of module_points_to_medal (levelSetPointsToNextMedal with the Birdman\'s points to go).</summary>',
+        f'    public const uint PointsToMedalAddress = 0x{symbols["module_points_to_medal"]:08X};',
         '    /// <summary>RAM address of module_touchdown_curve (the Gyrocopter\'s touchdown point in the scoring function).</summary>',
         f'    public const uint TouchdownCurveAddress = 0x{symbols["module_touchdown_curve"]:08X};',
         '',

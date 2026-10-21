@@ -1008,6 +1008,27 @@ void module_goal_jingle(s32 music) {
     GAME_SND_SET_MUSIC(vehicle < 7 ? sGoalJingle[vehicle] : 0x09);
 }
 
+/* "Points to the next medal" (levelSetPointsToNextMedal, 0x8032C174: s32 f(s32 *out, u16 points, u8 medal)), called
+   through here by the game patch "Bonus games and Birdman". The game's medal table has no limits for the Birdman
+   (entry 7 was 0, the patch sets 280/320/360), and when every medal is reached the original writes "100 x tests -
+   points" only for the main vehicles and "100 - points" for all others. The Birdman has four missions per stage, so
+   it gets the formula of the main vehicles, with the tests of its class. (Function names from the decompilation,
+   https://github.com/gcsmith/Pilotwings64Decomp, MIT license.) */
+#define GAME_POINTS_TO_MEDAL ((s32(*)(s32 *, u32, u32))0x8032C174) /* levelSetPointsToNextMedal */
+#define GAME_TEST_COUNT      ((s32(*)(s32, s32))0x80344EF0)        /* taskGetTestCount(class, vehicle) */
+
+s32 module_points_to_medal(s32 *out, u32 points, u32 medal) {
+    s32 result = GAME_POINTS_TO_MEDAL(out, points, medal);
+    u8 *state = GAME_STATE;
+    if (result == 3 && state != 0) {
+        u8 *player = state + (*(s32 *)(state + 0x9C)) * 140 + 0x0C; /* as the original: the current player */
+        if (*(u16 *)(player + 2) == 6) {
+            *out = 100 * GAME_TEST_COUNT(*(u16 *)(player + 4), 6) - (s32)(points & 0xFFFF);
+        }
+    }
+    return result;
+}
+
 /* The hard end time is reached (game.c, ROM 0x75004: "arg0->unkA1 = 1" goes through here):
    the game goes straight to the results and plays nothing itself, except the Hang Glider, whose
    result frames play its landing jingle. Missions with a hard end setting play the jingle chosen

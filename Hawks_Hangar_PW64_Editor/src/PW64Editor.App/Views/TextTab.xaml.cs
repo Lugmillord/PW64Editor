@@ -149,7 +149,10 @@ public partial class TextTab : UserControl, ITextEditorHost
         string added = custom > 0 ? L.F(", {0} added (marked +)", custom) : string.Empty;
         SourceText.Text = library.FromProject
             ? L.F("{0} texts from the project, {1} changed compared to the original game (marked ✎){2}. Unsaved edits are marked ●.", _rows.Count, changed, added)
-            : L.F("{0} texts from the original game. Edited texts are marked ● until saved.", _rows.Count);
+            : custom > 0
+                ? L.F("{0} texts from the original game and {1} added by a game patch (marked +; they are written into the project when you save a text). Edited texts are marked ● until saved.",
+                    _rows.Count - custom, custom)
+                : L.F("{0} texts from the original game. Edited texts are marked ● until saved.", _rows.Count);
         UnsavedChangesChanged?.Invoke(this, EventArgs.Empty);
         TextsReloaded?.Invoke(this, EventArgs.Empty);
     }

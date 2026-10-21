@@ -28,10 +28,12 @@ namespace PW64Editor.Core.Code;
 /// +0x70 f32[4] speed limits of the vehicle (LandingValues.SpeedsOf; HG km/h, GC and RB units per second)
 /// +0x80 ... reserved (0)
 /// </code>
-/// <para>The header holds behind its first 0x10 bytes the values the game code reads while flying
-/// (written by the module in every flight frame, see <see cref="LiveLandingAddress"/>).</para>
-/// <code>
-/// </code>
+/// <para>Header: +0x00 'HHMD', +0x04 version, +0x08 missions, +0x0C entry size, +0x10 size of the result tables
+/// (0 = none). At +0x40 the values the game code reads while flying (written by the module in every flight frame,
+/// see <see cref="LiveLandingAddress"/>).</para>
+/// <para>Behind the room for <see cref="MissionCapacity"/> entries (at <see cref="Missions.ResultTables.Address"/>)
+/// the result tables of the game patch <see cref="GamePatches.BonusGames"/>, when it is applied; the image then
+/// reaches up to their end.</para>
 /// <para><b>ROM</b>: the image lies in the <see cref="RomReserve"/> bytes in front of the game module
 /// at the end of the ROM; the module header holds its offset and size.</para>
 /// </remarks>
@@ -82,21 +84,40 @@ public static class DataArea
         }
     }
 
-    /// <summary>The image as the module copies it into the data area: header and the used entries.</summary>
+    /// <summary>Header offset of the size of the result tables (0 = none).</summary>
+    public const int ResultTablesSizeOffset = 0x10;
+
+    /// <summary>
+    /// The image as the module copies it into the data area: header, the used entries and, if given, the
+    /// result tables at their place behind the room for all entries.
+    /// </summary>
     /// <param name="missions">Missions with settings.</param>
-    /// <exception cref="InvalidDataException">More missions than the table has room for.</exception>
-    public static byte[] CreateImage(IReadOnlyList<GameModuleCondition> missions)
+    /// <param name="resultTables">The result tables of <see cref="GamePatches.BonusGames"/> (<see cref="Missions.ResultTables.Create"/>), or null.</param>
+    /// <exception cref="InvalidDataException">More missions than the table has room for, or the tables do not fit.</exception>
+    public static byte[] CreateImage(IReadOnlyList<GameModuleCondition> missions, byte[]? resultTables = null)
     {
         if (missions.Count > MissionCapacity)
         {
             throw new InvalidDataException($"The mission settings table has room for {MissionCapacity} missions.");
         }
 
-        byte[] image = new byte[HeaderSize + (missions.Count * MissionEntrySize)];
+        int tablesOffset = (int)(Missions.ResultTables.Address - Start);
+        if (resultTables is not null && (tablesOffset + resultTables.Length > End - Start || tablesOffset + resultTables.Length > RomReserve))
+        {
+            throw new InvalidDataException("The result tables do not fit into the data area.");
+        }
+
+        byte[] image = new byte[resultTables is null ? HeaderSize + (missions.Count * MissionEntrySize) : tablesOffset + resultTables.Length];
         BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(0x00), Magic);
         BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(0x04), Version);
         BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(0x08), (uint)missions.Count);
         BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(0x0C), MissionEntrySize);
+        if (resultTables is not null)
+        {
+            BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(ResultTablesSizeOffset), (uint)resultTables.Length);
+            resultTables.CopyTo(image, tablesOffset);
+        }
+
         for (int i = 0; i < missions.Count; i++)
         {
             WriteEntry(image.AsSpan(HeaderSize + (i * MissionEntrySize), MissionEntrySize), missions[i]);
@@ -148,6 +169,19 @@ public static class DataArea
         BinaryPrimitives.WriteSingleBigEndian(entry[0x0C..], c.MinimumAltitude ?? 0);
         BinaryPrimitives.WriteSingleBigEndian(entry[0x10..], c.MinimumDistance ?? 0);
         entry[0x14] = c.HardEndMusic;
+    }
+
+    /// <summary>The result tables of an image made by <see cref="CreateImage"/>, or null if it has none.</summary>
+    public static byte[]? ReadResultTables(ReadOnlySpan<byte> image)
+    {
+        if (image.Length < HeaderSize || BinaryPrimitives.ReadUInt32BigEndian(image) != Magic)
+        {
+            return null;
+        }
+
+        int size = (int)BinaryPrimitives.ReadUInt32BigEndian(image[ResultTablesSizeOffset..]);
+        int offset = (int)(Missions.ResultTables.Address - Start);
+        return size > 0 && offset + (long)size <= image.Length ? image.Slice(offset, size).ToArray() : null;
     }
 
     /// <summary>Reads the mission entries of an image made by <see cref="CreateImage"/>.</summary>

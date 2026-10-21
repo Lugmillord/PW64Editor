@@ -273,12 +273,22 @@ public partial class MainWindow : Window
     /// <summary>True if texts or missions have edits that are saved with Ctrl+S.</summary>
     private bool HasUnsavedEdits => TextEditor.HasUnsavedChanges || MissionEditor.HasUnsavedChanges;
 
-    private void OnProjectSettings(object sender, RoutedEventArgs e)
+    private async void OnProjectSettings(object sender, RoutedEventArgs e)
     {
+        // A game patch can add texts to the project's text file, so edits must be saved first.
+        if (!await ConfirmUnsavedChangesAsync("opening the project settings"))
+        {
+            return;
+        }
+
         var dialog = new ProjectSettingsDialog(_session) { Owner = this };
         bool saved = dialog.ShowDialog() == true;
 
-        if (dialog.CodeFixesApplied)
+        if (dialog.GamePatchesChanged)
+        {
+            ReloadProject(); // new texts, other texts of the missions, other layout of the save files
+        }
+        else if (dialog.CodeFixesApplied)
         {
             TextEditor.RefreshPreview(); // the preview takes the fixes into account
             MissionEditor.RefreshPreview();

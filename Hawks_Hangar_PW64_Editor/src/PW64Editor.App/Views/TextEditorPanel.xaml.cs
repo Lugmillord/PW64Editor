@@ -162,7 +162,9 @@ public partial class TextEditorPanel : UserControl
         DetailCategory.Text = category.Description.Length > 0
             ? L.F("Text {0}: {1} › {2} › {3}", row.Index, L.T(category.Area), L.T(category.Section), DescriptionOf(category))
             : L.F("Text {0}: {1} › {2}", row.Index, L.T(category.Area), L.T(category.Section));
-        DetailUsage.Text = row.IsCustom
+        DetailUsage.Text = row.Text.IsPatchText
+            ? L.T("Added by the game patch \"Bonus games and Birdman\" as a copy of the text shared by all levels. The game shows it for this level.")
+            : row.IsCustom
             ? L.T("Added text. The game finds it by its number or its name, but does not use it anywhere yet.")
             : category.SourceFiles.Count > 0
                 ? L.F("Used in the game code: {0}", string.Join(", ", category.SourceFiles.Select(Path.GetFileName)))
@@ -172,8 +174,8 @@ public partial class TextEditorPanel : UserControl
             DetailUsage.Text += " " + L.F("The game writes a number into {0} of this text.", TextNumberSlots.Describe(slot));
         }
 
-        CustomWarning.Visibility = row.IsCustom ? Visibility.Visible : Visibility.Collapsed;
-        RemoveButton.Visibility = AllowRemove && row.IsCustom ? Visibility.Visible : Visibility.Collapsed;
+        CustomWarning.Visibility = row.IsCustom && !row.Text.IsPatchText ? Visibility.Visible : Visibility.Collapsed;
+        RemoveButton.Visibility = AllowRemove && row.IsCustom && !row.Text.IsPatchText ? Visibility.Visible : Visibility.Collapsed;
 
         _updatingTextBox = true;
         DetailText.Text = row.Markup;

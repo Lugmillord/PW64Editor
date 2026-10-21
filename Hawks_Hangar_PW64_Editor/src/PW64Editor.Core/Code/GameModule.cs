@@ -114,8 +114,11 @@ public sealed record GameModuleOptions(bool DebugOutput, bool StartupInfo = fals
     /// </summary>
     public IReadOnlyList<IReadOnlyList<ushort>> CountdownTexts { get; init; } = [];
 
+    /// <summary>The result tables of the game patch <see cref="GamePatches.BonusGames"/> for the data area, or null.</summary>
+    public byte[]? ResultTables { get; init; }
+
     /// <summary>True if the module is built into the ROM.</summary>
-    public bool IsNeeded => RequireExpansionPak || DebugOutput || Conditions.Count > 0 || DistanceRow || PenaltyDigits.Count > 0;
+    public bool IsNeeded => RequireExpansionPak || ResultTables is not null || DebugOutput || Conditions.Count > 0 || DistanceRow || PenaltyDigits.Count > 0;
 }
 
 /// <summary>
@@ -631,7 +634,7 @@ public static class GameModule
     public static void Apply(byte[] rom, GameModuleOptions options, int romOffset, string info)
     {
         int dataRomOffset = romOffset - DataArea.RomReserve;
-        byte[] data = DataArea.CreateImage(options.Conditions);
+        byte[] data = DataArea.CreateImage(options.Conditions, options.ResultTables);
         byte[] image = CreateImage(options, romOffset, info, dataRomOffset, data.Length);
         if (dataRomOffset < 0 || romOffset + RomReserve > rom.Length)
         {

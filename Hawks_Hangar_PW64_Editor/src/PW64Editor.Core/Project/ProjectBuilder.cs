@@ -56,6 +56,7 @@ public static class ProjectBuilder
             files[position] = ApplyOverride(files[position], replacement, name);
         }
 
+        AddLevelTexts(project, fileSystem, files);
         CheckTextFile(project, fileSystem, files);
         ApplyMissionSettings(project, files);
 
@@ -68,7 +69,7 @@ public static class ProjectBuilder
                     SequenceFile = BuildMusic(project, cleanRom, layout),
                     DataPatches = MissionPatches(project, cleanRom, layout),
                     MinimumRomSize = HackRomSize,
-                    GameModule = ModuleOptions(project, fileSystem, files),
+                    GameModule = ModuleOptions(project, fileSystem, files) with { ResultTables = BonusResultTables(project, cleanRom, layout) },
                     GameModuleInfo = ModuleInfo(project),
                 });
         }
@@ -453,6 +454,62 @@ public static class ProjectBuilder
         }
 
         return patches;
+    }
+
+    /// <summary>
+    /// The result tables of the game patch <see cref="GamePatches.BonusGames"/> (with the project's point rows), or null
+    /// without the patch.
+    /// </summary>
+    /// <exception cref="ProjectException">The patch is applied, but the game version is not the US one.</exception>
+    public static byte[]? BonusResultTables(HackProject project, N64Rom cleanRom, RomLayout layout)
+    {
+        if (!project.HasPatch(GamePatches.BonusGames))
+        {
+            return null;
+        }
+
+        if (layout.Missions is null)
+        {
+            throw new ProjectException(CoreText.T("The result sheets of this game version are unknown, so changed point rows cannot be built."));
+        }
+
+        return Missions.ResultTables.Create(cleanRom.Data, layout.Missions, project.Settings.Missions);
+    }
+
+    /// <summary>
+    /// With the game patch <see cref="GamePatches.BonusGames"/>: the texts of the levels the project's text file lacks
+    /// (until a text is saved they are only in memory, see <see cref="Workspace.EditorSession.LoadTexts"/>) are added to
+    /// the built text file as copies of the shared texts, so the game always finds them.
+    /// </summary>
+    private static void AddLevelTexts(HackProject project, GameFileSystem cleanFileSystem, List<GameFile> files)
+    {
+        if (!project.HasPatch(GamePatches.BonusGames))
+        {
+            return;
+        }
+
+        GameFile originalText;
+        try
+        {
+            originalText = Text.GameTextFile.FindFile(cleanFileSystem);
+        }
+        catch (InvalidDataException)
+        {
+            return; // not the retail layout (test data)
+        }
+
+        int position = files.FindIndex(f => f.TableIndex == originalText.TableIndex);
+        try
+        {
+            if (Missions.ResultTables.AddLevelTexts(files[position].Data) is { } withTexts)
+            {
+                files[position] = files[position] with { Data = withTexts };
+            }
+        }
+        catch (InvalidDataException ex)
+        {
+            throw new ProjectException(CoreText.F("The project's text file is damaged: {0}", ex.Message), ex);
+        }
     }
 
     private static void CheckTextFile(HackProject project, GameFileSystem cleanFileSystem, List<GameFile> files)
