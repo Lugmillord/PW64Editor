@@ -91,6 +91,9 @@
             <TabItem Header="Music">
                 <views:MusicTab x:Name="MusicEditor" />
             </TabItem>
+            <TabItem Header="Classes">
+                <views:ClassesTab x:Name="ClassEditor" ClassesChanged="OnClassesChanged" />
+            </TabItem>
             <TabItem Header="Missions">
                 <views:MissionsTab x:Name="MissionEditor" UnsavedChangesChanged="OnUnsavedChangesChanged" />
             </TabItem>

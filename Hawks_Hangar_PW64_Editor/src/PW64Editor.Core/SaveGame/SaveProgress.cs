@@ -16,8 +16,8 @@ public enum Medal
 /// <remarks>
 /// <para><b>Values</b>: a test has 0-100 points (Cannonball: 0-25 per target, 100 per level), or
 /// <see cref="SaveSlot.NoResult"/> (127). Sums count 127 as 0.</para>
-/// <para><b>License classes</b>: a class has a medal if none of its tests is 127 and the sum reaches
-/// the limit (Beginner 70/80/90, A 140/160/180, B and Pilot 210/240/270). Class A is open when all
+/// <para><b>License classes</b>: a class has a medal if the sum reaches the limit (Beginner 70/80/90, A 140/160/180,
+/// B and Pilot 210/240/270, or the project's limits of the vehicle and class). Class A is open when all
 /// three vehicles have a medal in Beginner; Class B and Pilot are open per vehicle when the class
 /// before has a medal.</para>
 /// <para><b>Bonus games</b>: Cannonball opens when all three vehicles have silver in Class A, Sky
@@ -47,10 +47,26 @@ public sealed class SaveProgress
 
     private const int BonusLimits = 4;
 
-    public SaveProgress(SaveSlot slot)
+    public SaveProgress(SaveSlot slot) : this(slot, null)
+    {
+    }
+
+    /// <param name="slot">The saved game.</param>
+    /// <param name="limits">The medal limits per vehicle and class (bronze, silver, gold; Classes tab), or null for the
+    /// original ones.</param>
+    public SaveProgress(SaveSlot slot, Func<Vehicle, int, IReadOnlyList<int>?>? limits)
     {
         Slot = slot;
+        _limits = limits;
     }
+
+    private readonly Func<Vehicle, int, IReadOnlyList<int>?>? _limits;
+
+    /// <summary>The limit of a medal of a class of a vehicle (the project's, or the original one).</summary>
+    public int LimitOf(Vehicle vehicle, int classIndex, Medal medal) =>
+        _limits?.Invoke(vehicle, classIndex) is { Count: 3 } own
+            ? own[(int)medal - 1]
+            : Limit(classIndex, medal, bonus: !Vehicles.IsMain(vehicle));
 
     public SaveSlot Slot { get; }
 
@@ -94,18 +110,16 @@ public sealed class SaveProgress
         return true;
     }
 
-    /// <summary>Medal of a license class of a main vehicle.</summary>
+    /// <summary>
+    /// Medal of a license class of a main vehicle. Only the sum counts (as the editor's game code decides it; with the
+    /// original limits a medal is only reachable when every test has a result anyway).
+    /// </summary>
     public Medal ClassMedal(Vehicle vehicle, int classIndex)
     {
-        if (!HasAllResults(vehicle, classIndex))
-        {
-            return Medal.None;
-        }
-
         int total = ClassTotal(vehicle, classIndex);
         for (Medal medal = Medal.Gold; medal >= Medal.Bronze; medal--)
         {
-            if (total >= Limit(classIndex, medal))
+            if (total >= LimitOf(vehicle, classIndex, medal))
             {
                 return medal;
             }
@@ -150,7 +164,7 @@ public sealed class SaveProgress
     {
         foreach (Vehicle vehicle in Vehicles.Main)
         {
-            RaiseClass(vehicle, 0, Limit(0, Medal.Bronze));
+            RaiseClass(vehicle, 0, LimitOf(vehicle, 0, Medal.Bronze));
         }
 
         foreach (Vehicle vehicle in Vehicles.Main)
@@ -174,7 +188,7 @@ public sealed class SaveProgress
             return;
         }
 
-        RaiseClass(vehicle, classIndex - 1, Limit(classIndex - 1, Medal.Bronze));
+        RaiseClass(vehicle, classIndex - 1, LimitOf(vehicle, classIndex - 1, Medal.Bronze));
         ClearNoResults(vehicle, classIndex);
     }
 
@@ -262,7 +276,7 @@ public sealed class SaveProgress
         int total = LevelTotal(bonusGame, level);
         for (Medal medal = Medal.Gold; medal >= Medal.Bronze; medal--)
         {
-            if (total >= Limit(0, medal, bonus: true))
+            if (total >= LimitOf(bonusGame, level, medal))
             {
                 return medal;
             }
@@ -288,7 +302,7 @@ public sealed class SaveProgress
 
         for (int l = 0; l < level; l++)
         {
-            if (LevelTotal(bonusGame, l) < Limit(0, Medal.Bronze, bonus: true))
+            if (LevelTotal(bonusGame, l) < LimitOf(bonusGame, l, Medal.Bronze))
             {
                 return false;
             }
@@ -330,12 +344,12 @@ public sealed class SaveProgress
             int classIndex = RequiredClass(bonusGame);
             foreach (Vehicle vehicle in Vehicles.Main)
             {
-                RaiseClass(vehicle, classIndex, Limit(classIndex, Medal.Silver));
+                RaiseClass(vehicle, classIndex, LimitOf(vehicle, classIndex, Medal.Silver));
             }
         }
         else
         {
-            int needed = Limit(0, Medal.Bronze, bonus: true);
+            int needed = LimitOf(bonusGame, level - 1, Medal.Bronze);
             if (LevelTotal(bonusGame, level - 1) < needed)
             {
                 SetLevelValue(bonusGame, level - 1, needed);
@@ -367,10 +381,9 @@ public sealed class SaveProgress
         }
 
         Vehicle bonusGame = Vehicles.BonusGames[stage - 1];
-        int silver = Limit(0, Medal.Silver, bonus: true);
         for (int level = 0; level < 3; level++)
         {
-            if (LevelTotal(bonusGame, level) < silver)
+            if (LevelTotal(bonusGame, level) < LimitOf(bonusGame, level, Medal.Silver))
             {
                 return false;
             }
@@ -399,7 +412,7 @@ public sealed class SaveProgress
 
         foreach (Vehicle vehicle in Vehicles.Main)
         {
-            RaiseClass(vehicle, stage, Limit(stage, Medal.Silver));
+            RaiseClass(vehicle, stage, LimitOf(vehicle, stage, Medal.Silver));
         }
 
         if (stage == 0)
@@ -408,9 +421,9 @@ public sealed class SaveProgress
         }
 
         Vehicle bonusGame = Vehicles.BonusGames[stage - 1];
-        int silver = Limit(0, Medal.Silver, bonus: true);
         for (int level = 0; level < 3; level++)
         {
+            int silver = LimitOf(bonusGame, level, Medal.Silver);
             if (LevelTotal(bonusGame, level) < silver)
             {
                 SetLevelValue(bonusGame, level, silver);

@@ -251,7 +251,9 @@ public static partial class ResultTables
     /// <exception cref="InvalidDataException">The text file is damaged or lacks a shared text.</exception>
     /// <param name="encode">Turns markup into the data of a text (for the generated texts, <see cref="GeneratedTexts"/>), or
     /// null to leave those out.</param>
-    public static byte[]? AddLevelTexts(byte[] textFile, IEnumerable<TestId> birdmanPoints, Func<string, byte[]>? encode = null)
+    /// <param name="birdmanLimits">Own medal limits of Birdman stages (by stage), or null for none.</param>
+    public static byte[]? AddLevelTexts(byte[] textFile, IEnumerable<TestId> birdmanPoints, Func<string, byte[]>? encode = null,
+        IReadOnlyDictionary<int, IReadOnlyList<int>>? birdmanLimits = null)
     {
         var file = Text.GameTextFile.Parse(textFile);
         List<Text.TextFileEntry> texts = file.ToEntries();
@@ -287,7 +289,7 @@ public static partial class ResultTables
 
         if (encode is not null)
         {
-            foreach ((string name, string markup) in GeneratedTexts(points))
+            foreach ((string name, string markup) in GeneratedTexts(points, birdmanLimits))
             {
                 Put(name, encode(markup));
             }
@@ -325,7 +327,10 @@ public static partial class ResultTables
     /// (A_S3_…, B_S3_…); and "4 tests to go" (TRY4) for the stage screen if a stage has four missions with points
     /// (TRY1 … TRY3 are the game's).
     /// </summary>
-    public static IReadOnlyList<(string Name, string Markup)> GeneratedTexts(IEnumerable<TestId> birdmanPoints)
+    /// <param name="birdmanPoints">The Birdman missions with points.</param>
+    /// <param name="ownLimits">Own medal limits of stages (Classes tab, by stage), or null: then 70/80/90 per mission.</param>
+    public static IReadOnlyList<(string Name, string Markup)> GeneratedTexts(IEnumerable<TestId> birdmanPoints,
+        IReadOnlyDictionary<int, IReadOnlyList<int>>? ownLimits = null)
     {
         var result = new List<(string, string)>();
         List<TestId> points = [.. birdmanPoints];
@@ -339,9 +344,12 @@ public static partial class ResultTables
             }
 
             string prefix = $"BD_{BirdmanClassLetters[stage]}_S3_";
-            result.Add((prefix + "BLONDS", MedalText(tests, Header(70 * n, "Bronze Badge", 38, 43), true)));
-            result.Add((prefix + "SILVER", MedalText(tests, Header(80 * n, "Silver Badge", 45, 50), true)));
-            result.Add((prefix + "GOLD", MedalText(tests, Header(90 * n, "Gold Badge", 50, 55), true)));
+            IReadOnlyList<int> limits = ownLimits?.TryGetValue(stage, out IReadOnlyList<int>? own) == true && own.Count == 3
+                ? own
+                : [70 * n, 80 * n, 90 * n];
+            result.Add((prefix + "BLONDS", MedalText(tests, Header(limits[0], "Bronze Badge", 38, 43), true)));
+            result.Add((prefix + "SILVER", MedalText(tests, Header(limits[1], "Silver Badge", 45, 50), true)));
+            result.Add((prefix + "GOLD", MedalText(tests, Header(limits[2], "Gold Badge", 50, 55), true)));
             result.Add((prefix + "PERFECT", MedalText(tests, $"[x=39][b]< {100 * n} pts[/b]. [b]for perfect score >[/b]", true)));
             result.Add((prefix + "GREAT", MedalText(tests, "[x=78][b]< Perfect score!!! >[/b]", false)));
         }
@@ -355,7 +363,7 @@ public static partial class ResultTables
 
         // The header as the game's texts have it (centred with [x=…] by the width of the number).
         static string Header(int points, string badge, int xThreeDigits, int xTwoDigits) =>
-            $"[x={(points >= 100 ? xThreeDigits : xTwoDigits)}][b]< {points} pts[/b]. [b]for {badge} >[/b]";
+            $"[x={(points >= 1000 ? xThreeDigits - 5 : points >= 100 ? xThreeDigits : points >= 10 ? xTwoDigits : xTwoDigits + 5)}][b]< {points} pts[/b]. [b]for {badge} >[/b]";
     }
 
     /// <summary>

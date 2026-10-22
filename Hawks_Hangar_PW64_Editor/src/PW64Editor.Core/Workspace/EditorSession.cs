@@ -265,10 +265,11 @@ public sealed class EditorSession
         GameFile textFile = GameTextFile.FindFile(CleanFileSystem);
         byte[] data = GetCurrentFileData(textFile.TableIndex, out bool fromProject);
 
-        // The game patch "Bonus games and Birdman" needs texts of its own for the levels: until a text is saved they
-        // exist only here (and in the build, which adds them the same way).
-        if (Project.HasPatch(GamePatches.BonusGames)
-            && ResultTables.AddLevelTexts(data, ResultTables.BirdmanPointMissions(Project.Settings.Missions), EncodeFor(font)) is { } withTexts)
+        // The game patch "Bonus games and Birdman" needs texts of its own for the levels, and classes with own medal
+        // limits get own medal texts: until a text is saved they exist only here (and in the build, which adds them the
+        // same way).
+        if (ProjectBuilder.AddGeneratedTexts(Project.HasPatch(GamePatches.BonusGames), ProjectBuilder.HasOwnClassTexts(Project),
+                Project.Settings.Missions, Project.Settings.Classes, data, font) is { } withTexts)
         {
             data = withTexts;
         }
@@ -791,6 +792,47 @@ public sealed class EditorSession
         {
             SaveMission(mission, mission.File.Comm, settings);
         }
+    }
+
+    /// <summary>The classes of every vehicle with their medal limits and islands (Classes tab).</summary>
+    public IReadOnlyList<Classes.ClassInfo> LoadClasses()
+    {
+        IReadOnlyList<MissionInfo> missions = LoadMissions().Missions;
+        MissionTables? tables = Layout.Missions is { } layout ? new MissionTables(CleanRom.Data, layout) : null;
+        bool bonusPatch = Project.HasPatch(GamePatches.BonusGames);
+        IReadOnlySet<TestId> birdman = bonusPatch ? ResultTables.BirdmanPointMissions(Project.Settings.Missions) : new HashSet<TestId>();
+        bool ownTexts = ProjectBuilder.HasOwnClassTexts(Project);
+        var result = new List<Classes.ClassInfo>();
+        foreach ((Vehicle vehicle, int classIndex) in Classes.ClassLimits.All)
+        {
+            Classes.ClassSettings? settings = Project.Settings.Classes.FirstOrDefault(c => c.VehicleId == vehicle && c.Class == classIndex);
+            int tests = missions.Count(m => m.Id.Vehicle == vehicle && m.Id.Class == classIndex);
+            int pointMissions = vehicle == Vehicle.Birdman ? birdman.Count(m => m.Class == classIndex) : 0;
+            int? originalIsland = tables?.ClassIsland(vehicle, classIndex);
+            result.Add(new Classes.ClassInfo(vehicle, classIndex, settings?.Clone(),
+                Classes.ClassLimits.Original(vehicle, classIndex, bonusPatch),
+                Classes.ClassLimits.Effective(null, vehicle, classIndex, bonusPatch, pointMissions),
+                Classes.ClassLimits.Effective(settings, vehicle, classIndex, bonusPatch, pointMissions),
+                Classes.ClassLimits.Perfect(vehicle, tests, pointMissions),
+                tests, pointMissions, originalIsland, settings?.Island ?? originalIsland,
+                ownTexts && Classes.ClassTexts.HasOwnTexts(vehicle)));
+        }
+
+        return result;
+    }
+
+    /// <summary>Saves the settings of a class (removed from the project when nothing is changed).</summary>
+    /// <exception cref="ArgumentException">The limits cannot be used.</exception>
+    public void SaveClass(Classes.ClassSettings settings)
+    {
+        Project.Settings.Classes.RemoveAll(c => c.Vehicle == settings.Vehicle && c.Class == settings.Class);
+        if (!settings.IsEmpty)
+        {
+            Project.Settings.Classes.Add(settings.Clone());
+            Project.Settings.Classes.Sort((a, b) => (a.Vehicle, a.Class).CompareTo((b.Vehicle, b.Class)));
+        }
+
+        Project.Save();
     }
 
     /// <summary>The Birdman mission that gets a landing pad when it has points (stage 1, mission 1, Holiday Island).</summary>

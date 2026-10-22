@@ -30,10 +30,14 @@ public sealed class SaveSlotView : UserControl
     private readonly StackPanel _root = new();
     private readonly StackPanel _photoList = new();
 
-    public SaveSlotView(SaveSlot slot, string name, Action changed)
+    /// <param name="slot">The saved game.</param>
+    /// <param name="name">Name of the file slot.</param>
+    /// <param name="changed">Called after a change.</param>
+    /// <param name="limits">The project's medal limits per vehicle and class, or null for the original ones.</param>
+    public SaveSlotView(SaveSlot slot, string name, Action changed, Func<Vehicle, int, IReadOnlyList<int>?>? limits = null)
     {
         _slot = slot;
-        _progress = new SaveProgress(slot);
+        _progress = new SaveProgress(slot, limits);
         _name = name;
         _changed = changed;
         Content = _root;
@@ -158,8 +162,7 @@ public sealed class SaveSlotView : UserControl
             if (c == 1)
             {
                 Button open = MakeButton(L.T("Open Class A"),
-                    L.T("Raises the Beginner test of every vehicle to at least 70 points (a bronze medal each), " +
-                    "and gives the Class A tests 0 points."), () => { _progress.OpenClassA(); OnChanged(); });
+                    L.T("Raises the Beginner test of every vehicle to its bronze limit, and gives the Class A tests 0 points."), () => { _progress.OpenClassA(); OnChanged(); });
                 open.Margin = new Thickness(0, 4, 0, 0);
                 open.HorizontalAlignment = HorizontalAlignment.Left;
                 label.Children.Add(open);
@@ -178,7 +181,7 @@ public sealed class SaveSlotView : UserControl
 
                 if (c >= 2)
                 {
-                    int limit = SaveProgress.Limit(c - 1, Medal.Bronze);
+                    int limit = _progress.LimitOf(vehicle, c - 1, Medal.Bronze);
                     Button open = MakeButton(L.F("Open {0}", Vehicles.ClassName(c)),
                         L.F("Raises the {0} tests of the {1} one after the other (up to 100 each) to {2} points together " +
                             "(a bronze medal), and gives the {3} tests 0 points.", Vehicles.ClassName(c - 1), Vehicles.Name(vehicle), limit,
@@ -257,9 +260,9 @@ public sealed class SaveSlotView : UserControl
                     ? L.T("The stage is open when the points of the license tests and bonus games reach the game's limits.")
                     : L.T("Birdman has no points. The stage is open when the points below reach the game's limits.") };
             string needs = stage == 0
-                ? L.T("Raises the Beginner test of all three license vehicles to 80 points (a silver medal).")
-                : L.F("Raises the {0} tests of all three license vehicles to a silver medal ({1} points each), and every level of {2} to 80 points.",
-                    Vehicles.ClassName(stage), SaveProgress.Limit(stage, Medal.Silver), Vehicles.Name(Vehicles.BonusGames[stage - 1]));
+                ? L.T("Raises the Beginner test of all three license vehicles to their silver limit.")
+                : L.F("Raises the {0} tests of all three license vehicles to their silver limit, and every level of {1} to its silver limit.",
+                    Vehicles.ClassName(stage), Vehicles.Name(Vehicles.BonusGames[stage - 1]));
             Button open = MakeButton(L.T("Open"), needs, () => { _progress.OpenBirdmanStage(stage); OnChanged(); });
             open.Margin = new Thickness(0, 4, 0, 0);
             open.HorizontalAlignment = HorizontalAlignment.Left;
@@ -312,9 +315,10 @@ public sealed class SaveSlotView : UserControl
                 var box = new ScoreBox(() => _progress.LevelValue(game, level), value => _progress.SetLevelValue(game, level, value), OnChanged);
                 var state = new TextBlock { Foreground = Muted };
                 string needs = level == 0
-                    ? L.F("Raises the {0} tests of all three license vehicles to a silver medal ({1} points each), and gives level 1 0 points.",
-                        Vehicles.ClassName(SaveProgress.RequiredClass(game)), SaveProgress.Limit(SaveProgress.RequiredClass(game), Medal.Silver))
-                    : L.F("Raises level {0} to 70 points, and gives level {1} 0 points.", level, level + 1);
+                    ? L.F("Raises the {0} tests of all three license vehicles to their silver limit, and gives level 1 0 points.",
+                        Vehicles.ClassName(SaveProgress.RequiredClass(game)))
+                    : L.F("Raises level {0} to its bronze limit ({1} points), and gives level {2} 0 points.", level,
+                        _progress.LimitOf(game, level - 1, Medal.Bronze), level + 1);
                 Button open = MakeButton(L.T("Open"), needs, () => { _progress.OpenLevel(game, level); OnChanged(); });
                 open.Margin = new Thickness(0, 4, 0, 0);
                 open.HorizontalAlignment = HorizontalAlignment.Left;

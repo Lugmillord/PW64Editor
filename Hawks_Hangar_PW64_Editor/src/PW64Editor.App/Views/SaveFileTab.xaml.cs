@@ -59,6 +59,14 @@ public partial class SaveFileTab : UserControl
         return !_file.IsModified;
     }
 
+    private EditorSession? _session;
+
+    /// <summary>The project's own medal limits of a class (Classes tab), or null for the original ones.</summary>
+    private IReadOnlyList<int>? Limits(Vehicle vehicle, int classIndex) =>
+        _session?.Project.Settings.Classes.FirstOrDefault(c => c.VehicleId == vehicle && c.Class == classIndex)?.Medals is { Count: 3 } own
+            ? own
+            : null;
+
     /// <summary>True if the open save file has changes that are not saved yet.</summary>
     public bool HasUnsavedChanges => _file?.IsModified == true;
 
@@ -69,6 +77,7 @@ public partial class SaveFileTab : UserControl
     /// </summary>
     public void Load(EditorSession session)
     {
+        _session = session;
         bool birdmanStage4 = session.Project.HasPatch(GamePatches.BonusGames);
         try
         {
@@ -173,8 +182,8 @@ public partial class SaveFileTab : UserControl
 
         NoFileText.Visibility = Visibility.Collapsed;
         SlotTabs.Visibility = Visibility.Visible;
-        Slot1Host.Content = new SaveSlotView(_file.Slots[0], L.T("File 1"), OnSlotChanged);
-        Slot2Host.Content = new SaveSlotView(_file.Slots[1], L.T("File 2"), OnSlotChanged);
+        Slot1Host.Content = new SaveSlotView(_file.Slots[0], L.T("File 1"), OnSlotChanged, Limits);
+        Slot2Host.Content = new SaveSlotView(_file.Slots[1], L.T("File 2"), OnSlotChanged, Limits);
         UpdateFileState();
     }
 

@@ -270,6 +270,25 @@ public partial class MainWindow : Window
 
     private void OnUnsavedChangesChanged(object? sender, EventArgs e) => UpdateTitle();
 
+    /// <summary>
+    /// A class was saved: its own badge texts change, and the save file tab counts with its limits. The Text tab is read
+    /// again when nothing is unsaved (otherwise the texts follow when it is next read; the build always writes them).
+    /// </summary>
+    private void OnClassesChanged(object? sender, EventArgs e)
+    {
+        if (_session is null)
+        {
+            return;
+        }
+
+        if (!HasUnsavedEdits)
+        {
+            TextEditor.Load(_session);
+        }
+
+        SaveEditor.Load(_session);
+    }
+
     /// <summary>True if texts or missions have edits that are saved with Ctrl+S.</summary>
     private bool HasUnsavedEdits => TextEditor.HasUnsavedChanges || MissionEditor.HasUnsavedChanges;
 
@@ -722,6 +741,7 @@ public partial class MainWindow : Window
     {
         TextEditor.Load(_session);
         MissionEditor.Load(_session);
+        ClassEditor.Load(_session);
         SaveEditor.Load(_session);
         TextureEditor.Load(_session);
         MusicEditor.Load(_session);

@@ -1043,48 +1043,362 @@ static u32 nth_bit(u32 mask, u32 n) {
 /* The stage of the current player if it is a Birdman stage with points, else 0 (mask of its missions with points). */
 static u32 birdman_player_stage(void);
 
-/* "Points to the next medal" (levelSetPointsToNextMedal, 0x8032C174: s32 f(s32 *out, u16 points, u8 medal)), called
-   through here by the game patch "Bonus games and Birdman". The game's medal table has no limits for the Birdman
-   (entry 7 was 0, the patch sets 280/320/360), and when every medal is reached the original writes "100 x tests -
-   points" only for the main vehicles and "100 - points" for all others. The Birdman has four missions per stage, so
-   it gets the formula of the main vehicles, with the tests of its class. (Function names from the decompilation,
-   https://github.com/gcsmith/Pilotwings64Decomp, MIT license.) */
-#define GAME_POINTS_TO_MEDAL ((s32(*)(s32 *, u32, u32))0x8032C174) /* levelSetPointsToNextMedal */
-#define GAME_TEST_COUNT      ((s32(*)(s32, s32))0x80344EF0)        /* taskGetTestCount(class, vehicle) */
+/* ------------------------------------------------------------------ medal limits per vehicle and class */
 
-s32 module_points_to_medal(s32 *out, u32 points, u32 medal) {
-    s32 result;
-    u8 *state = GAME_STATE;
-    u32 stage = birdman_player_stage();
-    s32 p = (s32)(points & 0xFFFF);
+/* The Classes tab: medal limits per vehicle and class (data area header +0x18 = address of the class table, 0 = none).
+   Table: u16 limits[7 vehicles][4 classes][3] (bronze, silver, gold), then u8 flags[7][4]: 1 own limits, 2 own medal
+   texts of the total screen. Without a table the game's table counts (gMedalPointRequirements, 0x8034FBD4: entry =
+   class for the main vehicles, vehicle + 1 for the others). A Birdman stage with points and without own limits has
+   70/80/90 per mission with points. (Names from the decompilation, https://github.com/gcsmith/Pilotwings64Decomp,
+   MIT license.) */
+#define CLASS_TABLE_ADDRESS (*(volatile u32 *)(DATA_AREA + 0x18))
+#define GAME_MEDAL_TABLE    ((volatile u16 *)0x8034FBD4) /* gMedalPointRequirements */
+#define GAME_TEST_COUNT     ((s32(*)(s32, s32))0x80344EF0) /* taskGetTestCount(class, vehicle) */
+#define GAME_LEVEL_TOTAL    ((s32(*)(void *, u32, u32))0x8032BD20) /* levelGetTotalPoints(results, class, vehicle) */
 
-    /* A Birdman stage with points: the limits follow the number of its missions with points (70/80/90 each). */
-    if ((medal & 0xFF) == 7 && stage != 0) {
-        s32 n = (s32)bit_count(stage);
-        s32 limits[3];
-        s32 i;
-        limits[0] = 70 * n;
-        limits[1] = 80 * n;
-        limits[2] = 90 * n;
+static const u16 *class_table(void) {
+    u32 a = CLASS_TABLE_ADDRESS;
+    return DATA_HEADER->magic == DATA_MAGIC && a >= DATA_AREA && a + 0xC4 <= DATA_AREA_END ? (const u16 *)a : 0;
+}
+
+static u32 class_flags(u32 veh, u32 cls) {
+    const u16 *t = class_table();
+    return t != 0 && veh < 7 && cls < 4 ? ((const u8 *)t + 0xA8)[veh * 4 + cls] : 0;
+}
+
+static void class_limits(u32 veh, u32 cls, s32 out[3]) {
+    const u16 *t = class_table();
+    u32 stage;
+    s32 i;
+    if (veh > 6 || cls > 3) {
+        out[0] = out[1] = out[2] = 0x7FFF;
+        return;
+    }
+    if (t != 0 && (class_flags(veh, cls) & 1)) {
         for (i = 0; i < 3; i++) {
-            if (p < limits[i]) {
-                *out = limits[i] - p;
-                return i;
+            out[i] = t[(veh * 4 + cls) * 3 + i];
+        }
+        return;
+    }
+    if (veh == 6 && (stage = birdman_stage(cls)) != 0) {
+        s32 n = (s32)bit_count(stage);
+        out[0] = 70 * n;
+        out[1] = 80 * n;
+        out[2] = 90 * n;
+        return;
+    }
+    if (t != 0) {
+        for (i = 0; i < 3; i++) {
+            out[i] = t[(veh * 4 + cls) * 3 + i];
+        }
+        return;
+    }
+    for (i = 0; i < 3; i++) {
+        out[i] = GAME_MEDAL_TABLE[(veh < 3 ? cls : veh + 1) * 3 + i];
+    }
+}
+
+/* Points for a perfect score: 100 per test (bonus games 100 per level, a Birdman stage with points 100 per mission with
+   points). */
+static s32 class_perfect(u32 veh, u32 cls) {
+    u32 stage = veh == 6 ? birdman_stage(cls) : 0;
+    if (stage != 0) {
+        return 100 * (s32)bit_count(stage);
+    }
+    if (veh >= 3 && veh <= 5) {
+        return 100;
+    }
+    return 100 * GAME_TEST_COUNT((s32)cls, (s32)veh);
+}
+
+/* The medal of a total: 0 none, 1 bronze, 2 silver, 3 gold (no check that every test was played: only the sums
+   count, as the editor's unlock rules). */
+static s32 class_medal_of(u32 veh, u32 cls, s32 total) {
+    s32 lim[3];
+    class_limits(veh, cls, lim);
+    return total >= lim[2] ? 3 : total >= lim[1] ? 2 : total >= lim[0] ? 1 : 0;
+}
+
+static u8 *player_results(void) {
+    u8 *state = GAME_STATE;
+    return (u8 *)0x80364210 + (state != 0 ? *(s32 *)(state + 0x9C) : 0) * 0x34E0; /* D_80364210[player] */
+}
+
+static s32 class_medal(u8 *results, u32 veh, u32 cls) {
+    return class_medal_of(veh, cls, GAME_LEVEL_TOTAL(results, cls, veh));
+}
+
+/* "Points to the next medal" (levelSetPointsToNextMedal, 0x8032C174: s32 f(s32 *out, u16 points, u8 medal); returns 0
+   bronze, 1 silver, 2 gold to get, 3 all reached, with *out = the points still missing). Every caller asks about the
+   class being played, so the limits are those of the player's vehicle and class; the medal index of the caller only
+   counts without a player. The original wrote "100 x tests - points" as the points to a perfect score only for the
+   main vehicles (and the bonus games had one test); here every class gets its own perfect score (class_perfect).
+   Called through the game patch "Bonus games and Birdman" (its eight calls) and, with a class table, from the
+   function's entry. */
+s32 module_points_to_medal(s32 *out, u32 points, u32 medal) {
+    u8 *p = player_flight();
+    s32 v = (s32)(points & 0xFFFF);
+    s32 lim[3];
+    u32 veh, cls;
+    s32 i;
+    medal &= 0xFF;
+    if (p != 0) {
+        veh = *(u16 *)(p + 2);
+        cls = *(u16 *)(p + 4);
+    } else if (medal < 4) {
+        veh = 0;
+        cls = medal;
+    } else {
+        veh = medal - 1;
+        cls = 0;
+    }
+    class_limits(veh, cls, lim);
+    for (i = 0; i < 3; i++) {
+        if (v < lim[i]) {
+            *out = lim[i] - v;
+            return i;
+        }
+    }
+    *out = class_perfect(veh, cls) - v;
+    return 3;
+}
+
+/* The lowest medal over the classes (func_8032C3C4, used by the ending): flags 1 from the Hang Glider on (else from the
+   Cannonball), 2 up to all vehicles (else up to the Cannonball); the Birdman is left out. Returns the game's MEDAL_*
+   of the first medal still missing: 0 bronze, 1 silver, 2 gold, 3 none (every gold reached). */
+s32 module_lowest_medal(u8 *results, u32 flags) {
+    u32 first = (flags & 1) ? 0 : 3;
+    u32 last = (flags & 2) ? 7 : 3;
+    s32 lowest = 3;
+    u32 veh, cls;
+    if (first == last) {
+        return 0;
+    }
+    for (veh = first; veh < last; veh++) {
+        if (veh == 6) {
+            continue;
+        }
+        for (cls = 0; cls < (veh < 3 ? 4u : 3u); cls++) {
+            s32 m = class_medal(results, veh, cls);
+            if (m < lowest) {
+                lowest = m;
             }
         }
-        *out = 100 * n - p;
-        return 3;
     }
+    return lowest;
+}
 
-    result = GAME_POINTS_TO_MEDAL(out, points, medal);
-    if (result == 3 && state != 0) {
-        u8 *player = state + (*(s32 *)(state + 0x9C)) * 140 + 0x0C; /* as the original: the current player */
-        if (*(u16 *)(player + 2) == 6) {
-            *out = 100 * GAME_TEST_COUNT(*(u16 *)(player + 4), 6) - p;
+/* The level select (level_select.c): func_8030D9C8 (page 1, the license classes) and func_8030DED0 (page 2, bonus
+   games and Birdman) jump here. They set the medal sprites of the fields and the arrays the cursor and the drawing
+   use: D_8036A8CC[3] highest open class per vehicle, D_8036A8D0[3] highest open level per bonus game (-1 closed),
+   D_8036A8D8[4] silver with all three vehicles in a class ([0] at the end: some Birdman stage open), D_8036A8D4[4]
+   Birdman stage open. The rules are the original ones, with the limits of each vehicle and class and without the
+   check that every test was played. */
+#define GAME_SPRITE    ((void (*)(s32, ...))0x80231158) /* uvSprtProps(id, props..., 0) */
+#define LS_CLASS_OPEN  ((volatile u8 *)0x8036A8CC)
+#define LS_LEVEL_OPEN  ((volatile signed char *)0x8036A8D0)
+#define LS_STAGE_OPEN  ((volatile u8 *)0x8036A8D4)
+#define LS_SILVER      ((volatile u8 *)0x8036A8D8)
+#define LS_ALL_OPEN    (*(volatile u8 *)0x8034F7BC) /* debug flag of the developers, always 0 */
+#define LS_UNUSED      (*(volatile signed char *)0x8034F7B4)
+#define SP_END 0
+#define SP_DIM 1
+#define SP_POS 2
+#define SP_ENABLED 3
+#define SP_TEX 5
+#define SP_COLOR 7
+
+static s32 menu_texture(s32 medal) {
+    return medal == 3 ? 0x14E : medal == 2 ? 0x14F : medal == 1 ? 0x150 : 0x14D;
+}
+
+static void menu_common(u8 *r) {
+    s32 i, v;
+    for (i = 0; i < 4; i++) {
+        s32 ok = 1;
+        for (v = 0; v < 3; v++) {
+            if (class_medal(r, (u32)v, (u32)i) < 2) {
+                ok = 0;
+                break;
+            }
+        }
+        LS_SILVER[i] = (u8)ok;
+    }
+    LS_STAGE_OPEN[0] = LS_SILVER[0];
+    for (i = 1; i < 4; i++) {
+        s32 ok = 0;
+        if (LS_SILVER[i] != 0) {
+            s32 l;
+            ok = 1;
+            for (l = 0; l < 3; l++) {
+                if (class_medal(r, (u32)i + 2, (u32)l) < 2) {
+                    ok = 0;
+                    break;
+                }
+            }
+        }
+        LS_STAGE_OPEN[i] = (u8)ok;
+    }
+    LS_SILVER[0] = (u8)(LS_STAGE_OPEN[0] | LS_STAGE_OPEN[1] | LS_STAGE_OPEN[2] | LS_STAGE_OPEN[3]);
+}
+
+void module_menu_page1(void) {
+    u8 *r = player_results();
+    s32 i, v, c;
+    for (i = 0; i < 12; i++) {
+        GAME_SPRITE(i, SP_ENABLED, 1, SP_DIM, 46, 31, SP_POS, (i % 3) * 48 + 78, 161 - (i / 3) * 34, SP_TEX, 332,
+                    SP_COLOR, 255, 255, 255, 255, SP_END);
+    }
+    for (i = 0; i < 3; i++) {
+        GAME_SPRITE(i + 12, SP_ENABLED, 1, SP_DIM, 46, 31, SP_POS, 236, 126 - i * 34, SP_COLOR, 255, 255, 255, 255,
+                    SP_TEX, 332, SP_END);
+    }
+    for (v = 0; v < 3; v++) {
+        for (c = 0; c < 4; c++) {
+            s32 tex = menu_texture(class_medal(r, (u32)v, (u32)c));
+            GAME_SPRITE(v + c * 3, SP_TEX, tex, SP_END);
+            if (tex == 0x14D) {
+                break;
+            }
+        }
+        LS_CLASS_OPEN[v] = (u8)(LS_ALL_OPEN != 0 ? 3 : (c > 3 ? 3 : c));
+    }
+    if (LS_CLASS_OPEN[0] == 0 || LS_CLASS_OPEN[1] == 0 || LS_CLASS_OPEN[2] == 0) {
+        for (i = 0; i < 3; i++) {
+            if (LS_CLASS_OPEN[i] > 0) {
+                LS_UNUSED = 0;
+                GAME_SPRITE(LS_CLASS_OPEN[i] * 3 + i, SP_TEX, 0x14C, SP_END);
+                if (LS_ALL_OPEN == 0) {
+                    LS_CLASS_OPEN[i] = 0;
+                }
+            }
         }
     }
-    return result;
+    menu_common(r);
 }
+
+void module_menu_page2(void) {
+    u8 *r = player_results();
+    s32 i, g, l;
+    for (i = 0; i < 9; i++) {
+        GAME_SPRITE(i, SP_ENABLED, 1, SP_DIM, 46, 31, SP_POS, (i % 3) * 48 + 109, 127 - (i / 3) * 34, SP_TEX, 332,
+                    SP_COLOR, 255, 255, 255, 255, SP_END);
+    }
+    for (i = 0; i < 4; i++) {
+        GAME_SPRITE(i + 9, SP_ENABLED, 1, SP_DIM, 33, 26, SP_POS, 109 + i * 36, 195, SP_COLOR, 255, 255, 255, 255,
+                    SP_TEX, 332, SP_END);
+    }
+    for (i = 0; i < 3; i++) {
+        GAME_SPRITE(i + 13, SP_ENABLED, 1, SP_DIM, 46, 31, SP_POS, 61, 127 - i * 34, SP_COLOR, 255, 255, 255, 255,
+                    SP_TEX, 332, SP_END);
+    }
+    menu_common(r); /* [1..3] of LS_SILVER stay the silver of Class A/B/Pilot, which opens the bonus games */
+    for (g = 0; g < 3; g++) {
+        signed char open;
+        if (LS_SILVER[g + 1] != 0) {
+            for (l = 0; l < 3; l++) {
+                s32 tex = menu_texture(class_medal(r, (u32)g + 3, (u32)l));
+                GAME_SPRITE(g * 3 + l, SP_TEX, tex, SP_END);
+                if (tex == 0x14D) {
+                    break;
+                }
+            }
+            open = (signed char)(LS_ALL_OPEN != 0 ? 2 : l);
+        } else {
+            open = (signed char)(LS_ALL_OPEN != 0 ? 2 : -1);
+        }
+        if ((u8)open > 2) {
+            open = 2;
+        }
+        LS_LEVEL_OPEN[g] = open;
+    }
+}
+
+/* The file menu (fileMenu_802E8AF0): the medals of the license classes, the locks of the bonus games
+   (sFileMenu_803624E0[3], 1 = closed) and whether the Birdman icon shows (sFileMenu_803624E3). */
+#define FM_GAME_CLOSED ((volatile u8 *)0x803624E0)
+#define FM_BIRDMAN     (*(volatile u8 *)0x803624E3)
+
+void module_file_menu(void) {
+    u8 *r = player_results();
+    s32 i, j, k, any;
+    for (i = 0; i < 12; i++) {
+        GAME_SPRITE(i, SP_ENABLED, 1, SP_DIM, 38, 22, SP_POS, (i % 3) * 40 + 93, 123 - (i / 3) * 25,
+                    SP_COLOR, 255, 255, 255, 255, SP_TEX, 0x148, SP_END);
+    }
+    for (i = 0; i < 3; i++) {
+        GAME_SPRITE(i + 12, SP_ENABLED, 1, SP_DIM, 38, 22, SP_POS, 229, 98 - 25 * i, SP_COLOR, 255, 255, 255, 255,
+                    SP_TEX, 0x148, SP_END);
+    }
+    for (j = 0; j < 3; j++) {
+        for (k = 0; k < 4; k++) {
+            s32 m = class_medal(r, (u32)j, (u32)k);
+            GAME_SPRITE(k * 3 + j, SP_TEX, m == 3 ? 0x14B : m == 2 ? 0x14A : m == 1 ? 0x149 : 0x148, SP_END);
+        }
+    }
+    for (i = 0; i < 3; i++) {
+        GAME_SPRITE(i + 12, SP_ENABLED, 1, SP_TEX, 0x148, SP_END);
+        FM_GAME_CLOSED[i] = (u8)!(class_medal(r, 0, (u32)i + 1) >= 2 && class_medal(r, 1, (u32)i + 1) >= 2
+                                 && class_medal(r, 2, (u32)i + 1) >= 2);
+    }
+    any = class_medal(r, 0, 0) >= 2 && class_medal(r, 1, 0) >= 2 && class_medal(r, 2, 0) >= 2;
+    if (!any) {
+        for (i = 0; i < 3 && !any; i++) {
+            if (FM_GAME_CLOSED[i] == 0 && class_medal(r, (u32)i + 3, 0) >= 2 && class_medal(r, (u32)i + 3, 1) >= 2
+                && class_medal(r, (u32)i + 3, 2) >= 2) {
+                any = 1;
+            }
+        }
+    }
+    FM_BIRDMAN = (u8)any;
+}
+
+/* The points under a field of the level select (func_8030F818) show from bronze on: "lhu t2, gMed[...].bronze" at ROM
+   0x971F4 becomes a call of this stub (vehicle in s3, class in s2), which returns the field's bronze limit in t2. */
+u32 class_bronze(u32 veh, u32 cls) {
+    s32 lim[3];
+    class_limits(veh, cls, lim);
+    return (u32)lim[0];
+}
+
+__asm__(".section .text\n"
+        ".set push\n"
+        ".set noreorder\n"
+        ".set noat\n"
+        ".globl module_bronze_t2\n"
+        "module_bronze_t2:\n"
+        "    addiu $sp, $sp, -64\n"
+        "    sw $ra, 60($sp)\n"
+        "    sw $v0, 56($sp)\n"
+        "    sw $v1, 52($sp)\n"
+        "    sw $a0, 48($sp)\n"
+        "    sw $a1, 44($sp)\n"
+        "    sw $a2, 40($sp)\n"
+        "    sw $a3, 36($sp)\n"
+        "    sw $t0, 32($sp)\n"
+        "    sw $t1, 28($sp)\n"
+        "    sw $t3, 24($sp)\n"
+        "    sw $t4, 20($sp)\n"
+        "    sw $at, 16($sp)\n"
+        "    move $a0, $s3\n"
+        "    jal class_bronze\n"
+        "    move $a1, $s2\n"
+        "    move $t2, $v0\n"
+        "    lw $ra, 60($sp)\n"
+        "    lw $v0, 56($sp)\n"
+        "    lw $v1, 52($sp)\n"
+        "    lw $a0, 48($sp)\n"
+        "    lw $a1, 44($sp)\n"
+        "    lw $a2, 40($sp)\n"
+        "    lw $a3, 36($sp)\n"
+        "    lw $t0, 32($sp)\n"
+        "    lw $t1, 28($sp)\n"
+        "    lw $t3, 24($sp)\n"
+        "    lw $t4, 20($sp)\n"
+        "    lw $at, 16($sp)\n"
+        "    jr $ra\n"
+        "    addiu $sp, $sp, 64\n"
+        ".set pop\n");
 
 /* The hard end time is reached (game.c, ROM 0x75004: "arg0->unkA1 = 1" goes through here):
    the game goes straight to the results and plays nothing itself, except the Hang Glider, whose
@@ -1751,8 +2065,37 @@ static char sTextName[24];
 
 void *module_tot_medal_text(const char *name) {
     static const char bonus[] = "BONUS_S3_";
+    static const char prefixes[] = "HGRPGCCBSDHP";
     u8 *p = player_flight();
     u32 i;
+    /* A class with own limits has own texts for bronze, silver and gold ("HG_A_S3_GOLD", "SD_L2_S3_SILVER"), written by
+       the editor from the class's text; perfect and "great" stay the game's (their numbers do not change). */
+    if (p != 0 && *(u16 *)(p + 2) < 6 && (class_flags(*(u16 *)(p + 2), *(u16 *)(p + 4)) & 2)) {
+        u32 veh = *(u16 *)(p + 2);
+        u32 cls = *(u16 *)(p + 4) & 3;
+        const char *rest = name;
+        while (*rest != 0 && !(rest[0] == 'S' && rest[1] == '3' && rest[2] == '_')) {
+            rest++;
+        }
+        if (*rest != 0 && (rest[3] == 'B' || rest[3] == 'S' || (rest[3] == 'G' && rest[4] == 'O'))) {
+            u32 n = 0;
+            sTextName[n++] = prefixes[veh * 2];
+            sTextName[n++] = prefixes[veh * 2 + 1];
+            sTextName[n++] = '_';
+            if (veh < 3) {
+                sTextName[n++] = "EABP"[cls];
+            } else {
+                sTextName[n++] = 'L';
+                sTextName[n++] = (char)('1' + cls);
+            }
+            sTextName[n++] = '_';
+            for (i = 0; rest[i] != 0 && n < sizeof(sTextName) - 1; i++) {
+                sTextName[n++] = rest[i];
+            }
+            sTextName[n] = 0;
+            return GAME_TEXT_BY_NAME(sTextName);
+        }
+    }
     if (birdman_player_stage() != 0) {
         for (i = 0; bonus[i] != 0 && name[i] == bonus[i]; i++) {
         }

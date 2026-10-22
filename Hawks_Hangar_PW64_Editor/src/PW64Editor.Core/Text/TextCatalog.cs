@@ -178,6 +178,23 @@ public static partial class TextCatalog
             return Make("Badges", "Birdman", 10, Badges[badge], $"{stageClass.Order}{badgeOrder}", sourceFiles);
         }
 
+        // Own badge texts of a class with own medal limits (Classes tab): HG_A_S3_GOLD, SD_L2_S3_SILVER
+        if ((m = ClassBadgePattern().Match(name)).Success)
+        {
+            string vehicle = m.Groups[2].Success && m.Groups[2].Value.Length > 0 ? m.Groups[2].Value : m.Groups[4].Value;
+            string vehicleName = vehicle switch
+            {
+                "HG" => "Hang Glider", "RP" => "Rocket Belt", "GC" => "Gyrocopter",
+                "CB" => "Cannonball", "SD" => "Sky Diving", _ => "Jumble Hopper",
+            };
+            int vehicleOrder = Array.IndexOf(["HG", "RP", "GC", "CB", "SD", "HP"], vehicle);
+            string badge = m.Groups[6].Value;
+            int badgeOrder = Array.IndexOf(["BLONDS", "SILVER", "GOLD"], badge);
+            return m.Groups[3].Success && m.Groups[3].Value.Length > 0 && Classes.TryGetValue(m.Groups[3].Value, out var ownClass)
+                ? Make("Badges", vehicleName, 20 + vehicleOrder, ("{0}: {1}", [ownClass.Name, Badges[badge]]), $"{ownClass.Order}{badgeOrder}", sourceFiles)
+                : Make("Badges", vehicleName, 20 + vehicleOrder, ("Level {0}: {1}", [m.Groups[5].Value, Badges[badge]]), $"{m.Groups[5].Value}{badgeOrder}", sourceFiles);
+        }
+
         // "4 tests to go" (game patch "Bonus games and Birdman"), next to the game's TRY1 … TRY3.
         if (name == "TRY4")
         {
@@ -262,6 +279,9 @@ public static partial class TextCatalog
 
     [GeneratedRegex(@"^BD_(E|B|A|P)_S3_(GREAT|PERFECT|GOLD|SILVER|BLONDS)$")]
     private static partial Regex BirdmanBadgePattern();
+
+    [GeneratedRegex(@"^((HG|RP|GC)_(E|A|B|P)|(CB|SD|HP)_L([123]))_S3_(GOLD|SILVER|BLONDS)$")]
+    private static partial Regex ClassBadgePattern();
 
     [GeneratedRegex(@"^(E|B|A|P|BONUS)_S3_(GREAT|PERFECT|GOLD|SILVER|BLONDS)$")]
     private static partial Regex BadgePattern();

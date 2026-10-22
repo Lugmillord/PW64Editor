@@ -1,0 +1,37 @@
+<UserControl x:Class="PW64Editor.App.Views.ClassesTab"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <UserControl.Resources>
+        <Style x:Key="SectionTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,4,0,6" />
+        </Style>
+        <Style x:Key="Note" TargetType="TextBlock">
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+            <Setter Property="Margin" Value="0,2,0,2" />
+        </Style>
+    </UserControl.Resources>
+
+    <!-- What applies to all missions of a class of a vehicle: medal limits and island. Every change is saved in the
+         project right away and takes effect with the next build. -->
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+        <StackPanel Margin="16,10,16,10" MaxWidth="1000" HorizontalAlignment="Left">
+            <TextBlock Style="{StaticResource Note}"
+                       Text="What applies to all missions of a class: the points for the badges and the island. Every change is saved in the project right away and takes effect with the next build (Ctrl+S)." />
+
+            <WrapPanel Margin="0,10,0,0">
+                <TextBlock Text="Vehicle" VerticalAlignment="Center" Margin="0,0,8,0" />
+                <ComboBox x:Name="VehicleBox" Width="200" SelectionChanged="OnVehicleChanged" />
+            </WrapPanel>
+
+            <TextBlock Text="Badges" Style="{StaticResource SectionTitle}" Margin="0,16,0,6" />
+            <TextBlock x:Name="MedalNote" Style="{StaticResource Note}" />
+            <Grid x:Name="ClassGrid" Margin="0,8,0,0" />
+            <TextBlock x:Name="TextsNote" Style="{StaticResource Note}" Margin="0,8,0,0" />
+            <TextBlock x:Name="IslandNote" Style="{StaticResource Note}" Margin="0,4,0,0" />
+            <TextBlock x:Name="StatusText" Margin="0,10,0,0" TextWrapping="Wrap" />
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

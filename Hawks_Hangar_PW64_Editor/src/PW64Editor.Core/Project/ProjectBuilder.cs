@@ -75,6 +75,8 @@ public static class ProjectBuilder
                         BirdmanPoints = project.HasPatch(GamePatches.BonusGames)
                             ? Missions.ResultTables.BirdmanPointsMask(Missions.ResultTables.BirdmanPointMissions(project.Settings.Missions))
                             : (ushort)0,
+                        ClassTable = Classes.ClassLimits.Table(project.Settings.Classes, project.HasPatch(GamePatches.BonusGames),
+                            HasOwnClassTexts(project)),
                     },
                     GameModuleInfo = ModuleInfo(project),
                 });
@@ -201,6 +203,7 @@ public static class ProjectBuilder
     /// </summary>
     public static void ApplyMissionSettings(HackProject project, List<GameFile> files)
     {
+        ApplyClassIslands(project, files);
         List<Missions.MissionSettings> withConditions = project.Settings.Missions
             .Where(m => m.Conditions is not null || m.StartFuel is not null || m.RunwayWidths is not null).ToList();
         if (withConditions.Count == 0)
@@ -241,6 +244,37 @@ public static class ProjectBuilder
             if (settings.RunwayWidths is { } widths && !mission.RunwayWidths.SequenceEqual(widths.Take(mission.RunwayWidths.Count)))
             {
                 files[i] = files[i] with { Data = mission.WithRunwayWidths(widths) };
+            }
+        }
+    }
+
+    /// <summary>
+    /// The islands of classes with an own island (Classes tab): COMM byte 3 of every mission of the class, which decides
+    /// the island the game loads (taskInitTest). The test screen's table follows in <see cref="MissionPatches"/>.
+    /// </summary>
+    public static void ApplyClassIslands(HackProject project, List<GameFile> files)
+    {
+        List<Classes.ClassSettings> islands = [.. project.Settings.Classes.Where(c => c.Island is not null)];
+        if (islands.Count == 0)
+        {
+            return;
+        }
+
+        for (int i = 0; i < files.Count; i++)
+        {
+            if (files[i].FileType != Missions.MissionFile.FormType)
+            {
+                continue;
+            }
+
+            Missions.MissionFile mission = Missions.MissionFile.Parse(files[i].Data);
+            SaveGame.TestId id = mission.Comm.Id;
+            if (islands.FirstOrDefault(c => c.VehicleId == id.Vehicle && c.Class == id.Class) is { Island: { } island }
+                && mission.Comm.Island != island)
+            {
+                Missions.MissionComm comm = mission.Comm.Clone();
+                comm.Island = island;
+                files[i] = files[i] with { Data = mission.WithComm(comm) };
             }
         }
     }
@@ -432,6 +466,17 @@ public static class ProjectBuilder
             patches.AddRange(Missions.DemoButton.Patches(hiddenDemos));
         }
 
+        // The island of a class on the test screen (globe, island name: D_8034F420[7][4] in test_summary.c).
+        foreach (Classes.ClassSettings island in project.Settings.Classes.Where(c => c.Island is not null))
+        {
+            if (layout.Missions is null || island.Island is not (>= 0 and < 4) || island.Vehicle is < 0 or > 6 || island.Class is < 0 or > 3)
+            {
+                throw new ProjectException(CoreText.T("The island of a class cannot be stored in this game version."));
+            }
+
+            patches.Add(new DataPatch(layout.Missions.ClassIslandsOffset + (island.Vehicle * 4) + island.Class, [(byte)island.Island.Value], "class island"));
+        }
+
         // The Birdman has no entry in the game's table: its rows only exist in the tables of the game patch "Bonus games
         // and Birdman" (BonusResultTables).
         List<Missions.MissionSettings> changed = project.Settings.Missions
@@ -490,17 +535,13 @@ public static class ProjectBuilder
     }
 
     /// <summary>
-    /// With the game patch <see cref="GamePatches.BonusGames"/>: the texts of the levels the project's text file lacks
-    /// (until a text is saved they are only in memory, see <see cref="Workspace.EditorSession.LoadTexts"/>) are added to
-    /// the built text file as copies of the shared texts, so the game always finds them.
+    /// The texts the editor adds or writes itself, added to the built text file so the game always finds them (until a
+    /// text is saved they are only in memory, see <see cref="Workspace.EditorSession.LoadTexts"/>): with the game patch
+    /// <see cref="GamePatches.BonusGames"/> the texts of the levels and of the Birdman missions with points, and the
+    /// medal texts of classes with own limits (<see cref="Classes.ClassTexts"/>).
     /// </summary>
     private static void AddLevelTexts(HackProject project, GameFileSystem cleanFileSystem, List<GameFile> files)
     {
-        if (!project.HasPatch(GamePatches.BonusGames))
-        {
-            return;
-        }
-
         GameFile originalText;
         try
         {
@@ -514,8 +555,8 @@ public static class ProjectBuilder
         int position = files.FindIndex(f => f.TableIndex == originalText.TableIndex);
         try
         {
-            if (Missions.ResultTables.AddLevelTexts(files[position].Data, Missions.ResultTables.BirdmanPointMissions(project.Settings.Missions),
-                    Workspace.EditorSession.EncodeFor(Text.TextFont.Load(cleanFileSystem))) is { } withTexts)
+            if (AddGeneratedTexts(project.HasPatch(GamePatches.BonusGames), HasOwnClassTexts(project), project.Settings.Missions,
+                    project.Settings.Classes, files[position].Data, Text.TextFont.Load(cleanFileSystem)) is { } withTexts)
             {
                 files[position] = files[position] with { Data = withTexts };
             }
@@ -524,6 +565,43 @@ public static class ProjectBuilder
         {
             throw new ProjectException(CoreText.F("The project's text file is damaged: {0}", ex.Message), ex);
         }
+    }
+
+    /// <summary>True if classes with own limits get own medal texts: the code fix for more texts is applied.</summary>
+    public static bool HasOwnClassTexts(HackProject project) => project.Settings.AppliedCodeFixes.Contains(CodeFixes.ExpandedTexts.Id);
+
+    /// <summary>
+    /// Adds the texts the editor writes itself to a text file: the level and Birdman texts of the game patch "Bonus games
+    /// and Birdman" (<paramref name="bonusPatch"/>) and the medal texts of classes with own limits (<paramref name="classTexts"/>).
+    /// </summary>
+    /// <returns>The new text file, or null if nothing changed.</returns>
+    /// <exception cref="InvalidDataException">The text file is damaged.</exception>
+    public static byte[]? AddGeneratedTexts(bool bonusPatch, bool classTexts, IEnumerable<Missions.MissionSettings> missions,
+        IEnumerable<Classes.ClassSettings> classes, byte[] textFile, Text.TextFont font)
+    {
+        List<Classes.ClassSettings> classList = [.. classes];
+        byte[] data = textFile;
+        bool changed = false;
+        if (bonusPatch)
+        {
+            Dictionary<int, IReadOnlyList<int>> birdmanLimits = classList
+                .Where(c => c.VehicleId == SaveGame.Vehicle.Birdman && c.Medals is { Count: 3 })
+                .ToDictionary(c => c.Class, c => (IReadOnlyList<int>)c.Medals!);
+            if (Missions.ResultTables.AddLevelTexts(data, Missions.ResultTables.BirdmanPointMissions(missions),
+                    Workspace.EditorSession.EncodeFor(font), birdmanLimits) is { } withLevels)
+            {
+                data = withLevels;
+                changed = true;
+            }
+        }
+
+        if (classTexts && Classes.ClassTexts.Add(data, classList, font) is { } withClasses)
+        {
+            data = withClasses;
+            changed = true;
+        }
+
+        return changed ? data : null;
     }
 
     private static void CheckTextFile(HackProject project, GameFileSystem cleanFileSystem, List<GameFile> files)

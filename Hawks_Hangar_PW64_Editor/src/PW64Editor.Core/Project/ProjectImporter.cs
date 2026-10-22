@@ -164,10 +164,18 @@ public static class ProjectImporter
             throw new ProjectException(CoreText.F("The game files of the ROM cannot be read: {0}", ex.Message), ex);
         }
 
-        // With the game patch "Bonus games and Birdman" the build adds the level texts to the text file; a text file that
-        // differs from the original only by them is not a change of its own.
+        // The classes (Classes tab): own medal limits from the class table, islands from the test screen's table.
+        settings.Classes = ReadClasses(hack, cleanRom.Data, layout, module, out bool classTexts);
+        if (settings.Classes.Count > 0)
+        {
+            notes.Add(Info(CoreText.F("Classes with own medal limits or islands: {0}.", settings.Classes.Count)));
+        }
+
+        // With the game patch "Bonus games and Birdman" the build adds the level texts to the text file, and classes with
+        // own limits get own medal texts; a text file that differs from the original only by them is not a change of its own.
         (int Index, byte[] Data)? patchTexts = null;
-        if (GamePatches.BonusGames.AsCodeFix.GetState(hack, CodeFixes.CodeStart, CodeFixes.CodeEnd(layout)) == CodeFixState.Applied)
+        bool bonusPatch = GamePatches.BonusGames.AsCodeFix.GetState(hack, CodeFixes.CodeStart, CodeFixes.CodeEnd(layout)) == CodeFixState.Applied;
+        if (bonusPatch || classTexts)
         {
             try
             {
@@ -175,7 +183,14 @@ public static class ProjectImporter
                 IReadOnlyList<TestId> birdman = module is not null && GameModule.ReadDataImage(hack, module) is { } image
                     ? ResultTables.BirdmanPointsFromMask(DataArea.ReadBirdmanPoints(image))
                     : [];
-                if (ResultTables.AddLevelTexts(cleanText.Data, birdman, Workspace.EditorSession.EncodeFor(Text.TextFont.Load(cleanFs))) is { } built)
+                List<MissionSettings> birdmanSettings = [.. birdman.Select(id =>
+                {
+                    MissionSettings m = MissionSettings.For(id);
+                    m.BirdmanPoints = true;
+                    return m;
+                })];
+                if (ProjectBuilder.AddGeneratedTexts(bonusPatch, classTexts, birdmanSettings, settings.Classes, cleanText.Data,
+                        Text.TextFont.Load(cleanFs)) is { } built)
                 {
                     patchTexts = (cleanText.TableIndex, built);
                 }
@@ -560,6 +575,52 @@ public static class ProjectImporter
     /// The ROM ranges the game module changes in the game code (with every feature on). Code fixes that share
     /// these places (the memory manager, the code cave) are judged by their other pieces.
     /// </summary>
+    /// <summary>
+    /// The classes of a hack: own medal limits from the class table of the data area (<see cref="Classes.ClassLimits"/>)
+    /// and islands that differ from the original in the test screen's table (D_8034F420).
+    /// </summary>
+    /// <param name="ownTexts">True if the class table gives classes own medal texts.</param>
+    private static List<Classes.ClassSettings> ReadClasses(byte[] hack, byte[] clean, RomLayout layout, GameModuleHeader? module, out bool ownTexts)
+    {
+        var result = new List<Classes.ClassSettings>();
+        ownTexts = false;
+        Classes.ClassSettings Get(Vehicle vehicle, int classIndex)
+        {
+            Classes.ClassSettings? existing = result.FirstOrDefault(c => c.VehicleId == vehicle && c.Class == classIndex);
+            if (existing is null)
+            {
+                existing = Classes.ClassSettings.For(vehicle, classIndex);
+                result.Add(existing);
+            }
+
+            return existing;
+        }
+
+        if (module is not null && GameModule.ReadDataImage(hack, module) is { } image && DataArea.ReadClassTable(image) is { } table)
+        {
+            ownTexts = table.AsSpan(Classes.ClassLimits.FlagsOffset).ToArray().Any(f => (f & Classes.ClassLimits.FlagOwnTexts) != 0);
+            foreach ((Vehicle vehicle, int classIndex, IReadOnlyList<int> medals) in Classes.ClassLimits.ReadTable(table))
+            {
+                Get(vehicle, classIndex).Medals = [.. medals];
+            }
+        }
+
+        if (layout.Missions is { } missions && missions.ClassIslandsOffset + 28 <= Math.Min(hack.Length, clean.Length))
+        {
+            foreach ((Vehicle vehicle, int classIndex) in Classes.ClassLimits.All)
+            {
+                int offset = missions.ClassIslandsOffset + ((int)vehicle * 4) + classIndex;
+                if (hack[offset] != clean[offset] && hack[offset] < 4)
+                {
+                    Get(vehicle, classIndex).Island = hack[offset];
+                }
+            }
+        }
+
+        result.Sort((a, b) => (a.Vehicle, a.Class).CompareTo((b.Vehicle, b.Class)));
+        return result;
+    }
+
     private static List<(int Start, int End)> ModulePatchRanges(GameModuleHeader module)
     {
         var all = new GameModuleOptions(true, true, true, true)
@@ -569,6 +630,9 @@ public static class ProjectImporter
             PenaltyDigits = new ushort[10],
             CountdownTexts = Enumerable.Repeat<IReadOnlyList<ushort>>([0xFFFF], 6).ToList(),
             DistanceRow = true,
+            ClassTable = Enumerable.Repeat((byte)0, Classes.ClassLimits.FlagsOffset)
+                .Concat(Enumerable.Repeat((byte)(Classes.ClassLimits.FlagOwnLimits | Classes.ClassLimits.FlagOwnTexts), Classes.ClassLimits.TableSize - Classes.ClassLimits.FlagsOffset))
+                .ToArray(),
         };
         return GameModule.Patches(all, module.RomOffset, Math.Max(module.ImageSize, 8))
             .Select(p => (p.RomOffset, p.RomOffset + (p.Replacement.Length * 4)))

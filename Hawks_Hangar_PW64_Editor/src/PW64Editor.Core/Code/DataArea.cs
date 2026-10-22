@@ -29,7 +29,8 @@ namespace PW64Editor.Core.Code;
 /// +0x80 ... reserved (0)
 /// </code>
 /// <para>Header: +0x00 'HHMD', +0x04 version, +0x08 missions, +0x0C entry size, +0x10 size of the result tables
-/// (0 = none), +0x14 u16 the Birdman missions with points (bit class × 4 + test). At +0x50 the Birdman's two landing
+/// (0 = none), +0x14 u16 the Birdman missions with points (bit class × 4 + test), +0x18 RAM address of the class table
+/// (medal limits per vehicle and class, <see cref="Classes.ClassLimits"/>; 0 = none). At +0x50 the Birdman's two landing
 /// limits, which its patched code reads. At +0x40 the values the game code reads while flying (written by the module in every flight frame,
 /// see <see cref="LiveLandingAddress"/>).</para>
 /// <para>Behind the room for <see cref="MissionCapacity"/> entries (at <see cref="Missions.ResultTables.Address"/>)
@@ -91,6 +92,9 @@ public static class DataArea
     /// <summary>Header offset of the mask of the Birdman missions with points (u16, <see cref="Missions.ResultTables.BirdmanPointsMask"/>).</summary>
     public const int BirdmanPointsOffset = 0x14;
 
+    /// <summary>Header: RAM address of the class table (<see cref="Classes.ClassLimits"/>), 0 = none.</summary>
+    public const int ClassTableOffset = 0x18;
+
     /// <summary>
     /// RAM address of the Birdman's two current landing limits (f32 km/h: vertical, forward), which its patched landing
     /// code loads instead of the immediates 50 (module: the mission's values or the original ones).
@@ -105,7 +109,8 @@ public static class DataArea
     /// <param name="resultTables">The result tables of <see cref="GamePatches.BonusGames"/> (<see cref="Missions.ResultTables.Create"/>), or null.</param>
     /// <exception cref="InvalidDataException">More missions than the table has room for, or the tables do not fit.</exception>
     /// <param name="birdmanPoints">The mask of the Birdman missions with points (header +0x14).</param>
-    public static byte[] CreateImage(IReadOnlyList<GameModuleCondition> missions, byte[]? resultTables = null, ushort birdmanPoints = 0)
+    public static byte[] CreateImage(IReadOnlyList<GameModuleCondition> missions, byte[]? resultTables = null, ushort birdmanPoints = 0,
+        byte[]? classTable = null)
     {
         if (missions.Count > MissionCapacity)
         {
@@ -118,7 +123,15 @@ public static class DataArea
             throw new InvalidDataException("The result tables do not fit into the data area.");
         }
 
-        byte[] image = new byte[resultTables is null ? HeaderSize + (missions.Count * MissionEntrySize) : tablesOffset + resultTables.Length];
+        int classOffset = (int)(Classes.ClassLimits.TableAddress - Start);
+        if (classTable is not null && (classTable.Length != Classes.ClassLimits.TableSize
+            || !Classes.ClassLimits.FitsBehind(Missions.ResultTables.Address + (uint)(resultTables?.Length ?? 0))))
+        {
+            throw new InvalidDataException("The class table does not fit into the data area.");
+        }
+
+        byte[] image = new byte[classTable is not null ? classOffset + classTable.Length
+            : resultTables is null ? HeaderSize + (missions.Count * MissionEntrySize) : tablesOffset + resultTables.Length];
         BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(0x00), Magic);
         BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(0x04), Version);
         BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(0x08), (uint)missions.Count);
@@ -128,6 +141,12 @@ public static class DataArea
         {
             BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(ResultTablesSizeOffset), (uint)resultTables.Length);
             resultTables.CopyTo(image, tablesOffset);
+        }
+
+        if (classTable is not null)
+        {
+            BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(ClassTableOffset), Classes.ClassLimits.TableAddress);
+            classTable.CopyTo(image, classOffset);
         }
 
         for (int i = 0; i < missions.Count; i++)
@@ -194,6 +213,19 @@ public static class DataArea
         int size = (int)BinaryPrimitives.ReadUInt32BigEndian(image[ResultTablesSizeOffset..]);
         int offset = (int)(Missions.ResultTables.Address - Start);
         return size > 0 && offset + (long)size <= image.Length ? image.Slice(offset, size).ToArray() : null;
+    }
+
+    /// <summary>The class table of an image made by <see cref="CreateImage"/>, or null if it has none.</summary>
+    public static byte[]? ReadClassTable(ReadOnlySpan<byte> image)
+    {
+        if (image.Length < HeaderSize || BinaryPrimitives.ReadUInt32BigEndian(image) != Magic
+            || BinaryPrimitives.ReadUInt32BigEndian(image[ClassTableOffset..]) != Classes.ClassLimits.TableAddress)
+        {
+            return null;
+        }
+
+        int offset = (int)(Classes.ClassLimits.TableAddress - Start);
+        return offset + Classes.ClassLimits.TableSize <= image.Length ? image.Slice(offset, Classes.ClassLimits.TableSize).ToArray() : null;
     }
 
     /// <summary>The mask of the Birdman missions with points of an image (0 for none or not an image).</summary>

@@ -59,6 +59,9 @@ public sealed class ProjectSettings
     /// <summary>Changed result sheets and generated point texts of missions (only missions with changes).</summary>
     public List<Missions.MissionSettings> Missions { get; set; } = [];
 
+    /// <summary>Changed classes: own medal limits and islands (Classes tab; only classes with changes).</summary>
+    public List<Classes.ClassSettings> Classes { get; set; } = [];
+
     /// <summary>Additional features built into the game (Features tab).</summary>
     public GameFeatureSettings Features { get; set; } = new();
 }

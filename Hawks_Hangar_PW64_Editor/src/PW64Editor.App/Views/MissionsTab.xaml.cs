@@ -126,7 +126,9 @@ public partial class MissionsTab : UserControl
             ? L.T("The Missions tab writes this text from the points of the mission. Change the points there.")
             : ResultTables.IsGeneratedText(name)
                 ? L.T("The editor writes this text from the Birdman missions with points of the stage (game patch \"Bonus games and Birdman\").")
-                : null;
+                : PW64Editor.Core.Classes.ClassTexts.IsClassText(name)
+                    ? L.T("The editor writes this text from the badge limits of the class (Classes tab) and the shared text of the class (e.g. A_S3_GOLD).")
+                    : null;
 
         // After saving or reloading, the Text tab has new row objects (and maybe new titles).
         texts.TextsReloaded += (_, _) => RefreshTexts();

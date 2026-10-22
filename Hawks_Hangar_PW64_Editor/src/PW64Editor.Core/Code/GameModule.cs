@@ -120,8 +120,11 @@ public sealed record GameModuleOptions(bool DebugOutput, bool StartupInfo = fals
     /// <summary>With <see cref="GamePatches.BonusGames"/>: the Birdman missions with points (bit class × 4 + test).</summary>
     public ushort BirdmanPoints { get; init; }
 
+    /// <summary>The class table (medal limits per vehicle and class, <see cref="Classes.ClassLimits"/>), or null for the game's limits.</summary>
+    public byte[]? ClassTable { get; init; }
+
     /// <summary>True if the module is built into the ROM.</summary>
-    public bool IsNeeded => RequireExpansionPak || ResultTables is not null || DebugOutput || Conditions.Count > 0 || DistanceRow || PenaltyDigits.Count > 0;
+    public bool IsNeeded => RequireExpansionPak || ResultTables is not null || ClassTable is not null || DebugOutput || Conditions.Count > 0 || DistanceRow || PenaltyDigits.Count > 0;
 }
 
 /// <summary>
@@ -636,6 +639,12 @@ public static class GameModule
             }
         }
 
+        // Medal limits per vehicle and class: the functions that read the game's table go through the module.
+        if (options.ClassTable is { } classTable)
+        {
+            patches.AddRange(ClassLimitPatches(classTable));
+        }
+
         // Distance points on the result sheet: the jump table entry of row type 10.
         if (options.DistanceRow)
         {
@@ -655,6 +664,38 @@ public static class GameModule
     }
 
     /// <summary>
+    /// The changes for medal limits per vehicle and class (<see cref="Classes.ClassLimits"/>): the level select
+    /// (func_8030D9C8 ROM 0x94EF8, func_8030DED0 0x95400), the file menu (fileMenu_802E8AF0 0x70020), "points to the next
+    /// medal" (levelSetPointsToNextMedal 0xB36A4) and the ending's lowest medal (func_8032C3C4 0xB38F4) jump to the module
+    /// at their entry; the points under the menu fields (func_8030F818) load their bronze limit through a stub
+    /// (0x971F4-0x971FC); with own medal texts the total screen asks the module for the text (0xCEA44, as the game patch
+    /// "Bonus games and Birdman" does). Function names from the decompilation
+    /// (https://github.com/gcsmith/Pilotwings64Decomp, MIT license).
+    /// </summary>
+    public static IReadOnlyList<WordPatch> ClassLimitPatches(byte[] classTable)
+    {
+        var patches = new List<WordPatch>
+        {
+            new("medal limits, level select page 1 (func_8030D9C8)", 0x94EF8, [0x27BDFF48, 0xAFBE0070], [CodeArea.J(GameModuleImage.MenuPage1Address), 0]),
+            new("medal limits, level select page 2 (func_8030DED0)", 0x95400, [0x27BDFF58, 0xAFB60068], [CodeArea.J(GameModuleImage.MenuPage2Address), 0]),
+            new("medal limits, file menu (fileMenu_802E8AF0)", 0x70020, [0x27BDFF88, 0xAFB3005C], [CodeArea.J(GameModuleImage.FileMenuAddress), 0]),
+            new("medal limits, points to the next medal (levelSetPointsToNextMedal)", 0xB36A4, [0x27BDFFD0, 0x3C028036],
+                [CodeArea.J(GameModuleImage.PointsToMedalAddress), 0]),
+            new("medal limits, lowest medal of the ending (func_8032C3C4)", 0xB38F4, [0x27BDFFC8, 0x30A3FFFF],
+                [CodeArea.J(GameModuleImage.LowestMedalAddress), 0]),
+            new("medal limits, points under the menu fields (func_8030F818)", 0x971F4, [0x3C0A8035, 0x01495021, 0x954AFBD4],
+                [CodeArea.Jal(GameModuleImage.BronzeT2Address), 0, 0]),
+        };
+        if (classTable.AsSpan(Classes.ClassLimits.FlagsOffset).IndexOfAnyExcept((byte)0, Classes.ClassLimits.FlagOwnLimits) >= 0)
+        {
+            patches.Add(new WordPatch("medal limits, own medal texts of the total screen (totResultInit)", 0xCEA44,
+                [0x0C0D083D], [CodeArea.Jal(GameModuleImage.TotalMedalTextAddress)]));
+        }
+
+        return patches;
+    }
+
+    /// <summary>
     /// Writes the module into a ROM: the image at its place, the image of the data area in front of it
     /// and all patches of the game code.
     /// </summary>
@@ -666,7 +707,7 @@ public static class GameModule
     public static void Apply(byte[] rom, GameModuleOptions options, int romOffset, string info)
     {
         int dataRomOffset = romOffset - DataArea.RomReserve;
-        byte[] data = DataArea.CreateImage(options.Conditions, options.ResultTables, options.BirdmanPoints);
+        byte[] data = DataArea.CreateImage(options.Conditions, options.ResultTables, options.BirdmanPoints, options.ClassTable);
         byte[] image = CreateImage(options, romOffset, info, dataRomOffset, data.Length);
         if (dataRomOffset < 0 || romOffset + RomReserve > rom.Length)
         {
