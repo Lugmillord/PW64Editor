@@ -516,6 +516,38 @@ public partial class TextTab : UserControl, ITextEditorHost
         UnsavedChangesChanged?.Invoke(this, EventArgs.Empty);
     }
 
+    /// <summary>
+    /// Adds a text a game patch needs (a Birdman mission with points gets its own texts), as a new custom text that is
+    /// saved with the other changes. Nothing happens if the text exists or the project cannot hold more texts.
+    /// </summary>
+    /// <returns>The row of the text, or null.</returns>
+    public TextRow? AddPatchText(string name, string markup)
+    {
+        if (_library is null || _session is null || !_session.CanAddTexts)
+        {
+            return null;
+        }
+
+        if (_rowsByName.TryGetValue(name, out TextRow? existing))
+        {
+            return existing;
+        }
+
+        if (CustomTexts.NextFreeIndex(_rows.Select(r => r.Index), _library.OriginalCount) is not { } number)
+        {
+            return null;
+        }
+
+        var entry = new GameTextEntry(number, name, TextFileEntry.FreeSlotData);
+        var text = new GameText(entry, string.Empty, TextCatalog.Categorize(name)) { IsCustom = true, IsPatchText = true };
+        var row = new TextRow(text, string.Empty) { IsNew = true, Markup = markup };
+        _rows.Add(row);
+        _rowsByName[name] = row;
+        _view?.Refresh();
+        UnsavedChangesChanged?.Invoke(this, EventArgs.Empty);
+        return row;
+    }
+
     /// <inheritdoc />
     public void RemoveText(TextRow row)
     {

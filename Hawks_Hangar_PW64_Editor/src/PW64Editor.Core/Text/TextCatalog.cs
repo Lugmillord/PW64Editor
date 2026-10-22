@@ -170,6 +170,20 @@ public static partial class TextCatalog
         }
 
         // Badge requirements: A_S3_GOLD, BONUS_S3_SILVER
+        // Badges of a Birdman stage with points (game patch "Bonus games and Birdman"): BD_E_S3_GOLD
+        if ((m = BirdmanBadgePattern().Match(name)).Success && Classes.TryGetValue(m.Groups[1].Value, out var stageClass))
+        {
+            string badge = m.Groups[2].Value;
+            int badgeOrder = Array.IndexOf(["BLONDS", "SILVER", "GOLD", "PERFECT", "GREAT"], badge);
+            return Make("Badges", "Birdman", 10, Badges[badge], $"{stageClass.Order}{badgeOrder}", sourceFiles);
+        }
+
+        // "4 tests to go" (game patch "Bonus games and Birdman"), next to the game's TRY1 … TRY3.
+        if (name == "TRY4")
+        {
+            return Categorize("TRY1") with { SortKey = name };
+        }
+
         if ((m = BadgePattern().Match(name)).Success && Classes.TryGetValue(m.Groups[1].Value, out var badgeClass))
         {
             string badge = m.Groups[2].Value;
@@ -237,7 +251,7 @@ public static partial class TextCatalog
     [GeneratedRegex(@"^(HG|RP|GC)_(\d+)_A$")]
     private static partial Regex TutorialPattern();
 
-    [GeneratedRegex(@"^(HG|RP|GC)_(E|B|A|P)(\d?)_S([12])$")]
+    [GeneratedRegex(@"^(HG|RP|GC|BD)_(E|B|A|P)(\d?)_S([12])$")]
     private static partial Regex ScoreSheetPattern();
 
     [GeneratedRegex(@"^(SD|CB|HP)_L(\d+)_S([12])$")]
@@ -245,6 +259,9 @@ public static partial class TextCatalog
 
     [GeneratedRegex(@"^BD_ALL_S(\d)$")]
     private static partial Regex BirdmanSheetPattern();
+
+    [GeneratedRegex(@"^BD_(E|B|A|P)_S3_(GREAT|PERFECT|GOLD|SILVER|BLONDS)$")]
+    private static partial Regex BirdmanBadgePattern();
 
     [GeneratedRegex(@"^(E|B|A|P|BONUS)_S3_(GREAT|PERFECT|GOLD|SILVER|BLONDS)$")]
     private static partial Regex BadgePattern();

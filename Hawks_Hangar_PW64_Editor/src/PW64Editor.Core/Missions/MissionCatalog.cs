@@ -51,8 +51,8 @@ public static class MissionCatalog
 
     /// <summary>
     /// The sources that can be chosen for a vehicle: those it can collect in the game (see
-    /// Mission_Scoring.md). Cannonball and Birdman have none: Cannonball shows its four targets,
-    /// Birdman has no score sheet.
+    /// Mission_Scoring.md). Cannonball has none: it shows its four targets. The Birdman's only count in its missions
+    /// with points (<see cref="MissionSettings.BirdmanPoints"/>).
     /// </summary>
     public static IReadOnlyList<PointSource> AvailableSources(Vehicle vehicle) => vehicle switch
     {
@@ -69,6 +69,11 @@ public static class MissionCatalog
         // too imprecise to land on a pad on purpose, so landing accuracy is not offered either (decision of 2026-10-16;
         // no retail mission uses it, their accuracy curves are empty).
         Vehicle.JumbleHopper => [PointSource.Rings, PointSource.Balloons, PointSource.Altitude, PointSource.Distance, PointSource.Time],
+
+        // Birdman with points (game patch "Bonus games and Birdman"): what it collects, and the landing (the module ends the
+        // mission at the landing and measures the impact).
+        Vehicle.Birdman => [PointSource.Rings, PointSource.Balloons, PointSource.Photo, PointSource.Altitude, PointSource.Distance, PointSource.Time,
+            PointSource.LandingAccuracy, PointSource.LandingImpact],
         _ => [],
     };
 

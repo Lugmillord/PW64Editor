@@ -162,7 +162,8 @@ public class BonusGamesTests
         Assert.Equal(new MedalLimits(280, 320, 360), new MissionTables(built, RomLayout.PilotwingsUsa.Missions!).MedalLimits()[7]);
         foreach (int call in GamePatches.PointsToMedalCalls)
         {
-            Assert.Equal(CodeArea.Jal(GameModuleImage.PointsToMedalAddress), Word(built, call));
+            Assert.Equal(CodeArea.Jal(call == GamePatches.CeremonyMedalCall ? GameModuleImage.CeremonyMedalAddress : GameModuleImage.PointsToMedalAddress),
+                Word(built, call));
         }
 
         // The texts are in the built text file.
@@ -222,6 +223,190 @@ public class BonusGamesTests
         session.Project.Settings.AppliedCodeFixes.Remove(CodeFixes.ExpandedTexts.Id);
         Assert.Throws<ProjectException>(() => session.SetGamePatch(GamePatches.BonusGames, true));
         Assert.False(session.Project.HasPatch(GamePatches.BonusGames));
+    }
+
+    [RealRomFact]
+    public void BirdmanWithPoints_GetsItsTextsRowsMaskAndLandingValues()
+    {
+        using var temp = new TempDirectory();
+        N64Rom rom = N64Rom.Load(TestRomLocator.RomPath!);
+        EditorSession session = EditorSession.Create(temp.Combine("hack"), "Birdman", false, rom, TestRomLocator.RomPath!);
+        var id = new TestId(1, Vehicle.Birdman, 2);
+        MissionInfo bm = session.LoadMissions().Missions.Single(m => m.Id == id);
+        var draft = new MissionDraft(bm, null);
+        Assert.False(draft.HasScoreSheet);
+        Assert.False(draft.CanChangeSources);
+        Assert.Empty(draft.LandingValuesShown);
+
+        draft.SetBirdmanPoints(true);
+        Assert.True(draft.HasScoreSheet && draft.Settings.GenerateTexts);
+        Assert.Equal([PointSource.LandingAccuracy], draft.Rows); // the original missions have a landing curve of 60 points
+        Assert.Null(draft.SetRowSource(1, PointSource.LandingImpact, 20));
+        Assert.Equal(LandingValues.SpeedsOf(Vehicle.Birdman), draft.LandingValuesShown);
+        draft.SetLandingValue(LandingValue.BirdmanLandingForward, 40);
+        Assert.Equal([new CurvePoint(0, 20), new CurvePoint(21, 20), new CurvePoint(30, 10), new CurvePoint(40, 0)],
+            draft.Comm.GetCurve(ScoreCurveKind.Impact).Points); // the Birdman's own impact curve (its speed in km/h)
+        session.SaveMission(bm, draft.Comm, draft.SettingsToSave());
+
+        // Names, texts (in memory, copies of the free flight's) and the shown medal limits.
+        bm = session.LoadMissions().Missions.Single(m => m.Id == id);
+        Assert.Equal("BD_A3_S1", bm.MissionScreenTextName);
+        Assert.Equal("BD_A3_S2", bm.ResultSheetTextName);
+        Assert.Equal("BD_ALL_S1", session.LoadMissions().Missions.Single(m => m.Id == new TestId(1, Vehicle.Birdman, 0)).MissionScreenTextName);
+        GameTextLibrary texts = session.LoadTexts();
+        GameText sheet = texts.Texts.Single(t => t.Name == "BD_A3_S2");
+        Assert.True(sheet.IsPatchText);
+        Assert.Equal("Birdman", sheet.Category.Area);
+        Assert.Equal(texts.Texts.Single(t => t.Name == "BD_ALL_S2").Markup, sheet.Markup);
+        Assert.Contains(GamePatches.MissionsUsing(GamePatches.BonusGames, session.LoadMissions().Missions), u => u.Contains("mission with points", StringComparison.Ordinal));
+
+        byte[] built = session.Build(false).Result.RomBuild.Rom.Data;
+        byte[] image = DataImage(built);
+        Assert.Equal(1 << ((1 * 4) + 2), DataArea.ReadBirdmanPoints(image));
+        byte[] tables = DataArea.ReadResultTables(image)!;
+        int entry = (((6 * 4) + 1) * 5) + 2;
+        Assert.Equal("BD_A3_S1", Name(built, tables, Word(tables, entry * 4)));
+        Assert.Equal("BD_A3_S2", Name(built, tables, Word(tables, 0x230 + (entry * 4))));
+        Assert.Equal(ResultTables.BirdmanMissionScreenName, Word(tables, (((6 * 4) + 1) * 5) * 4)); // stage 2, mission 1: free flight
+        Assert.Equal([(int)PointSource.LandingImpact, (int)PointSource.LandingAccuracy, 0, 0],
+            tables.AsSpan(ResultTables.RowsOffset(id)!.Value, 4).ToArray().Select(b => (int)b));
+        Assert.Equal(0, tables.AsSpan(ResultTables.RowsOffset(new TestId(1, Vehicle.Birdman, 0))!.Value, 4).ToArray().Sum(b => b));
+
+        // The Birdman's entry with its four speeds (original ones where not set), and its patched landing code.
+        GameModuleCondition condition = DataArea.ReadImage(image).Single(c => c.Vehicle == 6);
+        Assert.Equal([50f, 40f], condition.VehicleLimits);
+        Assert.Equal(0x3C01801Fu, Word(built, 0x57A24));
+        Assert.Equal(0xC4285050u, Word(built, 0x57A30));
+        Assert.Equal(0xC4325054u, Word(built, 0x57A5C));
+        Assert.Equal(CodeArea.Jal(GameModuleImage.FlightFrameHookAddress), Word(built, 0x74BBC)); // the Birdman's flight frame call
+    }
+
+    [RealRomFact]
+    public void BirdmanWithPoints_IsImportedAgain()
+    {
+        using var temp = new TempDirectory();
+        N64Rom rom = N64Rom.Load(TestRomLocator.RomPath!);
+        EditorSession session = EditorSession.Create(temp.Combine("hack"), "Birdman", false, rom, TestRomLocator.RomPath!);
+        var id = new TestId(3, Vehicle.Birdman, 3);
+        MissionInfo bm = session.LoadMissions().Missions.Single(m => m.Id == id);
+        var draft = new MissionDraft(bm, null);
+        draft.SetBirdmanPoints(true);
+        Assert.Null(draft.SetRowSource(1, PointSource.Time, 40));
+        session.SaveMission(bm, draft.Comm, draft.SettingsToSave());
+        N64Rom hack = session.Build(false).Result.RomBuild.Rom;
+
+        RomImport import = ProjectImporter.Analyze(hack, rom, RomLayout.PilotwingsUsa, "file");
+        MissionSettings imported = import.Settings.Missions.Single(m => m.Id == id);
+        Assert.True(imported.BirdmanPoints);
+        Assert.Equal([(int)PointSource.LandingAccuracy, (int)PointSource.Time], imported.ResultRows);
+        Assert.DoesNotContain(import.ChangedFiles, f => f.FileType == GameTextFile.FormType); // the texts the build adds by itself
+
+        (EditorSession copy, IReadOnlyList<ImportNote> report) = EditorSession.CreateFromImport(
+            import, hack, temp.Combine("imported"), "Birdman", false, rom, TestRomLocator.RomPath!);
+        Assert.Contains(report, n => n.Text.StartsWith("The project builds exactly the imported ROM", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void BirdmanMask_AndNames()
+    {
+        TestId[] missions = [new(0, Vehicle.Birdman, 0), new(3, Vehicle.Birdman, 3), new(2, Vehicle.Birdman, 1)];
+        ushort mask = ResultTables.BirdmanPointsMask(missions);
+        Assert.Equal(0x8201, mask);
+        Assert.Equal<IEnumerable<TestId>>(missions.OrderBy(m => (m.Class, m.Test)), ResultTables.BirdmanPointsFromMask(mask));
+        Assert.Equal("BD_P4_S2", ResultTables.BirdmanTextName(new TestId(3, Vehicle.Birdman, 3), true));
+        Assert.Null(ResultTables.BirdmanTextName(new TestId(0, Vehicle.HangGlider, 0), true));
+        Assert.True(ResultTables.IsLevelText("BD_E1_S1"));
+        Assert.False(ResultTables.IsLevelText("BD_ALL_S1"));
+        IReadOnlyList<TestId> all = [.. Enumerable.Range(0, 16).Select(b => new TestId(b / 4, Vehicle.Birdman, b % 4))];
+        Assert.True(ResultTables.Address + ResultTables.SizeFor(all) <= DataArea.End);
+        Assert.Equal(9 + 32, ResultTables.TextsNeeded(all).Count);
+    }
+
+    [Fact]
+    public void GeneratedTexts_HaveTheLimitsAndLinesOfTheMissionsWithPoints()
+    {
+        IReadOnlyList<(string Name, string Markup)> texts =
+            ResultTables.GeneratedTexts([new(0, Vehicle.Birdman, 0), new(0, Vehicle.Birdman, 3), new(0, Vehicle.HangGlider, 1)]);
+        Assert.Equal(["BD_E_S3_BLONDS", "BD_E_S3_SILVER", "BD_E_S3_GOLD", "BD_E_S3_PERFECT", "BD_E_S3_GREAT"], texts.Select(t => t.Name));
+        string[] bronze = texts[0].Markup.Split('\n');
+        Assert.Equal("[x=38][b]< 140 pts[/b]. [b]for Bronze Badge >[/b]", bronze[0]);
+        Assert.Equal(["", "", "  Test 1", "  Test 4", "  [b]Total[/b]", "", "Points to go:"], bronze[1..]);
+        Assert.Contains("< 180 pts", texts[2].Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("Points to go", texts[4].Markup, StringComparison.Ordinal);
+
+        // One mission: the limits of one mission (two digits), no total; four missions: "4 tests to go".
+        Assert.StartsWith("[x=43][b]< 70 pts", ResultTables.GeneratedTexts([new(2, Vehicle.Birdman, 1)])[0].Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain("Total", ResultTables.GeneratedTexts([new(2, Vehicle.Birdman, 1)])[0].Markup, StringComparison.Ordinal);
+        IReadOnlyList<(string Name, string Markup)> four = ResultTables.GeneratedTexts([.. Enumerable.Range(0, 4).Select(t => new TestId(3, Vehicle.Birdman, t))]);
+        Assert.Contains(four, t => t.Name == "BD_P_S3_PERFECT" && t.Markup.Contains("< 400 pts", StringComparison.Ordinal));
+        Assert.Equal("[b]4 tests to go[/b]", four.Single(t => t.Name == "TRY4").Markup);
+        Assert.True(ResultTables.IsGeneratedText("BD_B_S3_GOLD") && ResultTables.IsGeneratedText("TRY4"));
+        Assert.False(ResultTables.IsGeneratedText("TRY3") || ResultTables.IsGeneratedText("A_S3_GOLD"));
+    }
+
+    [RealRomFact]
+    public void BirdmanStage1Test1WithPoints_GetsTheHangGlidersPad_AndTheTotalScreen()
+    {
+        using var temp = new TempDirectory();
+        N64Rom rom = N64Rom.Load(TestRomLocator.RomPath!);
+        EditorSession session = EditorSession.Create(temp.Combine("hack"), "Birdman", false, rom, TestRomLocator.RomPath!);
+        MissionInfo hg = session.LoadMissions().Missions.Single(m => m.Id == new TestId(0, Vehicle.HangGlider, 0));
+        foreach (int test in new[] { 0, 3 })
+        {
+            MissionInfo bm = session.LoadMissions().Missions.Single(m => m.Id == new TestId(0, Vehicle.Birdman, test));
+            Assert.Equal(0, bm.File.Comm.GetObjectCount(MissionObjectKind.LandingPad));
+            var draft = new MissionDraft(bm, null);
+            draft.SetBirdmanPoints(true);
+            session.SaveMission(bm, draft.Comm, draft.SettingsToSave());
+        }
+
+        // Only test 1 gets a pad: the Hang Glider's of Holiday Island, with its target type.
+        MissionInfo e1 = session.LoadMissions().Missions.Single(m => m.Id == EditorSession.BirdmanPadMission);
+        Assert.Equal(1, e1.File.Comm.GetObjectCount(MissionObjectKind.LandingPad));
+        Assert.Equal(hg.File.GetObjectData(MissionObjectKind.LandingPad)[..MissionFile.LandingPadSize].ToArray(),
+            e1.File.GetObjectData(MissionObjectKind.LandingPad).ToArray());
+        Assert.Equal(0, session.LoadMissions().Missions.Single(m => m.Id == new TestId(0, Vehicle.Birdman, 3)).File.Comm.GetObjectCount(MissionObjectKind.LandingPad));
+
+        // Saving again adds no second pad.
+        var again = new MissionDraft(e1, null);
+        session.SaveMission(e1, again.Comm, again.SettingsToSave());
+        Assert.Equal(1, session.LoadMissions().Missions.Single(m => m.Id == e1.Id).File.Comm.GetObjectCount(MissionObjectKind.LandingPad));
+
+        // The generated texts of the stage, and the code that leads "Next" to the total screen.
+        GameTextLibrary texts = session.LoadTexts();
+        Assert.Contains("< 140 pts", texts.Texts.Single(t => t.Name == "BD_E_S3_BLONDS").Markup, StringComparison.Ordinal);
+        Assert.DoesNotContain(texts.Texts, t => t.Name == "BD_A_S3_BLONDS");
+        byte[] built = session.Build(false).Result.RomBuild.Rom.Data;
+        Assert.Equal(CodeArea.J(GameModuleImage.ResultNextAddress), Word(built, 0xB5D24));
+        Assert.Equal(CodeArea.Jal(GameModuleImage.TotalMenuAddress), Word(built, 0xCEA50));
+        Assert.Equal(CodeArea.Jal(GameModuleImage.HudBirdmanAddress), Word(built, 0x9FBC4));
+        Assert.Equal(CodeArea.J(GameModuleImage.LevelPointsAddress), Word(built, 0xB3250)); // levelGetTotalPoints
+    }
+
+    [RealRomFact]
+    public void BirdmanPad_IsAddedOnBuild_WhenThePointsCameWithoutIt()
+    {
+        using var temp = new TempDirectory();
+        N64Rom rom = N64Rom.Load(TestRomLocator.RomPath!);
+        EditorSession session = EditorSession.Create(temp.Combine("hack"), "Birdman", false, rom, TestRomLocator.RomPath!);
+        MissionSettings settings = MissionSettings.For(EditorSession.BirdmanPadMission);
+        settings.BirdmanPoints = true; // as saved by the first version of Step 36 (no pad yet)
+        session.Project.Settings.Missions.Add(settings);
+        session.Project.Save();
+        Assert.Equal(0, session.LoadMissions().Missions.Single(m => m.Id == EditorSession.BirdmanPadMission).File.Comm.GetObjectCount(MissionObjectKind.LandingPad));
+
+        session.Build(false);
+        Assert.Equal(1, session.LoadMissions().Missions.Single(m => m.Id == EditorSession.BirdmanPadMission).File.Comm.GetObjectCount(MissionObjectKind.LandingPad));
+        Assert.True(session.Project.Settings.Missions.Single(m => m.Id == EditorSession.BirdmanPadMission).BirdmanPoints);
+    }
+
+    [Fact]
+    public void BirdmanLanding_HasNoGoodLandingSpeeds_AndTheOldOnesAreDropped()
+    {
+        Assert.Equal([LandingValue.BirdmanLandingVertical, LandingValue.BirdmanLandingForward], LandingValues.SpeedsOf(Vehicle.Birdman));
+        Assert.DoesNotContain(LandingValue.BirdmanGoodForward, LandingValues.All);
+        Assert.Equal(1f, LandingValues.ImpactShownPerStored(Vehicle.Birdman));
+        Assert.Equal(LandingValues.KilometersPerHourPerUnit, LandingValues.ImpactShownPerStored(Vehicle.RocketBelt));
     }
 
     [Fact]

@@ -275,6 +275,9 @@ public sealed class MissionComm
     /// <summary>How many objects of a type the mission has (must match the size of its chunk).</summary>
     public int GetObjectCount(MissionObjectKind kind) => _data[CountsOffset + (int)kind];
 
+    /// <summary>Changes the number of objects of a kind (the data chunk must match it).</summary>
+    public void SetObjectCount(MissionObjectKind kind, int count) => _data[CountsOffset + (int)kind] = (byte)Math.Clamp(count, 0, 255);
+
     private static int CurveOffset(int index) => ScoringOffset + (index * ScoreCurve.Size);
 
     private static int CheckRingType(int type) =>

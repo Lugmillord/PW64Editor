@@ -117,6 +117,9 @@ public sealed record GameModuleOptions(bool DebugOutput, bool StartupInfo = fals
     /// <summary>The result tables of the game patch <see cref="GamePatches.BonusGames"/> for the data area, or null.</summary>
     public byte[]? ResultTables { get; init; }
 
+    /// <summary>With <see cref="GamePatches.BonusGames"/>: the Birdman missions with points (bit class × 4 + test).</summary>
+    public ushort BirdmanPoints { get; init; }
+
     /// <summary>True if the module is built into the ROM.</summary>
     public bool IsNeeded => RequireExpansionPak || ResultTables is not null || DebugOutput || Conditions.Count > 0 || DistanceRow || PenaltyDigits.Count > 0;
 }
@@ -273,6 +276,23 @@ public static class GameModule
         (0xDC978, 0x40FDC28F, "Rocket Belt hard landing sideways 7.93"),
         (0xDC988, 0x40FDC28F, "Rocket Belt hard landing sideways 7.93"),
     ];
+
+    /// <summary>
+    /// The Birdman's soft touchdown (bird_802D0080): "lui at, 0x4248; … mtc1 at, f8" (vertical, 50 km/h) and "lui at, 0x4248;
+    /// mtc1 at, f18" (forward) become "lui at, 0x801F; lwc1 fN, 0x5050/0x5054(at)" from <see cref="DataArea.LiveBirdmanAddress"/>.
+    /// </summary>
+    private static IEnumerable<WordPatch> BirdmanLimitPatches()
+    {
+        uint hi = (DataArea.LiveBirdmanAddress + 0x8000) >> 16;
+        uint lo = DataArea.LiveBirdmanAddress & 0xFFFF;
+        return
+        [
+            new WordPatch("Birdman landing limit (vertical), bird_802D0080", 0x57A24,
+                [0x3C014248, 0x5460003F, 0x8E2F0004, 0x44814000], [0x3C010000 | hi, 0x5460003F, 0x8E2F0004, 0xC4280000 | lo]),
+            new WordPatch("Birdman landing limit (forward), bird_802D0080", 0x57A58,
+                [0x3C014248, 0x44819000], [0x3C010000 | hi, 0xC4320000 | (lo + 4)]),
+        ];
+    }
 
     /// <summary>
     /// The Hang Glider's landing check (hangGlider_802F3A80): "lui at, 0x4248 / 0x4170" and the "mtc1 at, fN" that use them
@@ -444,6 +464,13 @@ public static class GameModule
     /// <summary>Bytes per entry of the conditions table of module versions before <see cref="DataAreaVersion"/>.</summary>
     private const int OldConditionSize = 0x14;
 
+    /// <summary>The image of the data area in a built ROM, or null if it has none.</summary>
+    public static byte[]? ReadDataImage(ReadOnlySpan<byte> rom, GameModuleHeader header) =>
+        header.DataSize > 0 && header.DataRomOffset > 0 && (long)header.DataRomOffset + header.DataSize <= rom.Length
+            && BinaryPrimitives.ReadUInt32BigEndian(rom[header.DataRomOffset..]) == DataArea.Magic
+            ? rom.Slice(header.DataRomOffset, header.DataSize).ToArray()
+            : null;
+
     /// <summary>
     /// The mission settings of a ROM built by the editor: from the data area, or (module versions before
     /// <see cref="DataAreaVersion"/>) from the table inside the module.
@@ -522,7 +549,7 @@ public static class GameModule
 
         // Live values, unlimited fuel, the time of a crash (also to stop the hard end countdown at the impact) and the
         // landing values: the vehicles' flight frame goes through the module.
-        if ((options.DebugOutput && options.Live != LiveValues.None)
+        if ((options.DebugOutput && options.Live != LiveValues.None) || options.BirdmanPoints != 0
             || options.Conditions.Any(c => c.UnlimitedFuel || c.CrashTimePoints || c.PadRadius is not null || c.VehicleLimits.Count > 0
                 || c.HardEnd != HardEndScoring.Retail))
         {
@@ -555,6 +582,11 @@ public static class GameModule
         if (options.Conditions.Any(c => c.Vehicle == 0 && c.VehicleLimits.Count > 0))
         {
             patches.AddRange(HangGliderLimitPatches());
+        }
+
+        if (options.Conditions.Any(c => c.Vehicle == 6 && c.VehicleLimits.Count > 0))
+        {
+            patches.AddRange(BirdmanLimitPatches());
         }
 
         if (options.Conditions.Any(c => c.Vehicle is 1 or 2 && c.VehicleLimits.Count > 0))
@@ -634,7 +666,7 @@ public static class GameModule
     public static void Apply(byte[] rom, GameModuleOptions options, int romOffset, string info)
     {
         int dataRomOffset = romOffset - DataArea.RomReserve;
-        byte[] data = DataArea.CreateImage(options.Conditions, options.ResultTables);
+        byte[] data = DataArea.CreateImage(options.Conditions, options.ResultTables, options.BirdmanPoints);
         byte[] image = CreateImage(options, romOffset, info, dataRomOffset, data.Length);
         if (dataRomOffset < 0 || romOffset + RomReserve > rom.Length)
         {

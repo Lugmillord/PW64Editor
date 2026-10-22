@@ -38,6 +38,19 @@ public enum LandingValue
 
     /// <summary>Rocket Belt: hard landing above this sideways speed (game units per second).</summary>
     RocketBeltHardSideways = 32,
+
+    /// <summary>Birdman (with points): landing instead of an impact below this vertical speed (km/h).</summary>
+    BirdmanLandingVertical = 40,
+
+    /// <summary>Birdman (with points): landing instead of an impact below this forward speed (km/h).</summary>
+    BirdmanLandingForward = 41,
+
+    /// <summary>No longer used (a first version of the Birdman's good landing; the place decides it now, the impact curve
+    /// how hard it was). Kept so that projects that have it still load; the editor drops it when the mission is opened.</summary>
+    BirdmanGoodVertical = 42,
+
+    /// <summary>No longer used, see <see cref="BirdmanGoodVertical"/>.</summary>
+    BirdmanGoodForward = 43,
 }
 
 /// <summary>The landing values: the original numbers, which vehicle uses them and how the editor shows them.</summary>
@@ -47,15 +60,21 @@ public enum LandingValue
 /// × 2.52) with the immediates 50 and 15 (hangGlider_802F3A80); the Gyrocopter (func_80305DC0) and the
 /// Rocket Belt (rocket_belt.c) compare their speeds in game units per second with constants of the
 /// game's data (ROM 0xDACF8/0xDACFC and 0xDC964, 0xDC96C, 0xDC974, 0xDC978, 0xDC988). The HUD shows
-/// speeds as units per second × 3.6 × 0.7 = km/h, so the editor shows these speeds in km/h too.
+/// speeds as units per second × 3.6 × 0.7 = km/h, so the editor shows these speeds in km/h too. The Birdman (missions
+/// with points, game patch "Bonus games and Birdman") compares km/h like the Hang Glider: 50 and 50 for a landing
+/// (immediates in bird_802D0080, loaded from the data area when changed); like the Hang Glider's, its landing is good on a
+/// landing pad, and the impact curve decides how hard it was.
 /// </remarks>
 public static class LandingValues
 {
     /// <summary>Game units per second to the km/h the HUD shows (3.6 × 0.7).</summary>
     public const float KilometersPerHourPerUnit = 2.52f;
 
-    /// <summary>All values in the order the editor shows them.</summary>
-    public static IReadOnlyList<LandingValue> All { get; } = Enum.GetValues<LandingValue>();
+    /// <summary>All values in the order the editor shows them (without the ones no longer used).</summary>
+    public static IReadOnlyList<LandingValue> All { get; } = [.. Enum.GetValues<LandingValue>().Where(v => !IsUnused(v))];
+
+    /// <summary>True for a value that is no longer used (<see cref="LandingValue.BirdmanGoodVertical"/>, …Forward).</summary>
+    public static bool IsUnused(LandingValue value) => value is LandingValue.BirdmanGoodVertical or LandingValue.BirdmanGoodForward;
 
     /// <summary>The value of the original game (in its stored form).</summary>
     public static float Original(LandingValue value) => value switch
@@ -63,6 +82,8 @@ public static class LandingValues
         LandingValue.PadRadius => 30f,
         LandingValue.HangGliderLandingVertical or LandingValue.HangGliderLandingForward => 50f,
         LandingValue.HangGliderGoodVertical or LandingValue.HangGliderGoodForward => 15f,
+        LandingValue.BirdmanLandingVertical or LandingValue.BirdmanLandingForward => 50f,
+        LandingValue.BirdmanGoodVertical or LandingValue.BirdmanGoodForward => 15f, // the Hang Glider's (the game has none)
         LandingValue.GyrocopterCrash => 12.698f,
         LandingValue.GyrocopterCrashOffPad => 7.937f,
         LandingValue.RocketBeltCrash => 21.8f,
@@ -75,6 +96,7 @@ public static class LandingValues
         LandingValue.PadRadius => null,
         >= LandingValue.HangGliderLandingVertical and <= LandingValue.HangGliderGoodForward => Vehicle.HangGlider,
         LandingValue.GyrocopterCrash or LandingValue.GyrocopterCrashOffPad => Vehicle.Gyrocopter,
+        >= LandingValue.BirdmanLandingVertical => Vehicle.Birdman,
         _ => Vehicle.RocketBelt,
     };
 
@@ -85,8 +107,17 @@ public static class LandingValues
             [LandingValue.HangGliderLandingVertical, LandingValue.HangGliderLandingForward, LandingValue.HangGliderGoodVertical, LandingValue.HangGliderGoodForward],
         Vehicle.Gyrocopter => [LandingValue.GyrocopterCrash, LandingValue.GyrocopterCrashOffPad],
         Vehicle.RocketBelt => [LandingValue.RocketBeltCrash, LandingValue.RocketBeltHard, LandingValue.RocketBeltHardSideways],
+        Vehicle.Birdman => [LandingValue.BirdmanLandingVertical, LandingValue.BirdmanLandingForward],
         _ => [],
     };
+
+    /// <summary>
+    /// The km/h the editor shows per stored unit of the impact (the x values of the impact curve): the Hang Glider and the
+    /// Birdman measure in km/h already (× 2.52 in their code or in the game module), the Rocket Belt, the Gyrocopter and
+    /// Sky Diving in game units per second.
+    /// </summary>
+    public static float ImpactShownPerStored(Vehicle vehicle) =>
+        vehicle is Vehicle.HangGlider or Vehicle.Birdman ? 1f : KilometersPerHourPerUnit;
 
     /// <summary>True if the vehicle lands on pads (all but Cannonball and the Jumble Hopper).</summary>
     public static bool UsesPads(Vehicle vehicle) => vehicle is not (Vehicle.Cannonball or Vehicle.JumbleHopper);
@@ -96,6 +127,7 @@ public static class LandingValues
     {
         LandingValue.PadRadius => GameUnits.MetersPerUnit,
         >= LandingValue.HangGliderLandingVertical and <= LandingValue.HangGliderGoodForward => 1f, // the Hang Glider compares km/h
+        >= LandingValue.BirdmanLandingVertical => 1f, // so does the Birdman
         _ => KilometersPerHourPerUnit,
     };
 
@@ -115,10 +147,10 @@ public static class LandingValues
     public static string Name(LandingValue value) => value switch
     {
         LandingValue.PadRadius => CoreText.T("Radius of the landing pads for a good landing"),
-        LandingValue.HangGliderLandingVertical => CoreText.T("Landing (not a crash) below this vertical speed"),
-        LandingValue.HangGliderLandingForward => CoreText.T("Landing (not a crash) below this forward speed"),
-        LandingValue.HangGliderGoodVertical => CoreText.T("Good landing below this vertical speed"),
-        LandingValue.HangGliderGoodForward => CoreText.T("Good landing below this forward speed"),
+        LandingValue.HangGliderLandingVertical or LandingValue.BirdmanLandingVertical => CoreText.T("Landing (not a crash) below this vertical speed"),
+        LandingValue.HangGliderLandingForward or LandingValue.BirdmanLandingForward => CoreText.T("Landing (not a crash) below this forward speed"),
+        LandingValue.HangGliderGoodVertical or LandingValue.BirdmanGoodVertical => CoreText.T("Good landing below this vertical speed"),
+        LandingValue.HangGliderGoodForward or LandingValue.BirdmanGoodForward => CoreText.T("Good landing below this forward speed"),
         LandingValue.GyrocopterCrash => CoreText.T("Crash from this speed into the ground"),
         LandingValue.GyrocopterCrashOffPad => CoreText.T("Crash from this speed into the ground beside a pad or runway"),
         LandingValue.RocketBeltCrash => CoreText.T("Crash above this speed into the ground"),

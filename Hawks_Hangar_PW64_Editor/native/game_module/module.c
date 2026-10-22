@@ -151,7 +151,8 @@ typedef struct {
     u8 touchdown[0x54]; /* +0x18 curve of the touchdown point (s32 count, 10 x {f32 x, f32 y}), like the mission file */
     u32 padRadius;   /* +0x6C f32 bits, game units */
     u32 limits[4];   /* +0x70 f32 bits: HG landing vertical/forward, good vertical/forward (km/h); GC crash, crash
-                        beside a pad; RB crash, hard landing, hard landing sideways (units per second) */
+                        beside a pad; RB crash, hard landing, hard landing sideways (units per second); Birdman landing
+                        vertical/forward (km/h) */
     u8 reserved[DATA_ENTRY_SIZE - 0x80];
 } Condition;
 
@@ -1008,6 +1009,40 @@ void module_goal_jingle(s32 music) {
     GAME_SND_SET_MUSIC(vehicle < 7 ? sGoalJingle[vehicle] : 0x09);
 }
 
+/* Game patch "Bonus games and Birdman": the Birdman missions with points (bit class * 4 + test, data area header
+   +0x14, written by the editor). The patched result, total and test screens read it too (module_bm_* below). */
+#define BIRDMAN_MASK (*(volatile u16 *)(DATA_AREA + 0x14))
+
+/* The missions with points of a Birdman stage (bit = test), 0 for none. */
+static u32 birdman_stage(u32 cls) {
+    return DATA_HEADER->magic == DATA_MAGIC && cls < 4 ? (BIRDMAN_MASK >> (cls * 4)) & 0xFu : 0;
+}
+
+static u32 bit_count(u32 mask) {
+    u32 n = 0;
+    for (; mask != 0; mask >>= 1) {
+        n += mask & 1;
+    }
+    return n;
+}
+
+/* The test of the n-th mission with points (counting from 0). */
+static u32 nth_bit(u32 mask, u32 n) {
+    u32 t;
+    for (t = 0; t < 4; t++) {
+        if ((mask >> t) & 1) {
+            if (n == 0) {
+                return t;
+            }
+            n--;
+        }
+    }
+    return n + 4; /* not there: past the missions, as the game would count */
+}
+
+/* The stage of the current player if it is a Birdman stage with points, else 0 (mask of its missions with points). */
+static u32 birdman_player_stage(void);
+
 /* "Points to the next medal" (levelSetPointsToNextMedal, 0x8032C174: s32 f(s32 *out, u16 points, u8 medal)), called
    through here by the game patch "Bonus games and Birdman". The game's medal table has no limits for the Birdman
    (entry 7 was 0, the patch sets 280/320/360), and when every medal is reached the original writes "100 x tests -
@@ -1018,12 +1053,34 @@ void module_goal_jingle(s32 music) {
 #define GAME_TEST_COUNT      ((s32(*)(s32, s32))0x80344EF0)        /* taskGetTestCount(class, vehicle) */
 
 s32 module_points_to_medal(s32 *out, u32 points, u32 medal) {
-    s32 result = GAME_POINTS_TO_MEDAL(out, points, medal);
+    s32 result;
     u8 *state = GAME_STATE;
+    u32 stage = birdman_player_stage();
+    s32 p = (s32)(points & 0xFFFF);
+
+    /* A Birdman stage with points: the limits follow the number of its missions with points (70/80/90 each). */
+    if ((medal & 0xFF) == 7 && stage != 0) {
+        s32 n = (s32)bit_count(stage);
+        s32 limits[3];
+        s32 i;
+        limits[0] = 70 * n;
+        limits[1] = 80 * n;
+        limits[2] = 90 * n;
+        for (i = 0; i < 3; i++) {
+            if (p < limits[i]) {
+                *out = limits[i] - p;
+                return i;
+            }
+        }
+        *out = 100 * n - p;
+        return 3;
+    }
+
+    result = GAME_POINTS_TO_MEDAL(out, points, medal);
     if (result == 3 && state != 0) {
         u8 *player = state + (*(s32 *)(state + 0x9C)) * 140 + 0x0C; /* as the original: the current player */
         if (*(u16 *)(player + 2) == 6) {
-            *out = 100 * GAME_TEST_COUNT(*(u16 *)(player + 4), 6) - (s32)(points & 0xFFFF);
+            *out = 100 * GAME_TEST_COUNT(*(u16 *)(player + 4), 6) - p;
         }
     }
     return result;
@@ -1446,11 +1503,15 @@ static void live_update(u8 *flight) {
 #define RB_HARD_SIDE_A  (*(volatile u32 *)0x80355448) /* 7.93, sideways */
 #define RB_HARD_SIDE_B  (*(volatile u32 *)0x80355458) /* 7.93, sideways */
 
+#define LIVE_BIRDMAN ((volatile u32 *)(DATA_AREA + 0x50)) /* the Birdman's two landing limits (patched code loads them) */
+
 static void landing_defaults(void) {
     LIVE_LANDING[0] = FLOAT_50;
     LIVE_LANDING[1] = FLOAT_50;
     LIVE_LANDING[2] = FLOAT_15;
     LIVE_LANDING[3] = FLOAT_15;
+    LIVE_BIRDMAN[0] = FLOAT_50;
+    LIVE_BIRDMAN[1] = FLOAT_50;
 }
 
 /* Sets the landing values of the mission being flown (or the original ones) in every flight frame: the radius
@@ -1470,12 +1531,15 @@ static void landing_values(const Condition *c, u32 vehicle) {
         }
     }
 
+    landing_defaults();
     if (own && vehicle == 0) {
         for (i = 0; i < 4; i++) {
             LIVE_LANDING[i] = c->limits[i];
         }
-    } else {
-        landing_defaults();
+    }
+    if (own && vehicle == 6) {
+        LIVE_BIRDMAN[0] = c->limits[0];
+        LIVE_BIRDMAN[1] = c->limits[1];
     }
 
     GC_CRASH = own && vehicle == 2 ? c->limits[0] : 0x414B2B02u;
@@ -1509,9 +1573,408 @@ __asm__(".section .text\n"
         "    addiu $sp, $sp, 24\n"
         ".set pop\n");
 
+/* ------------------------------------------------------------------ Birdman with points */
+
+/* Game patch "Bonus games and Birdman": the Birdman missions with points (bit class * 4 + test, data area header
+   +0x14, written by the editor). The patched result and test screens read it too (module_bm_* below). */
+#define FLOAT_2_52 0x402147AEu /* units per second to the km/h the HUD shows */
+#define FLOAT_1_5  0x3FC00000u
+#define FLOAT_8    0x41000000u
+#define GAME_HUD_TEXT ((void (*)(s32, u32, u32))0x8031D8E0) /* hudText_8031D8E0(text, 1.5f, 8.0f) */
+#define TEXT_LAND_OK  0xCB /* "Landing accomplished" */
+#define TEXT_LAND_OUT 0xB2 /* "Landed outside target" */
+
+/* A single-precision operation on the FPU (the module itself is built without it). Only f0, f2, f12 and
+   f14 are used: the caller (the game) may keep values in f20 to f30. */
+__asm__(".section .text\n"
+        ".set push\n"
+        ".set noreorder\n"
+        ".set hardfloat\n"
+        ".globl f_mul\n"
+        "f_mul:\n"
+        "    mtc1 $a0, $f0\n"
+        "    mtc1 $a1, $f2\n"
+        "    nop\n"
+        "    mul.s $f0, $f0, $f2\n"
+        "    jr $ra\n"
+        "    mfc1 $v0, $f0\n"
+        /* padsLandedPadStrip(x, y, z, &index) (0x80317978): x, y in f12, f14, z in a2 (o32); the index is non-zero on a
+           landing pad within its radius or on a runway. */
+        ".globl birdman_pad_index\n"
+        "birdman_pad_index:\n"
+        "    addiu $sp, $sp, -32\n"
+        "    sw $ra, 28($sp)\n"
+        "    sb $zero, 24($sp)\n"
+        "    mtc1 $a0, $f12\n"
+        "    mtc1 $a1, $f14\n"
+        "    jal 0x80317978\n"
+        "    addiu $a3, $sp, 24\n"
+        "    lbu $v0, 24($sp)\n"
+        "    lw $ra, 28($sp)\n"
+        "    jr $ra\n"
+        "    addiu $sp, $sp, 32\n"
+        ".set pop\n");
+u32 f_mul(u32 a, u32 b);
+u32 birdman_pad_index(u32 x, u32 y, u32 z);
+
+static int birdman_points(u32 cls, u32 test) {
+    return DATA_HEADER->magic == DATA_MAGIC && cls < 4 && test < 4 && ((BIRDMAN_MASK >> (cls * 4 + test)) & 1);
+}
+
+/* The Birdman's landing (BirdmanData: flags +0x04, flight time +0x08, position +0x40, state +0x104 (0 flying, 1 impact,
+   2 crashed, 3 landed), soft touchdown +0x105, speed +0x218 (x, y forward, z vertical), its length +0x224 (the HUD shows
+   it × 2.52 as km/h)). The original makes a soft touchdown (feet first, vertical and forward speed below 50 km/h) a
+   1.9 s bounce, after which the Birdman flies on; every other ground contact is an impact (a crash 3.75 s later). With
+   points the soft touchdown is a landing: the unused state "landed" (3, flight state 5) ends the mission at once. Like
+   the Hang Glider, the place decides: on a landing pad (within its radius) "Landing accomplished" and all flags,
+   otherwise "Landed outside target" and the flags of a landing beside the target. How hard the landing was only the
+   impact curve decides: the impact is the speed of the last frame in the air in km/h as the HUD shows it (vertical,
+   forward and sideways together; the Birdman passes 0). */
+static int sBmLanded;
+static u32 sBmTime, sBmSpeed, sBmFlags;
+
+static void birdman_frame(u8 *bm, const Condition *c, u32 *impact, u32 *flags, u32 *state, u32 time) {
+    (void)c;
+    if (sBmLanded && (s32)time < (s32)sBmTime) {
+        sBmLanded = 0; /* a new flight: its time started again */
+    }
+    if (!sBmLanded) {
+        int onPad;
+        if (bm[0x104] != 0) {
+            return;
+        }
+        if (bm[0x105] == 0) {
+            /* Still in the air: the speed of this frame (the touchdown sets it to 0). */
+            sBmSpeed = f_mul(*(u32 *)(bm + 0x224) & 0x7FFFFFFFu, FLOAT_2_52);
+            return;
+        }
+        /* Soft touchdown in this frame. */
+        onPad = birdman_pad_index(*(u32 *)(bm + 0x40), *(u32 *)(bm + 0x44), *(u32 *)(bm + 0x48)) != 0;
+        sBmLanded = 1;
+        sBmTime = time;
+        sBmFlags = onPad ? 0xFFFFu : SCORE_NO_LANDING;
+        GAME_HUD_TEXT(onPad ? TEXT_LAND_OK : TEXT_LAND_OUT, FLOAT_1_5, FLOAT_8);
+        GAME_SND_SET_MUSIC(onPad ? 0x1A : 0x1B);
+        GAME_SND_SET_MUSIC_STATE(0);
+        GAME_SND_VEHICLE(6);
+        message("Birdman: landed %s at %d km/h (impact).\n", onPad ? "on a landing pad" : "beside the target",
+                float_to_fixed8((s32)sBmSpeed) >> 8);
+    }
+    bm[0x104] = 3;
+    bm[0x105] = 0;
+    *(u16 *)(bm + 4) = (u16)sBmFlags;
+    *impact = sBmSpeed;
+    *flags = sBmFlags;
+    *state = 5;
+}
+
+/* testMenuInitText takes the points shown on the test screen of all vehicles but the main ones from (level, test 0); for
+   the Birdman the mission's own: (class, test). */
+#define GAME_POINT_COUNT ((s32(*)(void *, u32, u32, u32))0x8032BE1C) /* testGetPointCount(data, class, test, vehicle) */
+s32 module_point_count(void *data, u32 a1, u32 a2, u32 vehicle) {
+    u8 *p = player_flight();
+    if ((vehicle & 0xFF) == 6 && p != 0) {
+        return GAME_POINT_COUNT(data, *(u16 *)(p + 4), a1, vehicle);
+    }
+    return GAME_POINT_COUNT(data, a1, a2, vehicle);
+}
+
+/* "All perfect" (func_8032C27C) skips the Birdman; the Birdman missions with points must have 100 points too. Their
+   results: D_80364210 (0x34E0 bytes per player), + class * 0x694 + vehicle * 0x30 + test * 0x150 + 0x6C (s16). */
+#define GAME_ALL_PERFECT ((s32(*)(void))0x8032C27C)
+s32 module_all_perfect(void) {
+    s32 ok = GAME_ALL_PERFECT();
+    u8 *state = GAME_STATE;
+    u32 bit;
+    if (!ok || state == 0 || DATA_HEADER->magic != DATA_MAGIC) {
+        return ok;
+    }
+    for (bit = 0; bit < 16; bit++) {
+        if ((BIRDMAN_MASK >> bit) & 1) {
+            u8 *results = (u8 *)0x80364210 + *(s32 *)(state + 0x9C) * 0x34E0;
+            short points = *(short *)(results + (bit / 4) * 0x694 + 6 * 0x30 + (bit % 4) * 0x150 + 0x6C);
+            if (points != 100) {
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
+static u32 birdman_player_stage(void) {
+    u8 *p = player_flight();
+    return p != 0 && *(u16 *)(p + 2) == 6 ? birdman_stage(*(u16 *)(p + 4)) : 0;
+}
+
+/* levelGetTotalPoints (0x8032BD20) itself jumps here (its first instruction becomes "j module_level_points"), so every
+   caller (stage screen, level select, scoring, medal ceremony, ...) gets the same sum: for a Birdman stage with points only
+   its missions with points, otherwise as the original all tests of the class (taskGetTestCount), 0x7F (no result) as 0.
+   The total screen (taskGetTestCount, testGetPointCount) is patched below. */
+s32 module_level_points(void *data, u32 cls, u32 vehicle) {
+    u32 stage = (vehicle & 0xFF) == 6 ? birdman_stage(cls & 0xFF) : 0;
+    s32 count = stage != 0 ? 4 : GAME_TEST_COUNT((s32)cls, (s32)vehicle);
+    s32 sum = 0;
+    s32 t;
+    for (t = 0; t < count; t++) {
+        if (stage == 0 || ((stage >> t) & 1)) {
+            s32 points = GAME_POINT_COUNT(data, cls, (u32)t, vehicle);
+            if (points != 127) {
+                sum += points;
+            }
+        }
+    }
+    return sum;
+}
+
+/* The medal ceremony (code_A8C30, call 0xA9114) asks for the medal of every bonus vehicle with entry 4 (70/80/90, one
+   test); the Birdman has its own limits (entry 7, or 70/80/90 per mission with points in a stage with points). */
+s32 module_ceremony_medal(s32 *out, u32 points, u32 medal) {
+    u8 *p = player_flight();
+    return module_points_to_medal(out, points, p != 0 && *(u16 *)(p + 2) == 6 ? 7 : medal);
+}
+
+s32 module_tot_test_count(s32 cls, s32 vehicle) {
+    u32 stage = vehicle == 6 ? birdman_stage((u32)cls) : 0;
+    return stage != 0 ? (s32)bit_count(stage) : GAME_TEST_COUNT(cls, vehicle);
+}
+
+s32 module_tot_point_count(void *data, u32 cls, u32 i, u32 vehicle) {
+    u32 stage = (vehicle & 0xFF) == 6 ? birdman_stage(cls & 0xFF) : 0;
+    return GAME_POINT_COUNT(data, cls, stage != 0 ? nth_bit(stage, i & 0xFF) : i, vehicle);
+}
+
+/* Texts: the medal texts of a Birdman stage with points (BD_E_S3_BLONDS …, written by the editor for its number of
+   missions) instead of the bonus games' BONUS_S3_…, and "N tests to go" (TRY1 … TRY4) for the stage screen. */
+#define GAME_TEXT_BY_NAME ((void *(*)(const char *))0x803420F4) /* textGetDataByName */
+#define GAME_TEXT_BY_IDX  ((void *(*)(u32))0x80342198)          /* textGetDataByIdx */
+static char sTextName[24];
+
+void *module_tot_medal_text(const char *name) {
+    static const char bonus[] = "BONUS_S3_";
+    u8 *p = player_flight();
+    u32 i;
+    if (birdman_player_stage() != 0) {
+        for (i = 0; bonus[i] != 0 && name[i] == bonus[i]; i++) {
+        }
+        if (bonus[i] == 0) {
+            const char *rest = name + i;
+            sTextName[0] = 'B';
+            sTextName[1] = 'D';
+            sTextName[2] = '_';
+            sTextName[3] = "EABP"[*(u16 *)(p + 4) & 3];
+            sTextName[4] = '_';
+            sTextName[5] = 'S';
+            sTextName[6] = '3';
+            sTextName[7] = '_';
+            for (i = 0; rest[i] != 0 && i < 15; i++) {
+                sTextName[8 + i] = rest[i];
+            }
+            sTextName[8 + i] = 0;
+            return GAME_TEXT_BY_NAME(sTextName);
+        }
+    }
+    return GAME_TEXT_BY_NAME(name);
+}
+
+void *module_try_text(u32 index) {
+    u32 stage = birdman_player_stage();
+    if (stage != 0) {
+        sTextName[0] = 'T';
+        sTextName[1] = 'R';
+        sTextName[2] = 'Y';
+        sTextName[3] = (char)('0' + bit_count(stage));
+        sTextName[4] = 0;
+        return GAME_TEXT_BY_NAME(sTextName);
+    }
+    return GAME_TEXT_BY_IDX(index);
+}
+
+/* The menu of the total screen: a Birdman stage with more than one mission with points gets "Retry", "Another test" and
+   "Quit", like the license classes from Class A on (the game offers it only to Hang Glider, Rocket Belt and
+   Gyrocopter); the choice is mapped the same way. A new record keeps the game's "Next" menu. */
+#define GAME_TOT_MENU     ((void (*)(void))0x8034754C)                                   /* totResultCreateMenu */
+#define GAME_TOT_CHOICE   ((s32(*)(s32))0x80347150)                                      /* totResult_80347150 */
+#define GAME_TOT_RECORD   ((u32(*)(u8 *))0x80346FC0)                                     /* totResult_80346FC0 */
+#define GAME_MENU_CREATE  ((void (*)(s32, s32, s32, u32, u32, volatile s32 *, s32))0x8030B48C) /* menuCreateItems */
+#define TOT_MENU_ITEMS    ((volatile s32 *)0x80350948)                                   /* sResultsMenuItems */
+#define TOT_MENU_COUNT    (*(volatile s32 *)0x80350954)                                  /* sResultsMenuCount */
+#define TEXT_RETRY_SGI    0x189
+#define TEXT_ANOTHER_TASK 0x166
+#define TEXT_QUIT_SGI     0x1D
+
+static int tot_another_test(void) {
+    u8 *p = player_flight();
+    return p != 0 && bit_count(birdman_player_stage()) > 1 && (GAME_TOT_RECORD(p) & 0xFF) == 0;
+}
+
+void module_tot_menu(void) {
+    if (!tot_another_test()) {
+        GAME_TOT_MENU();
+        return;
+    }
+    TOT_MENU_ITEMS[0] = TEXT_RETRY_SGI;
+    TOT_MENU_ITEMS[1] = TEXT_ANOTHER_TASK;
+    TOT_MENU_ITEMS[2] = TEXT_QUIT_SGI;
+    TOT_MENU_COUNT = 3;
+    GAME_MENU_CREATE(0xAA, 2, 6, FLOAT_1, FLOAT_1, TOT_MENU_ITEMS, 3);
+}
+
+s32 module_tot_choice(s32 item) {
+    if (item < 0 || !tot_another_test()) {
+        return GAME_TOT_CHOICE(item);
+    }
+    return item == 0 ? 3 : item == 1 ? 4 : item == 2 ? 5 : -1; /* retry, another test, quit */
+}
+
+/* The HUD of a Birdman mission with points: also the radar and the time, at the places of the Hang Glider's. The HUD
+   state: elapsed time +0x10, attitude +0x68 (x, y, heading, pitch, computed by hudMainRender), radar (HUDRadar) +0x90, as
+   the game's own calls pass it (hudDrawHangGlider: addiu t9, s0, 0x90). */
+#define GAME_HUD_BIRDMAN ((void (*)(u8 *))0x80319EFC)                                  /* hudDrawBirdman */
+#define GAME_HUD_RADAR   ((void (*)(s32, s32, u32, u32, u32, u32, u8 *))0x8031AD68)     /* hudDrawRadar */
+#define GAME_HUD_TIMER   ((void (*)(s32, s32, u32))0x8031D264)                         /* hudDrawTimer */
+void module_hud_birdman(u8 *hud) {
+    u8 *comm = GAME_TASK_SCORING() - 0x48;
+    u8 *p = player_flight();
+    GAME_HUD_BIRDMAN(hud);
+    if (p == 0 || p[0x7B] != 0 || (u32)comm < 0x80000400u || (u32)comm >= 0x80800000u || comm[1] != 6
+        || !birdman_points(comm[0], comm[2])) {
+        return; /* free flight or the demo */
+    }
+    GAME_HUD_RADAR(215, 222, *(u32 *)(hud + 0x68), *(u32 *)(hud + 0x6C), *(u32 *)(hud + 0x70), *(u32 *)(hud + 0x74), hud + 0x90);
+    GAME_HUD_TIMER(27, 222, *(u32 *)(hud + 0x10));
+}
+
+/* The result sheet and the test screen leave out the Birdman ("veh != BIRDMAN": no line above the total, no numbers,
+   no top score). The patch replaces "lhu d, 2(b); li at, 6" by "jal module_bm_d_b; lhu d, 2(b)": b is the player's
+   flight data (class +4, test +6), d the vehicle just loaded. For a Birdman mission with points d becomes 0x7F, so the
+   check that follows (against at = 6) treats it like any other vehicle. Only v0 and v1 are used (saved). */
+#define BM_CHECK(name, d, b) \
+    ".globl " name "\n" name ":\n" \
+    "    addiu $sp, $sp, -16\n" \
+    "    sw $v0, 0($sp)\n" \
+    "    sw $v1, 4($sp)\n" \
+    "    addiu $at, $zero, 6\n" \
+    "    bne " d ", $at, 9f\n" \
+    "    lhu $v0, 4(" b ")\n" \
+    "    lhu $v1, 6(" b ")\n" \
+    "    or $at, $v0, $v1\n" \
+    "    sltiu $at, $at, 4\n" \
+    "    beqz $at, 8f\n" \
+    "    sll $v0, $v0, 2\n" \
+    "    addu $v0, $v0, $v1\n" \
+    "    lui $v1, 0x801F\n" \
+    "    lhu $v1, 0x5014($v1)\n" \
+    "    srlv $v1, $v1, $v0\n" \
+    "    andi $v1, $v1, 1\n" \
+    "    beqz $v1, 8f\n" \
+    "    nop\n" \
+    "    addiu " d ", $zero, 0x7F\n" \
+    "8:  addiu $at, $zero, 6\n" \
+    "9:  lw $v0, 0($sp)\n" \
+    "    lw $v1, 4($sp)\n" \
+    "    jr $ra\n" \
+    "    addiu $sp, $sp, 16\n"
+
+/* The same for the stage screen: there the whole stage counts (any mission with points), not the test last chosen. */
+#define BM_STAGE_CHECK(name, d, b) \
+    ".globl " name "\n" name ":\n" \
+    "    addiu $sp, $sp, -16\n" \
+    "    sw $v0, 0($sp)\n" \
+    "    sw $v1, 4($sp)\n" \
+    "    addiu $at, $zero, 6\n" \
+    "    bne " d ", $at, 9f\n" \
+    "    lhu $v0, 4(" b ")\n" \
+    "    sltiu $at, $v0, 4\n" \
+    "    beqz $at, 8f\n" \
+    "    sll $v0, $v0, 2\n" \
+    "    lui $v1, 0x801F\n" \
+    "    lhu $v1, 0x5014($v1)\n" \
+    "    srlv $v1, $v1, $v0\n" \
+    "    andi $v1, $v1, 0xF\n" \
+    "    beqz $v1, 8f\n" \
+    "    nop\n" \
+    "    addiu " d ", $zero, 0x7F\n" \
+    "8:  addiu $at, $zero, 6\n" \
+    "9:  lw $v0, 0($sp)\n" \
+    "    lw $v1, 4($sp)\n" \
+    "    jr $ra\n" \
+    "    addiu $sp, $sp, 16\n"
+
+__asm__(".section .text\n"
+        ".set push\n"
+        ".set noreorder\n"
+        ".set noat\n"
+        BM_CHECK("module_bm_t9_t7", "$t9", "$t7")
+        BM_CHECK("module_bm_t6_t5", "$t6", "$t5")
+        BM_CHECK("module_bm_t3_t2", "$t3", "$t2")
+        BM_CHECK("module_bm_t9_t8", "$t9", "$t8")
+        BM_CHECK("module_bm_t1_t0", "$t1", "$t0")
+        BM_STAGE_CHECK("module_bm_t0_t9", "$t0", "$t9")
+        /* The banner of the stage screen (test_summary.c): "v1 = 7" (Free Flight) for the Birdman becomes, for a stage
+           with points, the banner of level class + 1 (stage 4: level 3). s0 is the player's flight data. */
+        ".globl module_bm_banner\n"
+        "module_bm_banner:\n"
+        "    addiu $sp, $sp, -16\n"
+        "    sw $t0, 0($sp)\n"
+        "    sw $t1, 4($sp)\n"
+        "    addiu $v1, $zero, 7\n"
+        "    lhu $t0, 4($s0)\n"
+        "    sltiu $at, $t0, 4\n"
+        "    beqz $at, 9f\n"
+        "    lui $t1, 0x801F\n"
+        "    lhu $t1, 0x5014($t1)\n"
+        "    sll $at, $t0, 2\n"
+        "    srlv $t1, $t1, $at\n"
+        "    andi $t1, $t1, 0xF\n"
+        "    beqz $t1, 9f\n"
+        "    nop\n"
+        "    addiu $v1, $t0, 4\n"
+        "    sltiu $at, $v1, 7\n"
+        "    bnez $at, 9f\n"
+        "    nop\n"
+        "    addiu $v1, $zero, 6\n"
+        "9:  lw $t0, 0($sp)\n"
+        "    lw $t1, 4($sp)\n"
+        "    jr $ra\n"
+        "    addiu $sp, $sp, 16\n"
+        /* "Next" on the result sheet (resultMenuChoose, 0x8032E7F4): "beql veh, 6 (at), test details" becomes "j" here
+           (the delay slot sets t6 = 2, the value of test details): the Birdman goes to the test details only in a free
+           flight, a mission with points to the total screen like every other vehicle. v0 = vehicle, v1 = flight data. */
+        ".globl module_res_next\n"
+        "module_res_next:\n"
+        "    addiu $at, $zero, 6\n"
+        "    bne $v0, $at, 1f\n"
+        "    lhu $t5, 4($v1)\n"
+        "    lhu $t7, 6($v1)\n"
+        "    or $at, $t5, $t7\n"
+        "    sltiu $at, $at, 4\n"
+        "    beqz $at, 2f\n"
+        "    sll $t5, $t5, 2\n"
+        "    addu $t5, $t5, $t7\n"
+        "    lui $t7, 0x801F\n"
+        "    lhu $t7, 0x5014($t7)\n"
+        "    srlv $t7, $t7, $t5\n"
+        "    andi $t7, $t7, 1\n"
+        "    bnez $t7, 1f\n"
+        "    nop\n"
+        "2:  j 0x8032E810\n"
+        "    nop\n"
+        "1:  j 0x8032E7FC\n"
+        "    nop\n"
+        ".set pop\n");
+
 void module_flight_frame(u32 a0, u32 a1, u32 a2, u32 a3, u32 a4, u32 a5, u32 a6, u32 a7, u32 a8, u32 a9, u32 a10) {
     const Condition *c;
     u8 *result;
+    u8 *comm = GAME_TASK_SCORING() - 0x48;
+
+    /* A Birdman mission with points: its landing (a1 is the Birdman's matrix at +0x10). */
+    if (*(u16 *)((u8 *)a0 + 2) == 6 && (u32)comm >= 0x80000400u && (u32)comm < 0x80800000u && comm[1] == 6
+        && birdman_points(comm[0], comm[2])) {
+        birdman_frame((u8 *)a1 - 0x10, current_condition(), &a4, &a7, &a10, a6);
+    } else {
+        sBmLanded = 0;
+    }
     GAME_FLIGHT_FRAME(a0, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10);
 
     /* The time of a crash: the impact (flight state a10 = 3: the vehicle tumbles for 3.75 s; 4: crashed),

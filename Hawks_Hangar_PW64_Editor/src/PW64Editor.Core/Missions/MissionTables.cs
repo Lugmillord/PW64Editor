@@ -21,17 +21,20 @@ public sealed class MissionTables
     private readonly byte[] _rom;
     private readonly MissionLayout _layout;
     private readonly bool _bonusGames;
+    private readonly IReadOnlySet<TestId> _birdmanPoints;
 
     /// <summary>Reads the tables from a ROM (a copy of the needed bytes is not made; do not change the array).</summary>
     /// <param name="rom">The ROM (the clean one: the editor's changes are not read back from a built ROM).</param>
     /// <param name="layout">Where the tables are.</param>
     /// <param name="bonusGames">The game patch <see cref="Code.GamePatches.BonusGames"/> is applied: the levels of Sky
     /// Diving and the Jumble Hopper have texts of their own and the Birdman has medal limits.</param>
-    public MissionTables(byte[] rom, MissionLayout layout, bool bonusGames = false)
+    /// <param name="birdmanPoints">With the patch: the Birdman missions with points (texts of their own).</param>
+    public MissionTables(byte[] rom, MissionLayout layout, bool bonusGames = false, IReadOnlySet<TestId>? birdmanPoints = null)
     {
         _rom = rom;
         _layout = layout;
         _bonusGames = bonusGames;
+        _birdmanPoints = bonusGames ? birdmanPoints ?? new HashSet<TestId>() : new HashSet<TestId>();
     }
 
     /// <summary>
@@ -39,11 +42,17 @@ public sealed class MissionTables
     /// has none for this test.
     /// </summary>
     public string? MissionScreenTextName(TestId test) =>
-        (_bonusGames ? ResultTables.LevelTextName(test, false) : null) ?? ReadName(_layout.MissionScreenNamesOffset, test);
+        (_bonusGames ? OwnName(test, false) : null) ?? ReadName(_layout.MissionScreenNamesOffset, test);
 
     /// <summary>Name of the text of the result sheet ("…_S2", with slash), or null if the game has none.</summary>
     public string? ResultSheetTextName(TestId test) =>
-        (_bonusGames ? ResultTables.LevelTextName(test, true) : null) ?? ReadName(_layout.ResultSheetNamesOffset, test);
+        (_bonusGames ? OwnName(test, true) : null) ?? ReadName(_layout.ResultSheetNamesOffset, test);
+
+    private string? OwnName(TestId test, bool resultSheet) =>
+        ResultTables.LevelTextName(test, resultSheet)
+        ?? (test.Vehicle != Vehicle.Birdman ? null
+            : _birdmanPoints.Contains(test) ? ResultTables.BirdmanTextName(test, resultSheet)
+            : resultSheet ? "BD_ALL_S2" : "BD_ALL_S1"); // the patched resultInit reads the free flight's names from the tables
 
     /// <summary>
     /// The point rows of the result sheet, bottom row first, as stored. Empty rows are 0; the list

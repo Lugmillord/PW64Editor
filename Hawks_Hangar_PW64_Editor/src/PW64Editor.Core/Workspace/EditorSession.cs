@@ -5,6 +5,7 @@ using PW64Editor.Core.Localization;
 using PW64Editor.Core.Missions;
 using PW64Editor.Core.Project;
 using PW64Editor.Core.Rom;
+using PW64Editor.Core.SaveGame;
 using PW64Editor.Core.Text;
 using PW64Editor.Core.Textures;
 
@@ -133,6 +134,7 @@ public sealed class EditorSession
     /// <returns>The build result, the path of the hack ROM and the restore point (if created).</returns>
     public (ProjectBuildResult Result, string RomPath, BackupInfo? RestorePoint) Build(bool createRestorePoint)
     {
+        EnsureBirdmanPad();
         ProjectBuildResult result = ProjectBuilder.Build(Project, CleanRom, Layout);
         string romPath = ProjectBuilder.WriteRom(Project, result);
         BackupInfo? restorePoint = createRestorePoint ? ProjectBackups.Create(Project) : null;
@@ -205,6 +207,7 @@ public sealed class EditorSession
     /// <returns>Size of the patch in bytes.</returns>
     public int ExportPatch(string patchPath)
     {
+        EnsureBirdmanPad();
         ProjectBuildResult result = ProjectBuilder.Build(Project, CleanRom, Layout);
         byte[] patch = ProjectBuilder.CreatePatch(Project, CleanRom, result.RomBuild.Rom);
         File.WriteAllBytes(patchPath, patch);
@@ -264,12 +267,27 @@ public sealed class EditorSession
 
         // The game patch "Bonus games and Birdman" needs texts of its own for the levels: until a text is saved they
         // exist only here (and in the build, which adds them the same way).
-        if (Project.HasPatch(GamePatches.BonusGames) && ResultTables.AddLevelTexts(data) is { } withTexts)
+        if (Project.HasPatch(GamePatches.BonusGames)
+            && ResultTables.AddLevelTexts(data, ResultTables.BirdmanPointMissions(Project.Settings.Missions), EncodeFor(font)) is { } withTexts)
         {
             data = withTexts;
         }
 
         return GameTextLibrary.Create(font, data, fromProject, OriginalTextCount);
+    }
+
+    /// <summary>Markup to the data of a text (for the texts the editor writes itself).</summary>
+    /// <exception cref="InvalidDataException">The markup has errors.</exception>
+    internal static Func<string, byte[]> EncodeFor(TextFont font)
+    {
+        var codec = new TextCodec(font);
+        return markup =>
+        {
+            TextEncodeResult result = codec.Encode(markup);
+            return result.Success
+                ? TextCodec.ToChunkData(result.Codes, 0)
+                : throw new InvalidDataException(result.Errors[0].Message);
+        };
     }
 
     /// <summary>Loads the texts of the original game (ignoring the project), for comparison.</summary>
@@ -709,7 +727,8 @@ public sealed class EditorSession
             sources.Add(new MissionSource(file.TableIndex, file.GroupIndex, data, fromProject));
         }
 
-        MissionTables? tables = Layout.Missions is { } layout ? new MissionTables(CleanRom.Data, layout, Project.HasPatch(GamePatches.BonusGames)) : null;
+        MissionTables? tables = Layout.Missions is { } layout ? new MissionTables(CleanRom.Data, layout, Project.HasPatch(GamePatches.BonusGames),
+            ResultTables.BirdmanPointMissions(Project.Settings.Missions)) : null;
         MissionCatalogResult result = MissionCatalog.Build(sources, tables, Project.Settings.Missions);
         return problems.Count == 0 ? result : result with { Problems = [.. problems, .. result.Problems] };
     }
@@ -727,6 +746,15 @@ public sealed class EditorSession
         GameFile original = CleanFileSystem.Files.FirstOrDefault(f => f.TableIndex == mission.TableIndex)
             ?? throw new ProjectException(CoreText.F("The game has no file with table index {0}.", mission.TableIndex));
         byte[] data = mission.File.WithComm(comm);
+
+        // Until the level editor: the first Birdman mission with points gets the landing pad of Holiday Island (as the Hang
+        // Glider's first mission has it), so a good landing is possible there.
+        if (settings?.BirdmanPoints == true && mission.Id == BirdmanPadMission && Project.HasPatch(GamePatches.BonusGames)
+            && MissionFile.Parse(data).Comm.GetObjectCount(MissionObjectKind.LandingPad) == 0 && HangGliderPad() is { } pad)
+        {
+            data = MissionFile.Parse(data).WithLandingPad(pad);
+        }
+
         if (data.AsSpan().SequenceEqual(original.Data))
         {
             Project.RemoveOverride(original.TableIndex);
@@ -744,6 +772,43 @@ public sealed class EditorSession
         }
 
         Project.Save();
+    }
+
+    /// <summary>
+    /// Gives <see cref="BirdmanPadMission"/> its landing pad if it has points but no pad yet (for example when the points
+    /// were switched on before the editor added the pad on saving). Writes the project's mission file only then.
+    /// </summary>
+    private void EnsureBirdmanPad()
+    {
+        if (Project.Settings.Missions.FirstOrDefault(m => m.Id == BirdmanPadMission) is not { BirdmanPoints: true } settings
+            || !Project.HasPatch(GamePatches.BonusGames))
+        {
+            return;
+        }
+
+        if (LoadMissions().Missions.FirstOrDefault(m => m.Id == BirdmanPadMission) is { } mission
+            && mission.File.Comm.GetObjectCount(MissionObjectKind.LandingPad) == 0)
+        {
+            SaveMission(mission, mission.File.Comm, settings);
+        }
+    }
+
+    /// <summary>The Birdman mission that gets a landing pad when it has points (stage 1, mission 1, Holiday Island).</summary>
+    public static readonly TestId BirdmanPadMission = new(0, Vehicle.Birdman, 0);
+
+    /// <summary>The landing pad of the Hang Glider's Beginner mission (Holiday Island, the island's only pad), or null.</summary>
+    private byte[]? HangGliderPad()
+    {
+        foreach (GameFile file in CleanFileSystem.Files.Where(f => f.FileType == MissionFile.FormType))
+        {
+            MissionFile mission = MissionFile.Parse(file.Data);
+            if (mission.Comm.Id == new TestId(0, Vehicle.HangGlider, 0) && mission.GetObjectData(MissionObjectKind.LandingPad) is { Length: >= MissionFile.LandingPadSize } pads)
+            {
+                return pads[..MissionFile.LandingPadSize].ToArray();
+            }
+        }
+
+        return null;
     }
 
     /// <summary>The COMM block of a mission in the original game.</summary>

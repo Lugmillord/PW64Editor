@@ -98,6 +98,50 @@ public sealed class MissionFile
         return result;
     }
 
+    /// <summary>Size of a landing pad (TaskLPAD) in the LPAD chunk.</summary>
+    public const int LandingPadSize = 0x30;
+
+    /// <summary>
+    /// The file with one more landing pad (TaskLPAD, <see cref="LandingPadSize"/> bytes): appended to the LPAD chunk, or a new
+    /// LPAD chunk behind the takeoff pads; the count in COMM follows.
+    /// </summary>
+    public byte[] WithLandingPad(ReadOnlySpan<byte> pad)
+    {
+        if (pad.Length != LandingPadSize)
+        {
+            throw new ArgumentException("A landing pad has 0x30 bytes.", nameof(pad));
+        }
+
+        MissionComm comm = Comm.Clone();
+        comm.SetObjectCount(MissionObjectKind.LandingPad, comm.GetObjectCount(MissionObjectKind.LandingPad) + 1);
+        Iff.IffForm form = Iff.IffForm.Parse(_file);
+        var chunks = new List<byte[]>();
+        bool added = false;
+        foreach (IffChunk chunk in form.Chunks)
+        {
+            byte[] data = chunk.Tag == "COMM" ? comm.ToArray() : _file.AsSpan(chunk.DataOffset, chunk.DataSize).ToArray();
+            if (chunk.Tag == "LPAD")
+            {
+                data = [.. data, .. pad];
+                added = true;
+            }
+
+            chunks.Add(Iff.IffWriter.BuildChunk(chunk.Tag, data));
+            if (chunk.Tag == "TPAD" && !_chunks.ContainsKey("LPAD"))
+            {
+                chunks.Add(Iff.IffWriter.BuildChunk("LPAD", pad));
+                added = true;
+            }
+        }
+
+        if (!added)
+        {
+            chunks.Add(Iff.IffWriter.BuildChunk("LPAD", pad));
+        }
+
+        return Iff.IffWriter.BuildForm(form.FormType, chunks);
+    }
+
     /// <summary>Offset of the start fuel in the takeoff pad (TaskTPAD.unk2C, 0 to 1, Rocket Belt and Gyrocopter).</summary>
     public const int StartFuelOffset = 0x2C;
 

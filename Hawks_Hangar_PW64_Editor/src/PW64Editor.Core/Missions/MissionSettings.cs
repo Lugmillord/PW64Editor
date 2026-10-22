@@ -86,6 +86,13 @@ public sealed class MissionSettings
     /// <summary>The width of each runway for a good landing (game units, in the order of the mission file), or null for the mission file's.</summary>
     public List<float>? RunwayWidths { get; set; }
 
+    /// <summary>
+    /// Birdman: the mission has points (game patch "Bonus games and Birdman"): a landing ends it (a good one on a landing
+    /// pad), the impact is its speed at the touchdown (km/h as the HUD shows it), and it has its own mission screen and result sheet (BD_E1_S1 …) instead of the free flight text
+    /// BD_ALL_S1/S2.
+    /// </summary>
+    public bool BirdmanPoints { get; set; }
+
     /// <summary>The mission these settings belong to.</summary>
     [JsonIgnore]
     public TestId Id => new(Class, (Vehicle)Vehicle, Test);
@@ -94,7 +101,7 @@ public sealed class MissionSettings
     [JsonIgnore]
     public bool IsEmpty => ResultRows is null && !GenerateTexts && Footnote.Count == 0 && TextPoints.Count == 0
         && AutoFootnote is null && Conditions is null && !HideDemo && StartFuel is null && !UnlimitedFuel && !HardEndZero && HardEndJingle is null
-        && TouchdownCurve is null && Landing.Count == 0 && RunwayWidths is null;
+        && TouchdownCurve is null && Landing.Count == 0 && RunwayWidths is null && !BirdmanPoints;
 
     /// <summary>Empty settings for a mission.</summary>
     public static MissionSettings For(TestId id) => new() { Vehicle = (int)id.Vehicle, Class = id.Class, Test = id.Test };
@@ -119,6 +126,7 @@ public sealed class MissionSettings
         TouchdownCurve = TouchdownCurve is null ? null : [.. TouchdownCurve],
         Landing = new Dictionary<LandingValue, float>(Landing),
         RunwayWidths = RunwayWidths is null ? null : [.. RunwayWidths],
+        BirdmanPoints = BirdmanPoints,
     };
 }
 

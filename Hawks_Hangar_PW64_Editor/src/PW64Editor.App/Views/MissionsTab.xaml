@@ -69,6 +69,9 @@
                         <Expander Style="{StaticResource Section}">
                             <Expander.Header><TextBlock Text="Points" Style="{StaticResource SectionHeader}" /></Expander.Header>
                             <StackPanel Margin="18,0,0,0">
+                        <!-- Birdman (game patch "Bonus games and Birdman"): free flight or a mission with points. -->
+                        <CheckBox x:Name="BirdmanPointsBox" Content="Mission with points" Margin="0,4,0,0" Click="OnBirdmanPointsChanged" Visibility="Collapsed" />
+                        <TextBlock x:Name="BirdmanPointsNote" Style="{StaticResource Note}" Visibility="Collapsed" />
                         <TextBlock x:Name="PointsNote" Style="{StaticResource Note}" />
                         <!-- One line per row of the result sheet, plus one to add a row; filled in code. -->
                         <!-- The rows can be dragged by their handle (⠿) to another place. -->
@@ -220,6 +223,15 @@
                             <CheckBox x:Name="SeparateTouchdownBox" Margin="0,6,0,0" Click="OnSeparateTouchdownChanged"
                                       Content="Own curve for the touchdown point" />
                             <StackPanel x:Name="LandingCurvePanel" Margin="0,6,0,0" />
+                        </StackPanel>
+                        </Expander>
+
+                        <!-- Only for missions with landing impact points. -->
+                        <Expander x:Name="ImpactPanel" Style="{StaticResource Section}">
+                            <Expander.Header><TextBlock Text="Landing impact" Style="{StaticResource SectionHeader}" /></Expander.Header>
+                            <StackPanel Margin="18,0,0,0">
+                            <TextBlock x:Name="ImpactNote" Style="{StaticResource Note}" />
+                            <StackPanel x:Name="ImpactCurvePanel" Margin="0,6,0,0" />
                         </StackPanel>
                         </Expander>
 

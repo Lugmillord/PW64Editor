@@ -27,6 +27,12 @@ public sealed class MissionDraft
         _loadedComm = mission.File.Comm.ToArray();
         _loadedSettings = mission.Settings?.Clone();
         Settings = mission.Settings?.Clone() ?? MissionSettings.For(mission.Id);
+        // Values no longer used go with the next save (the draft does not count as changed by that).
+        foreach (MissionSettings? s in new[] { Settings, _loadedSettings })
+        {
+            s?.Landing.Keys.Where(LandingValues.IsUnused).ToList().ForEach(v => s.Landing.Remove(v));
+        }
+
         Rows = mission.Rows.Select(r => r.Source).ToList();
         CurrentScreenText = currentScreenText;
     }
@@ -54,8 +60,44 @@ public sealed class MissionDraft
     /// <summary>The vehicle.</summary>
     public Vehicle Vehicle => Mission.Id.Vehicle;
 
-    /// <summary>True if the rows and the sources of this mission can be changed (not Cannonball, not Birdman).</summary>
-    public bool CanChangeSources => MissionCatalog.AvailableSources(Vehicle).Count > 0;
+    /// <summary>True if the rows and the sources of this mission can be changed (not Cannonball; Birdman only with points).</summary>
+    public bool CanChangeSources => MissionCatalog.AvailableSources(Vehicle).Count > 0 && (Vehicle != Vehicle.Birdman || Settings.BirdmanPoints);
+
+    /// <summary>True if the mission has a score sheet (every vehicle but the Birdman; the Birdman in its missions with points).</summary>
+    public bool HasScoreSheet => Vehicle != Vehicle.Birdman || Settings.BirdmanPoints;
+
+    /// <summary>
+    /// Birdman: switches between free flight (as the original game) and a mission with points (game patch "Bonus games
+    /// and Birdman"). With points the texts are written by the editor; a mission without rows gets the sources that
+    /// already give points (in the original missions the landing accuracy). Back to free flight the texts are no longer
+    /// written (the free flights share BD_ALL_S1/S2); the rows stay for the next time.
+    /// </summary>
+    public void SetBirdmanPoints(bool points)
+    {
+        if (Vehicle != Vehicle.Birdman || Settings.BirdmanPoints == points)
+        {
+            return;
+        }
+
+        Settings.BirdmanPoints = points;
+        if (!points)
+        {
+            Settings.GenerateTexts = false;
+            return;
+        }
+
+        if (Rows.Count == 0)
+        {
+            Rows = MissionCatalog.AvailableSources(Vehicle)
+                .Where(source => PointSources.Curve(source) is { } curve ? Comm.GetCurve(curve).GivesPoints : false)
+                .Take(MissionTextGenerator.MaxRows)
+                .ToList();
+        }
+
+        Settings.AutoFootnote ??= true;
+        Settings.GenerateTexts = true;
+        Settings.ResultRows = Rows.SequenceEqual(Mission.OriginalRowSources) ? null : Rows.Select(r => (int)r).ToList();
+    }
 
     /// <summary>The rows with their values for the edited data.</summary>
     /// <param name="otherComm">The current COMM block of another mission (Cannonball targets), or null.</param>
@@ -417,10 +459,12 @@ public sealed class MissionDraft
         return null;
     }
 
-    /// <summary>The landing values the editor offers for this mission (pad radius if it has landing pads, the vehicle's speeds).</summary>
-    public IReadOnlyList<LandingValue> LandingValuesShown =>
-        [.. (LandingValues.UsesPads(Vehicle) && Comm.GetObjectCount(MissionObjectKind.LandingPad) > 0 ? [LandingValue.PadRadius] : Array.Empty<LandingValue>()),
-         .. LandingValues.SpeedsOf(Vehicle)];
+    /// <summary>The landing values the editor offers for this mission (pad radius if it has landing pads, the vehicle's speeds).
+    /// The Birdman's only in its missions with points.</summary>
+    public IReadOnlyList<LandingValue> LandingValuesShown => !HasScoreSheet
+        ? []
+        : [.. (LandingValues.UsesPads(Vehicle) && Comm.GetObjectCount(MissionObjectKind.LandingPad) > 0 ? [LandingValue.PadRadius] : Array.Empty<LandingValue>()),
+           .. LandingValues.SpeedsOf(Vehicle)];
 
     /// <summary>A landing value of this mission (stored form): its setting, or the original.</summary>
     public float LandingValueOf(LandingValue value) => LandingValues.Effective(Settings, value);
@@ -628,6 +672,7 @@ public sealed class MissionDraft
             && a.HardEndJingle == other.HardEndJingle
             && (a.TouchdownCurve ?? []).SequenceEqual(other.TouchdownCurve ?? []) && (a.TouchdownCurve is null) == (other.TouchdownCurve is null)
             && a.Landing.Count == other.Landing.Count && a.Landing.All(p => other.Landing.TryGetValue(p.Key, out float v) && v == p.Value)
+            && a.BirdmanPoints == other.BirdmanPoints
             && (a.RunwayWidths ?? []).SequenceEqual(other.RunwayWidths ?? []) && (a.RunwayWidths is null) == (other.RunwayWidths is null)
             && (a.Conditions is null ? other.Conditions is null : a.Conditions.SameAs(other.Conditions))
             && a.TextPoints.Count == other.TextPoints.Count

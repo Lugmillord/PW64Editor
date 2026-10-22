@@ -172,7 +172,10 @@ public static class ProjectImporter
             try
             {
                 GameFile cleanText = Text.GameTextFile.FindFile(cleanFs);
-                if (ResultTables.AddLevelTexts(cleanText.Data) is { } built)
+                IReadOnlyList<TestId> birdman = module is not null && GameModule.ReadDataImage(hack, module) is { } image
+                    ? ResultTables.BirdmanPointsFromMask(DataArea.ReadBirdmanPoints(image))
+                    : [];
+                if (ResultTables.AddLevelTexts(cleanText.Data, birdman, Workspace.EditorSession.EncodeFor(Text.TextFont.Load(cleanFs))) is { } built)
                 {
                     patchTexts = (cleanText.TableIndex, built);
                 }
@@ -681,6 +684,11 @@ public static class ProjectImporter
             }
         }
 
+        // Game patch "Bonus games and Birdman": the Birdman missions with points and their rows (in the data area's tables).
+        byte[]? image = module is null ? null : GameModule.ReadDataImage(hack, module);
+        IReadOnlyList<TestId> birdmanPoints = image is null ? [] : ResultTables.BirdmanPointsFromMask(DataArea.ReadBirdmanPoints(image));
+        byte[]? resultTables = image is null ? null : DataArea.ReadResultTables(image);
+
         MissionTables? cleanTables = layout.Missions is null ? null : new MissionTables(clean, layout.Missions);
         MissionTables? hackTables = layout.Missions is null ? null : new MissionTables(hack, layout.Missions);
         HashSet<Vehicle> hiddenDemos = HiddenDemos(hack);
@@ -740,6 +748,20 @@ public static class ProjectImporter
                     else
                     {
                         notes.Add(Warning(CoreText.F("The result sheet of {0} has rows the editor does not know; they are not taken over.", MissionCatalog.Label(id))));
+                    }
+                }
+            }
+
+            if (birdmanPoints.Contains(id))
+            {
+                mission.BirdmanPoints = true;
+                if (resultTables is not null && ResultTables.RowsOffset(id) is { } offset && offset + MissionLayout.ResultRows <= resultTables.Length)
+                {
+                    List<int> stored = [.. resultTables.AsSpan(offset, MissionLayout.ResultRows).ToArray().Select(b => (int)b)];
+                    List<int> rows = stored.Take(stored.FindLastIndex(r => r != 0) + 1).Reverse().ToList();
+                    if (rows.Count > 0 && rows.All(PointSources.IsKnown))
+                    {
+                        mission.ResultRows = rows;
                     }
                 }
             }

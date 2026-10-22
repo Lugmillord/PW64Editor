@@ -120,6 +120,9 @@ public static class MissionCurves
             ScoreCurveKind.LandingAccuracy when vehicle == Vehicle.Gyrocopter => GyrocopterAccuracy(MathF.Sqrt(p)),
             ScoreCurveKind.LandingAccuracy => ScoreCurve.Create(
                 [new(0, p), new(6, p), new(11, Round(p * 0.75f)), new(18, Round(p * 0.5f)), new(35, Round(p * 0.1f)), new(35, 0)]),
+            // The Birdman's impact is its whole speed (km/h, as the HUD shows it); it cannot slow down below about 20 km/h.
+            ScoreCurveKind.Impact when vehicle == Vehicle.Birdman =>
+                ScoreCurve.Create([new(0, p), new(21, p), new(30, Round(p * 0.5f)), new(40, 0)]),
             ScoreCurveKind.Impact => ScoreCurve.Create([new(0, p), new(5, p), new(9, Round(p * 0.5f)), new(14, 0)]),
             // In meters as the game shows them (full points at 500 m), stored in game units.
             ScoreCurveKind.Altitude => ScoreCurve.Create(

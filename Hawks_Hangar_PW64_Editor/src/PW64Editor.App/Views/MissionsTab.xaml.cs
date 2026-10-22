@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using PW64Editor.App.Services;
+using PW64Editor.Core.Code;
 using PW64Editor.Core.Missions;
 using PW64Editor.Core.SaveGame;
 using PW64Editor.Core.Workspace;
@@ -123,7 +124,9 @@ public partial class MissionsTab : UserControl
         // Point texts are written by this tab from the points; they cannot be edited in the Text tab.
         texts.LockReason = name => PointTextNames().Contains(name)
             ? L.T("The Missions tab writes this text from the points of the mission. Change the points there.")
-            : null;
+            : ResultTables.IsGeneratedText(name)
+                ? L.T("The editor writes this text from the Birdman missions with points of the stage (game patch \"Bonus games and Birdman\").")
+                : null;
 
         // After saving or reloading, the Text tab has new row objects (and maybe new titles).
         texts.TextsReloaded += (_, _) => RefreshTexts();
@@ -313,7 +316,7 @@ public partial class MissionsTab : UserControl
     {
         if (!_drafts.TryGetValue(mission.Id, out MissionDraft? draft))
         {
-            draft = new MissionDraft(mission, Row(mission.MissionScreenTextName)?.Markup);
+            draft = new MissionDraft(mission, Row(ScreenName(mission))?.Markup);
             _drafts[mission.Id] = draft;
         }
 
@@ -324,13 +327,33 @@ public partial class MissionsTab : UserControl
     private MissionComm? OtherComm(TestId id) =>
         _drafts.TryGetValue(id, out MissionDraft? draft) ? draft.Comm : _missions.FirstOrDefault(m => m.Id == id)?.File.Comm;
 
-    /// <summary>Names of the point texts of all missions that the editor can write (not Birdman).</summary>
+    /// <summary>True if the project has the game patch "Bonus games and Birdman" (Birdman missions with points).</summary>
+    private bool BonusPatch => _session?.Project.HasPatch(GamePatches.BonusGames) == true;
+
+    /// <summary>True if a Birdman mission has points (its draft, or as saved); always false without the patch.</summary>
+    private bool BirdmanScored(MissionInfo mission) =>
+        mission.IsBirdman && BonusPatch
+        && (_drafts.TryGetValue(mission.Id, out MissionDraft? draft) ? draft.Settings.BirdmanPoints : mission.Settings?.BirdmanPoints == true);
+
+    /// <summary>The mission screen text of a mission; for the Birdman as its draft says (free flight or with points).</summary>
+    private string? ScreenName(MissionInfo mission) =>
+        mission.IsBirdman && BonusPatch
+            ? BirdmanScored(mission) ? ResultTables.BirdmanTextName(mission.Id, false) : "BD_ALL_S1"
+            : mission.MissionScreenTextName;
+
+    /// <summary>The result sheet text of a mission; for the Birdman as its draft says.</summary>
+    private string? SheetName(MissionInfo mission) =>
+        mission.IsBirdman && BonusPatch
+            ? BirdmanScored(mission) ? ResultTables.BirdmanTextName(mission.Id, true) : "BD_ALL_S2"
+            : mission.ResultSheetTextName;
+
+    /// <summary>Names of the point texts of all missions that the editor can write (not the Birdman's free flights).</summary>
     private HashSet<string> PointTextNames()
     {
         var names = new HashSet<string>(StringComparer.Ordinal);
-        foreach (MissionInfo mission in _missions.Where(m => !m.IsBirdman))
+        foreach (MissionInfo mission in _missions.Where(m => !m.IsBirdman || BirdmanScored(m)))
         {
-            foreach (string? name in new[] { mission.MissionScreenTextName, mission.ResultSheetTextName })
+            foreach (string? name in new[] { ScreenName(mission), SheetName(mission) })
             {
                 if (name is not null)
                 {
@@ -353,12 +376,12 @@ public partial class MissionsTab : UserControl
                 : mission.Settings?.GenerateTexts == true;
             if (generated)
             {
-                if (mission.MissionScreenTextName is { } screen)
+                if (ScreenName(mission) is { } screen)
                 {
                     names.Add(screen);
                 }
 
-                if (mission.ResultSheetTextName is { } sheet)
+                if (SheetName(mission) is { } sheet)
                 {
                     names.Add(sheet);
                 }
@@ -371,13 +394,13 @@ public partial class MissionsTab : UserControl
     /// <summary>Writes the point texts of a mission from its points into the Text tab's texts (not saved yet).</summary>
     private void WriteTexts(MissionDraft draft)
     {
-        if (!draft.Settings.GenerateTexts || draft.Rows.Count == 0)
+        if (!draft.Settings.GenerateTexts || draft.Rows.Count == 0 || !draft.HasScoreSheet)
         {
             return;
         }
 
-        SetText(draft.Mission.MissionScreenTextName, draft.MissionScreenText(OtherComm));
-        SetText(draft.Mission.ResultSheetTextName, draft.ResultSheetText(OtherComm));
+        SetText(ScreenName(draft.Mission), draft.MissionScreenText(OtherComm));
+        SetText(SheetName(draft.Mission), draft.ResultSheetText(OtherComm));
     }
 
     private void SetText(string? name, string markup)
@@ -424,10 +447,10 @@ public partial class MissionsTab : UserControl
 
         // The point texts back to their saved state, unless another changed mission writes them.
         HashSet<string> stillWritten = _drafts.Values.Where(d => d.IsChanged && d.Settings.GenerateTexts)
-            .SelectMany(d => new[] { d.Mission.MissionScreenTextName, d.Mission.ResultSheetTextName })
+            .SelectMany(d => new[] { ScreenName(d.Mission), SheetName(d.Mission) })
             .OfType<string>()
             .ToHashSet(StringComparer.Ordinal);
-        foreach (string? name in new[] { shown.MissionScreenTextName, shown.ResultSheetTextName })
+        foreach (string? name in new[] { ScreenName(shown), SheetName(shown) })
         {
             if (Row(name) is { } row && !stillWritten.Contains(row.Name))
             {
@@ -475,7 +498,7 @@ public partial class MissionsTab : UserControl
         }
 
         // The point texts go back to the original too (unless another changed mission shares them).
-        foreach (string? name in new[] { draft.Mission.MissionScreenTextName, draft.Mission.ResultSheetTextName })
+        foreach (string? name in new[] { ScreenName(draft.Mission), SheetName(draft.Mission) })
         {
             if (Row(name) is { } row && !GeneratedTextNames().Contains(row.Name))
             {
@@ -510,7 +533,7 @@ public partial class MissionsTab : UserControl
             }
 
             MissionDraft draft = Draft(mission);
-            RestoreButton.IsEnabled = !mission.IsBirdman;
+            RestoreButton.IsEnabled = draft.HasScoreSheet;
             UndoButton.IsEnabled = SelectedGroup.Append(mission).Any(m => _drafts.TryGetValue(m.Id, out MissionDraft? d) && d.IsChanged);
             InfoText.Text = L.F("Mission file {0} · island: {1} · texts: {2}", mission.FileNumber, MissionCatalog.IslandName(mission.Island),
                 mission.File.TextBase.Length > 0 ? mission.File.TextBase : L.T("none"))
@@ -523,6 +546,7 @@ public partial class MissionsTab : UserControl
             ShowAltitude(draft);
             ShowDistance(draft);
             ShowLanding(draft);
+            ShowImpact(draft);
             ShowGoodLanding(draft);
             ShowConditions(draft);
             DemoPanel.Visibility = draft.CanHideDemo ? Visibility.Visible : Visibility.Collapsed;
@@ -623,13 +647,25 @@ public partial class MissionsTab : UserControl
         MissionInfo mission = draft.Mission;
         RingPanel.Visibility = Visibility.Collapsed;
 
-        if (mission.IsBirdman)
+        // Birdman: free flight (as the original) or, with the game patch "Bonus games and Birdman", a mission with points.
+        BirdmanPointsBox.Visibility = mission.IsBirdman && BonusPatch ? Visibility.Visible : Visibility.Collapsed;
+        BirdmanPointsBox.IsChecked = draft.Settings.BirdmanPoints;
+        BirdmanPointsNote.Visibility = BirdmanPointsBox.Visibility;
+        BirdmanPointsNote.Text = draft.HasScoreSheet
+            ? L.T("A landing (feet first and slow enough, see \"Good landing\") ends the mission; a landing on a landing pad counts as a good landing, as for the Hang Glider, and the impact curve decides how hard it was. The impact is the Birdman's speed at the touchdown as the HUD shows it. The mission gets its own texts on the mission screen and the result sheet.")
+            : L.T("Free flight, as in the original game: after a soft touchdown the Birdman flies on, and the mission shows the shared texts BD_ALL_S1 and BD_ALL_S2 without points.");
+        if (!draft.HasScoreSheet)
         {
-            PointsNote.Text = L.T("Birdman has no score sheet in the original game: its missions are free flights and show the text BD_ALL_S1 (\"There's no score\"). The points it computes are saved, but never shown.");
+            PointsNote.Text = BonusPatch
+                ? string.Empty
+                : L.T("Birdman has no score sheet in the original game: its missions are free flights and show the text BD_ALL_S1 (\"There's no score\"). The points it computes are saved, but never shown. The game patch \"Bonus games and Birdman\" gives them points.");
+            PointsNote.Visibility = PointsNote.Text.Length > 0 ? Visibility.Visible : Visibility.Collapsed;
             SumText.Text = string.Empty;
             SumWarning.Visibility = Visibility.Collapsed;
             return;
         }
+
+        PointsNote.Visibility = Visibility.Visible;
 
         PointsNote.Text = draft.CanChangeSources
             ? L.T("The rows of the result sheet, from top to bottom (at most 4). Drag a row by its handle (⠿) to move it. For points from a curve, the number changes the curve; for points from objects, it is the number the texts show (the game counts the objects).")
@@ -670,7 +706,7 @@ public partial class MissionsTab : UserControl
         SumWarning.Visibility = warnings.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
 
         ShowRingTypes(draft);
-        ShowPointText(ScreenTextView, ScreenTextNote, mission.MissionScreenTextName, mission.SharesMissionScreenTextWith,
+        ShowPointText(ScreenTextView, ScreenTextNote, ScreenName(mission), BirdmanScored(mission) ? [] : mission.SharesMissionScreenTextWith,
             L.T("The game has no mission screen text for this mission."), draft);
     }
 
@@ -1179,6 +1215,31 @@ public partial class MissionsTab : UserControl
             GameUnits.MetersPerUnit, squaredPoints: gyrocopter));
     }
 
+    /// <summary>The landing impact curve: the measured speed in km/h like the HUD's speedometer.</summary>
+    private void ShowImpact(MissionDraft draft)
+    {
+        ImpactCurvePanel.Children.Clear();
+        bool shown = draft.Rows.Contains(PointSource.LandingImpact);
+        ImpactPanel.Visibility = shown ? Visibility.Visible : Visibility.Collapsed;
+        if (!shown)
+        {
+            return;
+        }
+
+        string measured = draft.Vehicle switch
+        {
+            Vehicle.HangGlider => L.T("The impact is the Hang Glider's vertical speed at the touchdown."),
+            Vehicle.RocketBelt => L.T("The impact is the Rocket Belt's speed into the ground at the touchdown."),
+            Vehicle.Gyrocopter => L.T("The impact is the highest speed of a wheel into the ground at the first touchdown."),
+            Vehicle.SkyDiving => L.T("The impact is the vertical speed at the touchdown."),
+            Vehicle.Birdman => L.T("The impact is the Birdman's speed at the touchdown as the HUD shows it (vertical, forward and sideways together)."),
+            _ => string.Empty,
+        };
+        ImpactNote.Text = (measured + " " + L.T("Speeds are in km/h like the speedometer of the HUD. Between two points the points fall or rise evenly; beyond the last point the last one counts. Two points at the same speed make a step.")).Trim();
+        ImpactCurvePanel.Children.Add(CurveEditor(draft, ScoreCurveKind.Impact, L.T("Speed (km/h)"), 5, "impact",
+            LandingValues.ImpactShownPerStored(draft.Vehicle)));
+    }
+
     /// <summary>
     /// The runway from above with the touchdown point T, the resting point R and their distances dT and dR
     /// from the centre line (the letters of the note of the Gyrocopter's landing accuracy).
@@ -1571,7 +1632,7 @@ public partial class MissionsTab : UserControl
         bool cannonball = draft.Vehicle == Vehicle.Cannonball;
 
         // Cannonball: a shot always ends in the water or on a target, and there are no time points.
-        ConditionsSection.Visibility = cannonball || draft.Mission.IsBirdman ? Visibility.Collapsed : Visibility.Visible;
+        ConditionsSection.Visibility = cannonball || !draft.HasScoreSheet ? Visibility.Collapsed : Visibility.Visible;
         CrashOriginalBox.IsChecked = draft.CrashScoring == CrashScoring.Original;
         CrashTimeBox.IsChecked = draft.CrashScoring == CrashScoring.TimePoints;
         CrashZeroBox.IsChecked = draft.CrashScoring == CrashScoring.Zero;
@@ -1635,7 +1696,7 @@ public partial class MissionsTab : UserControl
                 ? L.T("The original game can only check one of these conditions at a time. This combination is checked by the editor's game code, which is built into the ROM for it.")
                 : L.T("The original game checks these conditions itself.");
 
-        bool birdman = draft.Mission.IsBirdman;
+        bool birdman = !draft.HasScoreSheet; // a Birdman free flight
         HitPanel.Visibility = draft.Vehicle is Vehicle.Gyrocopter or Vehicle.RocketBelt || comm.HitDeduction != 0 ? Visibility.Visible : Visibility.Collapsed;
         HitCostBox.Text = (-comm.HitDeduction).ToString(CultureInfo.CurrentCulture);
         OutOfAreaPanel.Visibility = draft.Vehicle == Vehicle.JumbleHopper ? Visibility.Visible : Visibility.Collapsed;
@@ -1654,7 +1715,7 @@ public partial class MissionsTab : UserControl
                 ? MissionTextGenerator.SuggestFootnote(comm, draft.TextLines(OtherComm), conditions, draft.Settings.HardEndZero)
                 : draft.CurrentScreenText is { } screen ? MissionTextGenerator.ExtractFootnote(screen) : []);
         FootnoteBox.IsReadOnly = automatic;
-        FootnoteBox.IsEnabled = !birdman && draft.Mission.MissionScreenTextName is not null;
+        FootnoteBox.IsEnabled = !birdman && ScreenName(draft.Mission) is not null;
         AutoFootnoteBox.IsEnabled = FootnoteBox.IsEnabled;
     }
 
@@ -1774,6 +1835,30 @@ public partial class MissionsTab : UserControl
             draft.SetHardEndJingle(jingle);
             Changed(draft);
         }
+    }
+
+    private void OnBirdmanPointsChanged(object sender, RoutedEventArgs e)
+    {
+        if (_showing || SelectedDraft is not { } draft)
+        {
+            return;
+        }
+
+        bool points = BirdmanPointsBox.IsChecked == true;
+        draft.SetBirdmanPoints(points);
+        if (points && _texts is not null)
+        {
+            // The mission's own texts (added to the Text tab, saved with the other changes), at first copies of the free flight's.
+            foreach ((string? name, string source) in new[] { (ScreenName(draft.Mission), "BD_ALL_S1"), (SheetName(draft.Mission), "BD_ALL_S2") })
+            {
+                if (name is not null && Row(name) is null)
+                {
+                    _texts.AddPatchText(name, Row(source)?.Markup ?? string.Empty);
+                }
+            }
+        }
+
+        Changed(draft);
     }
 
     private void OnHideDemoChanged(object sender, RoutedEventArgs e)
@@ -2046,7 +2131,7 @@ public partial class MissionsTab : UserControl
     private void ShowResults(MissionDraft draft)
     {
         MissionInfo mission = draft.Mission;
-        if (mission.IsBirdman)
+        if (!draft.HasScoreSheet)
         {
             ResultRowsText.Text = L.T("Birdman has no result sheet in the original game.");
         }
@@ -2058,7 +2143,7 @@ public partial class MissionsTab : UserControl
                     : L.T("Below them comes the total (this vehicle has no \"Points Deducted\" row)."));
         }
 
-        ShowPointText(ResultTextView, ResultTextNote, mission.ResultSheetTextName, mission.SharesResultSheetTextWith,
+        ShowPointText(ResultTextView, ResultTextNote, SheetName(mission), BirdmanScored(mission) ? [] : mission.SharesResultSheetTextWith,
             L.T("The game has no result sheet text for this mission."), draft);
     }
 

@@ -29,7 +29,8 @@ namespace PW64Editor.Core.Code;
 /// +0x80 ... reserved (0)
 /// </code>
 /// <para>Header: +0x00 'HHMD', +0x04 version, +0x08 missions, +0x0C entry size, +0x10 size of the result tables
-/// (0 = none). At +0x40 the values the game code reads while flying (written by the module in every flight frame,
+/// (0 = none), +0x14 u16 the Birdman missions with points (bit class × 4 + test). At +0x50 the Birdman's two landing
+/// limits, which its patched code reads. At +0x40 the values the game code reads while flying (written by the module in every flight frame,
 /// see <see cref="LiveLandingAddress"/>).</para>
 /// <para>Behind the room for <see cref="MissionCapacity"/> entries (at <see cref="Missions.ResultTables.Address"/>)
 /// the result tables of the game patch <see cref="GamePatches.BonusGames"/>, when it is applied; the image then
@@ -87,6 +88,15 @@ public static class DataArea
     /// <summary>Header offset of the size of the result tables (0 = none).</summary>
     public const int ResultTablesSizeOffset = 0x10;
 
+    /// <summary>Header offset of the mask of the Birdman missions with points (u16, <see cref="Missions.ResultTables.BirdmanPointsMask"/>).</summary>
+    public const int BirdmanPointsOffset = 0x14;
+
+    /// <summary>
+    /// RAM address of the Birdman's two current landing limits (f32 km/h: vertical, forward), which its patched landing
+    /// code loads instead of the immediates 50 (module: the mission's values or the original ones).
+    /// </summary>
+    public const uint LiveBirdmanAddress = Start + 0x50;
+
     /// <summary>
     /// The image as the module copies it into the data area: header, the used entries and, if given, the
     /// result tables at their place behind the room for all entries.
@@ -94,7 +104,8 @@ public static class DataArea
     /// <param name="missions">Missions with settings.</param>
     /// <param name="resultTables">The result tables of <see cref="GamePatches.BonusGames"/> (<see cref="Missions.ResultTables.Create"/>), or null.</param>
     /// <exception cref="InvalidDataException">More missions than the table has room for, or the tables do not fit.</exception>
-    public static byte[] CreateImage(IReadOnlyList<GameModuleCondition> missions, byte[]? resultTables = null)
+    /// <param name="birdmanPoints">The mask of the Birdman missions with points (header +0x14).</param>
+    public static byte[] CreateImage(IReadOnlyList<GameModuleCondition> missions, byte[]? resultTables = null, ushort birdmanPoints = 0)
     {
         if (missions.Count > MissionCapacity)
         {
@@ -112,6 +123,7 @@ public static class DataArea
         BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(0x04), Version);
         BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(0x08), (uint)missions.Count);
         BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(0x0C), MissionEntrySize);
+        BinaryPrimitives.WriteUInt16BigEndian(image.AsSpan(BirdmanPointsOffset), birdmanPoints);
         if (resultTables is not null)
         {
             BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(ResultTablesSizeOffset), (uint)resultTables.Length);
@@ -183,6 +195,12 @@ public static class DataArea
         int offset = (int)(Missions.ResultTables.Address - Start);
         return size > 0 && offset + (long)size <= image.Length ? image.Slice(offset, size).ToArray() : null;
     }
+
+    /// <summary>The mask of the Birdman missions with points of an image (0 for none or not an image).</summary>
+    public static ushort ReadBirdmanPoints(ReadOnlySpan<byte> image) =>
+        image.Length >= HeaderSize && BinaryPrimitives.ReadUInt32BigEndian(image) == Magic
+            ? BinaryPrimitives.ReadUInt16BigEndian(image[BirdmanPointsOffset..])
+            : (ushort)0;
 
     /// <summary>Reads the mission entries of an image made by <see cref="CreateImage"/>.</summary>
     /// <exception cref="InvalidDataException">Not a data area image.</exception>

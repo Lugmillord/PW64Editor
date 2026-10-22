@@ -69,7 +69,13 @@ public static class ProjectBuilder
                     SequenceFile = BuildMusic(project, cleanRom, layout),
                     DataPatches = MissionPatches(project, cleanRom, layout),
                     MinimumRomSize = HackRomSize,
-                    GameModule = ModuleOptions(project, fileSystem, files) with { ResultTables = BonusResultTables(project, cleanRom, layout) },
+                    GameModule = ModuleOptions(project, fileSystem, files) with
+                    {
+                        ResultTables = BonusResultTables(project, cleanRom, layout),
+                        BirdmanPoints = project.HasPatch(GamePatches.BonusGames)
+                            ? Missions.ResultTables.BirdmanPointsMask(Missions.ResultTables.BirdmanPointMissions(project.Settings.Missions))
+                            : (ushort)0,
+                    },
                     GameModuleInfo = ModuleInfo(project),
                 });
         }
@@ -360,7 +366,11 @@ public static class ProjectBuilder
                 && Missions.LandingValues.UsesPads(vehicle)
                 ? radius
                 : null;
-            IReadOnlyList<Missions.LandingValue> speeds = Missions.LandingValues.SpeedsOf(vehicle);
+            // The Birdman's values only count in its missions with points (game patch "Bonus games and Birdman").
+            IReadOnlyList<Missions.LandingValue> speeds = vehicle != SaveGame.Vehicle.Birdman
+                || (settings?.BirdmanPoints == true && project.HasPatch(GamePatches.BonusGames))
+                ? Missions.LandingValues.SpeedsOf(vehicle)
+                : [];
             IReadOnlyList<float> limits = settings is not null && speeds.Any(settings.Landing.ContainsKey)
                 ? speeds.Select(v => Missions.LandingValues.Effective(settings, v)).ToList()
                 : [];
@@ -422,7 +432,10 @@ public static class ProjectBuilder
             patches.AddRange(Missions.DemoButton.Patches(hiddenDemos));
         }
 
-        List<Missions.MissionSettings> changed = project.Settings.Missions.Where(m => m.ResultRows is not null).ToList();
+        // The Birdman has no entry in the game's table: its rows only exist in the tables of the game patch "Bonus games
+        // and Birdman" (BonusResultTables).
+        List<Missions.MissionSettings> changed = project.Settings.Missions
+            .Where(m => m.ResultRows is not null && m.Id.Vehicle != SaveGame.Vehicle.Birdman).ToList();
         if (changed.Count == 0)
         {
             return patches;
@@ -501,7 +514,8 @@ public static class ProjectBuilder
         int position = files.FindIndex(f => f.TableIndex == originalText.TableIndex);
         try
         {
-            if (Missions.ResultTables.AddLevelTexts(files[position].Data) is { } withTexts)
+            if (Missions.ResultTables.AddLevelTexts(files[position].Data, Missions.ResultTables.BirdmanPointMissions(project.Settings.Missions),
+                    Workspace.EditorSession.EncodeFor(Text.TextFont.Load(cleanFileSystem))) is { } withTexts)
             {
                 files[position] = files[position] with { Data = withTexts };
             }

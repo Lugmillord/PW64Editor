@@ -86,6 +86,14 @@ public static class GamePatches
     ///         280/320/360 points per stage.</item>
     ///   <item>levelSetPointsToNextMedal goes through the module: with every medal reached the game showed
     ///         "100 - points" to go for all but the main vehicles; the Birdman gets "100 × missions - points".</item>
+    ///   <item>Birdman missions with points (<see cref="MissionSettings.BirdmanPoints"/>, a mask in the data area header):
+    ///         resultInit takes the Birdman's texts from the tables; the result sheet and the test screen show line,
+    ///         numbers and top score for them (checks "veh != BIRDMAN" through the module); the test screen reads their
+    ///         points from (class, test); "all perfect" needs 100 points in each of them. The module ends such a mission
+    ///         at a soft touchdown (landing) and measures the impact (see module.c, birdman_frame). Their stage shows the
+    ///         level banner and the tests to go on the stage screen, the HUD radar and timer, the objects on the map, and
+    ///         "Next" leads to the total screen with only these missions, medal limits of 70/80/90 points each and the
+    ///         menu Retry / Another test / Quit (module.c, module_tot_…).</item>
     /// </list>
     /// <para>Function and table names from the decompilation (https://github.com/gcsmith/Pilotwings64Decomp, MIT license).</para>
     /// </remarks>
@@ -95,7 +103,9 @@ public static class GamePatches
         Description: CoreText.K("Every Sky Diving level gets its own mission screen and result sheet, every Jumble Hopper level " +
             "its own result sheet (the game shares one text for all levels; the editor adds the texts as copies). The Birdman " +
             "gets medal limits (280/320/360 points per stage) and the game saves its stage 4 too, so the photos of a save " +
-            "file lie at another place than without the patch. The original missions do not change."),
+            "file lie at another place than without the patch. Birdman missions can get points (Missions tab): a landing ends " +
+            "them, they have a score sheet and a total screen, and the medal limits of their stage become 70/80/90 points " +
+            "per mission with points. The original missions do not change."),
         Patches: BonusGamesPatches());
 
     private static List<CodePatch> BonusGamesPatches()
@@ -148,18 +158,100 @@ public static class GamePatches
                 [0x00, 0x46, 0x00, 0x50, 0x00, 0x5A, 0x01, 0x18, 0x01, 0x40, 0x01, 0x68]),
         };
 
-        // levelSetPointsToNextMedal: all eight calls go through the module.
+        // Birdman missions with points (data area header +0x14): resultInit takes the Birdman's names from the tables too
+        // (0x8032E0B4: "bne veh, 6" becomes "b"; the tables hold BD_ALL_S1/S2 for the free flights).
+        patches.Add(CodePatch.FromWords("Birdman names, resultInit", 0xB55E4, [0x14E10008], [0x10000008]));
+
+        // "veh != BIRDMAN" of the result sheet (line above the total, the numbers) and of the test screen (top score box,
+        // its label, the points): "lhu d, 2(b); li at, 6" (or the other way round) becomes "jal module_bm_d_b; lhu d, 2(b)".
+        patches.Add(CodePatch.FromWords("Birdman with points, line of the result sheet", 0xB5FDC,
+            [0x954B0002, 0x24010006], [CodeArea.Jal(GameModuleImage.BirdmanCheckT3T2Address), 0x954B0002]));
+        patches.Add(CodePatch.FromWords("Birdman with points, numbers of the result sheet", 0xB62A4,
+            [0x97190002, 0x24010006], [CodeArea.Jal(GameModuleImage.BirdmanCheckT9T8Address), 0x97190002]));
+        patches.Add(CodePatch.FromWords("Birdman with points, top score box, testMenuDraw", 0xD1344,
+            [0x24010006, 0x95F90002], [CodeArea.Jal(GameModuleImage.BirdmanCheckT9T7Address), 0x95F90002]));
+        patches.Add(CodePatch.FromWords("Birdman with points, top score label (hint), testMenuDraw", 0xD13CC,
+            [0x24010006, 0x95AE0002], [CodeArea.Jal(GameModuleImage.BirdmanCheckT6T5Address), 0x95AE0002]));
+        patches.Add(CodePatch.FromWords("Birdman with points, top score label, testMenuDraw", 0xD142C,
+            [0x95F90002, 0x24010006], [CodeArea.Jal(GameModuleImage.BirdmanCheckT9T7Address), 0x95F90002]));
+        patches.Add(CodePatch.FromWords("Birdman with points, top score, testMenuDraw", 0xD1800,
+            [0x95F90002, 0x24010006], [CodeArea.Jal(GameModuleImage.BirdmanCheckT9T7Address), 0x95F90002]));
+
+        // The map ("View map", map3dLoad) leaves out rings and objects for the Birdman; with points it shows them.
+        patches.Add(CodePatch.FromWords("Birdman with points, objects on the map, map3dLoad", 0x977E8,
+            [0x95090002, 0x24010006], [CodeArea.Jal(GameModuleImage.BirdmanCheckT1T0Address), 0x95090002]));
+
+        // The stage screen (test_summary.c): the banner "Level N" instead of "Free Flight", the line with the tests and the
+        // medal, the points and "N tests to go" of the missions with points.
+        patches.Add(CodePatch.FromWords("Birdman with points, banner of the stage screen", 0x939FC,
+            [0x24030007, 0x3C188035], [CodeArea.Jal(GameModuleImage.BirdmanBannerAddress), 0x3C188035]));
+        patches.Add(CodePatch.FromWords("Birdman with points, medal line of the stage screen", 0x93E84,
+            [0x24010006, 0x97280002], [CodeArea.Jal(GameModuleImage.BirdmanCheckT0T9Address), 0x97280002]));
+        patches.Add(CodePatch.FromWords("Birdman with points, tests of the stage screen", 0x93CB8,
+            [0x0C0D0866], [CodeArea.Jal(GameModuleImage.TryTextAddress)]));
+
+        // "Next" on the result sheet: to the total screen (resultMenuChoose, "beql veh, 6" becomes "j module_res_next").
+        patches.Add(CodePatch.FromWords("Birdman with points, total screen after the result sheet, resultMenuChoose", 0xB5D24,
+            [0x50410006, 0x240E0002], [CodeArea.J(GameModuleImage.ResultNextAddress), 0x240E0002]));
+
+        // The total screen (total_results.c): only the missions with points, their medal texts and the menu.
+        foreach (int call in new[] { 0xCE884, 0xCE90C, 0xCEFC4 })
+        {
+            patches.Add(CodePatch.FromWords($"Birdman with points, tests of the total screen at 0x{call:X6}", call,
+                [0x0C0D13BC], [CodeArea.Jal(GameModuleImage.TotalTestCountAddress)]));
+        }
+
+        patches.Add(CodePatch.FromWords("Birdman with points, points of the total screen, totResultInit", 0xCE8AC,
+            [0x0C0CAF87], [CodeArea.Jal(GameModuleImage.TotalPointCountAddress)]));
+        patches.Add(CodePatch.FromWords("Birdman with points, medal text of the total screen, totResultInit", 0xCEA44,
+            [0x0C0D083D], [CodeArea.Jal(GameModuleImage.TotalMedalTextAddress)]));
+        patches.Add(CodePatch.FromWords("Birdman with points, menu of the total screen, totResultInit", 0xCEA50,
+            [0x0C0D1D53], [CodeArea.Jal(GameModuleImage.TotalMenuAddress)]));
+        foreach (int call in new[] { 0xCEC04, 0xCEC38 })
+        {
+            patches.Add(CodePatch.FromWords($"Birdman with points, choice of the total screen at 0x{call:X6}", call,
+                [0x0C0D1C54], [CodeArea.Jal(GameModuleImage.TotalChoiceAddress)]));
+        }
+
+        // The HUD (hudMainRender): radar and time for a Birdman mission with points.
+        patches.Add(CodePatch.FromWords("Birdman with points, radar and time, hudMainRender", 0x9FBC4,
+            [0x0C0C67BF], [CodeArea.Jal(GameModuleImage.HudBirdmanAddress)]));
+
+        // testMenuInitText: the Birdman's points from (class, test) instead of (test, 0), through the module.
+        patches.Add(CodePatch.FromWords("Birdman points of the test screen, testMenuInitText", 0xCFDB8,
+            [0x0C0CAF87], [CodeArea.Jal(GameModuleImage.PointCountAddress)]));
+
+        // "All perfect" (func_8032C27C) with the Birdman missions with points: its three calls go through the module.
+        foreach (int call in AllPerfectCalls)
+        {
+            patches.Add(CodePatch.FromWords($"all perfect with the Birdman, call at 0x{call:X6}", call,
+                [0x0C0CB09F], [CodeArea.Jal(GameModuleImage.AllPerfectAddress)]));
+        }
+
+        // levelSetPointsToNextMedal: all eight calls go through the module (the medal ceremony's to its own function,
+        // which gives the Birdman its own limits instead of entry 4 of the bonus games).
         foreach (int call in PointsToMedalCalls)
         {
             patches.Add(CodePatch.FromWords($"points to the next medal, call at 0x{call:X6}", call,
-                [0x0C0CB05D], [CodeArea.Jal(GameModuleImage.PointsToMedalAddress)]));
+                [0x0C0CB05D], [CodeArea.Jal(call == CeremonyMedalCall ? GameModuleImage.CeremonyMedalAddress : GameModuleImage.PointsToMedalAddress)]));
         }
+
+        // levelGetTotalPoints (0x8032BD20) itself goes to the module: a Birdman stage with points counts only its missions
+        // with points everywhere (stage screen, level select, scoring, medal ceremony); all others as the original.
+        patches.Add(CodePatch.FromWords("Birdman with points, points of a stage, levelGetTotalPoints", 0xB3250,
+            [0x27BDFFD0, 0xAFB30020], [CodeArea.J(GameModuleImage.LevelPointsAddress), 0x00000000]));
 
         return patches;
     }
 
+    /// <summary>ROM offsets of the three calls of func_8032C27C ("all perfect").</summary>
+    public static IReadOnlyList<int> AllPerfectCalls => [0x70944, 0x7099C, 0x94180];
+
     /// <summary>ROM offsets of the eight calls of levelSetPointsToNextMedal (0x8032C174).</summary>
     public static IReadOnlyList<int> PointsToMedalCalls => [0x93C64, 0xA9114, 0xB311C, 0xB3194, 0xB31D0, 0xCE518, 0xCE530, 0xCE944];
+
+    /// <summary>The call of levelSetPointsToNextMedal in the medal ceremony (code_A8C30), which passes entry 4 for every bonus vehicle.</summary>
+    public const int CeremonyMedalCall = 0xA9114;
 
     /// <summary>
     /// "slti at, sV, 3; bnez at, +3; (delay); b +2; li v0, 3; li v0, 4" becomes
@@ -189,6 +281,11 @@ public static class GamePatches
                 {
                     uses.Add(CoreText.F("{0}: own texts {1} (without the patch the game shows the shared text again; the texts stay in the project)",
                         MissionCatalog.Label(mission.Id), string.Join(", ", own)));
+                }
+
+                if (mission.IsBirdman && mission.Settings?.BirdmanPoints == true)
+                {
+                    uses.Add(CoreText.F("{0}: mission with points (without the patch it is a free flight again)", MissionCatalog.Label(mission.Id)));
                 }
             }
 
