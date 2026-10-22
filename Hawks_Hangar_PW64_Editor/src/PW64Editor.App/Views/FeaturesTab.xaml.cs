@@ -45,6 +45,7 @@ public partial class FeaturesTab : UserControl
         LiveAltitudeBox.IsChecked = features.LiveAltitude;
         LiveHorizontalBox.IsChecked = features.LiveHorizontalSpeed;
         LiveVerticalBox.IsChecked = features.LiveVerticalSpeed;
+        AllFieldsBox.IsChecked = features.AllFieldsOpen;
         DebugOptions.IsEnabled = features.DebugOutput;
         LiveOptions.IsEnabled = features.LiveValues;
         _showing = false;
@@ -101,6 +102,7 @@ public partial class FeaturesTab : UserControl
             LiveAltitude = LiveAltitudeBox.IsChecked == true,
             LiveHorizontalSpeed = LiveHorizontalBox.IsChecked == true,
             LiveVerticalSpeed = LiveVerticalBox.IsChecked == true,
+            AllFieldsOpen = AllFieldsBox.IsChecked == true,
         };
         DebugOptions.IsEnabled = features.DebugOutput;
         LiveOptions.IsEnabled = features.LiveValues;

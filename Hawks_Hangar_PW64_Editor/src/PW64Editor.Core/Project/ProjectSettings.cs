@@ -62,6 +62,9 @@ public sealed class ProjectSettings
     /// <summary>Changed classes: own medal limits and islands (Classes tab; only classes with changes).</summary>
     public List<Classes.ClassSettings> Classes { get; set; } = [];
 
+    /// <summary>Own unlock conditions of the menu fields (Menu tab), or null for the game's rules.</summary>
+    public List<Classes.FieldUnlock>? Unlocks { get; set; }
+
     /// <summary>Additional features built into the game (Features tab).</summary>
     public GameFeatureSettings Features { get; set; } = new();
 }
@@ -71,6 +74,9 @@ public sealed class GameFeatureSettings
 {
     /// <summary>Debug output: messages to the IS-Viewer port of emulators and into a log in RAM.</summary>
     public bool DebugOutput { get; set; }
+
+    /// <summary>Every field of the level select is open (for testing; overrides the unlock conditions).</summary>
+    public bool AllFieldsOpen { get; set; }
 
     /// <summary>With <see cref="DebugOutput"/>: report the steps of the game's startup.</summary>
     public bool StartupInfo { get; set; }

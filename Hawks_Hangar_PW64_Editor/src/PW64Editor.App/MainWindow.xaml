@@ -107,7 +107,7 @@
                 <TextBlock Style="{StaticResource PlaceholderText}" Text="Editing behaviors will be added here in a later version." />
             </TabItem>
             <TabItem Header="Menu">
-                <TextBlock Style="{StaticResource PlaceholderText}" Text="Editing the menus will be added here in a later version." />
+                <views:MenuTab x:Name="MenuEditor" UnlocksChanged="OnUnlocksChanged" />
             </TabItem>
             <TabItem Header="Objects">
                 <TextBlock Style="{StaticResource PlaceholderText}" Text="Editing objects will be added here in a later version." />

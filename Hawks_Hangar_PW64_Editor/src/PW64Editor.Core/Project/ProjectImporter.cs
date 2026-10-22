@@ -166,6 +166,20 @@ public static class ProjectImporter
 
         // The classes (Classes tab): own medal limits from the class table, islands from the test screen's table.
         settings.Classes = ReadClasses(hack, cleanRom.Data, layout, module, out bool classTexts);
+        if (module is not null && GameModule.ReadDataImage(hack, module) is { } unlockImage && DataArea.ReadUnlockTable(unlockImage) is { } unlockTable
+            && Classes.MenuUnlocks.ReadTable(unlockTable) is { } unlocks)
+        {
+            if (unlocks.All(f => f.Conditions.Count == 0))
+            {
+                settings.Features.AllFieldsOpen = true;
+                notes.Add(Info(CoreText.T("Every field of the level select is open (testing option).")));
+            }
+            else if (!Classes.MenuUnlocks.IsOriginal(unlocks))
+            {
+                settings.Unlocks = unlocks;
+                notes.Add(Info(CoreText.T("The menu fields have own unlock conditions.")));
+            }
+        }
         if (settings.Classes.Count > 0)
         {
             notes.Add(Info(CoreText.F("Classes with own medal limits or islands: {0}.", settings.Classes.Count)));
@@ -630,6 +644,7 @@ public static class ProjectImporter
             PenaltyDigits = new ushort[10],
             CountdownTexts = Enumerable.Repeat<IReadOnlyList<ushort>>([0xFFFF], 6).ToList(),
             DistanceRow = true,
+            UnlockTable = new byte[Classes.MenuUnlocks.TableSize],
             ClassTable = Enumerable.Repeat((byte)0, Classes.ClassLimits.FlagsOffset)
                 .Concat(Enumerable.Repeat((byte)(Classes.ClassLimits.FlagOwnLimits | Classes.ClassLimits.FlagOwnTexts), Classes.ClassLimits.TableSize - Classes.ClassLimits.FlagsOffset))
                 .ToArray(),

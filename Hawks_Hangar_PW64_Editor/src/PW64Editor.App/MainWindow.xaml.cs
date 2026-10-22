@@ -289,6 +289,15 @@ public partial class MainWindow : Window
         SaveEditor.Load(_session);
     }
 
+    /// <summary>The unlock conditions of the menu fields were saved: the save file tab follows them.</summary>
+    private void OnUnlocksChanged(object? sender, EventArgs e)
+    {
+        if (_session is not null)
+        {
+            SaveEditor.Load(_session);
+        }
+    }
+
     /// <summary>True if texts or missions have edits that are saved with Ctrl+S.</summary>
     private bool HasUnsavedEdits => TextEditor.HasUnsavedChanges || MissionEditor.HasUnsavedChanges;
 
@@ -742,6 +751,7 @@ public partial class MainWindow : Window
         TextEditor.Load(_session);
         MissionEditor.Load(_session);
         ClassEditor.Load(_session);
+        MenuEditor.Load(_session);
         SaveEditor.Load(_session);
         TextureEditor.Load(_session);
         MusicEditor.Load(_session);

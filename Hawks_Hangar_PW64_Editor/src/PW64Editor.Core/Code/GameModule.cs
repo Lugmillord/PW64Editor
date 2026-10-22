@@ -123,8 +123,11 @@ public sealed record GameModuleOptions(bool DebugOutput, bool StartupInfo = fals
     /// <summary>The class table (medal limits per vehicle and class, <see cref="Classes.ClassLimits"/>), or null for the game's limits.</summary>
     public byte[]? ClassTable { get; init; }
 
+    /// <summary>The unlock table (conditions of the menu fields, <see cref="Classes.MenuUnlocks"/>), or null for the game's rules.</summary>
+    public byte[]? UnlockTable { get; init; }
+
     /// <summary>True if the module is built into the ROM.</summary>
-    public bool IsNeeded => RequireExpansionPak || ResultTables is not null || ClassTable is not null || DebugOutput || Conditions.Count > 0 || DistanceRow || PenaltyDigits.Count > 0;
+    public bool IsNeeded => RequireExpansionPak || ResultTables is not null || ClassTable is not null || UnlockTable is not null || DebugOutput || Conditions.Count > 0 || DistanceRow || PenaltyDigits.Count > 0;
 }
 
 /// <summary>
@@ -645,6 +648,12 @@ public static class GameModule
             patches.AddRange(ClassLimitPatches(classTable));
         }
 
+        // Unlock conditions of the menu fields: the level select and the file menu through the module, and its own cursor.
+        if (options.UnlockTable is not null)
+        {
+            patches.AddRange(UnlockPatches().Where(u => !patches.Any(p => p.RomOffset == u.RomOffset)));
+        }
+
         // Distance points on the result sheet: the jump table entry of row type 10.
         if (options.DistanceRow)
         {
@@ -662,6 +671,20 @@ public static class GameModule
 
         return patches;
     }
+
+    /// <summary>
+    /// The changes for the unlock conditions of the menu fields (<see cref="Classes.MenuUnlocks"/>): the level select's
+    /// two pages and the file menu as with <see cref="ClassLimitPatches"/>, and its cursor (func_8030EA54, ROM 0x95F84),
+    /// which moves from open field to open field in the module.
+    /// </summary>
+    public static IReadOnlyList<WordPatch> UnlockPatches() =>
+    [
+        new("menu unlocks, level select page 1 (func_8030D9C8)", 0x94EF8, [0x27BDFF48, 0xAFBE0070], [CodeArea.J(GameModuleImage.MenuPage1Address), 0]),
+        new("menu unlocks, level select page 2 (func_8030DED0)", 0x95400, [0x27BDFF58, 0xAFB60068], [CodeArea.J(GameModuleImage.MenuPage2Address), 0]),
+        new("menu unlocks, file menu (fileMenu_802E8AF0)", 0x70020, [0x27BDFF88, 0xAFB3005C], [CodeArea.J(GameModuleImage.FileMenuAddress), 0]),
+        new("menu unlocks, cursor of the level select (func_8030EA54)", 0x95F84, [0x27BDFFD0, 0xAFBF0014],
+            [CodeArea.J(GameModuleImage.MenuUpdateAddress), 0]),
+    ];
 
     /// <summary>
     /// The changes for medal limits per vehicle and class (<see cref="Classes.ClassLimits"/>): the level select
@@ -707,7 +730,7 @@ public static class GameModule
     public static void Apply(byte[] rom, GameModuleOptions options, int romOffset, string info)
     {
         int dataRomOffset = romOffset - DataArea.RomReserve;
-        byte[] data = DataArea.CreateImage(options.Conditions, options.ResultTables, options.BirdmanPoints, options.ClassTable);
+        byte[] data = DataArea.CreateImage(options.Conditions, options.ResultTables, options.BirdmanPoints, options.ClassTable, options.UnlockTable);
         byte[] image = CreateImage(options, romOffset, info, dataRomOffset, data.Length);
         if (dataRomOffset < 0 || romOffset + RomReserve > rom.Length)
         {

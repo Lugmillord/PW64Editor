@@ -247,6 +247,7 @@ def main():
         f'    public const uint MenuPage2Address = 0x{symbols["module_menu_page2"]:08X};',
         f'    public const uint FileMenuAddress = 0x{symbols["module_file_menu"]:08X};',
         f'    public const uint BronzeT2Address = 0x{symbols["module_bronze_t2"]:08X};',
+        f'    public const uint MenuUpdateAddress = 0x{symbols["module_menu_update"]:08X};',
         '    /// <summary>RAM address of module_touchdown_curve (the Gyrocopter\'s touchdown point in the scoring function).</summary>',
         f'    public const uint TouchdownCurveAddress = 0x{symbols["module_touchdown_curve"]:08X};',
         '',

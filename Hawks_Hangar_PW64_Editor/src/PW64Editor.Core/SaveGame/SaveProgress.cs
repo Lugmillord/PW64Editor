@@ -54,13 +54,30 @@ public sealed class SaveProgress
     /// <param name="slot">The saved game.</param>
     /// <param name="limits">The medal limits per vehicle and class (bronze, silver, gold; Classes tab), or null for the
     /// original ones.</param>
-    public SaveProgress(SaveSlot slot, Func<Vehicle, int, IReadOnlyList<int>?>? limits)
+    public SaveProgress(SaveSlot slot, Func<Vehicle, int, IReadOnlyList<int>?>? limits) : this(slot, limits, null, null)
+    {
+    }
+
+    /// <param name="slot">The saved game.</param>
+    /// <param name="limits">The medal limits per vehicle and class (bronze, silver, gold; Classes tab), or null for the
+    /// original ones.</param>
+    /// <param name="unlocks">The unlock conditions of the menu fields (Menu tab), or null for the game's rules.</param>
+    /// <param name="birdmanPoints">The Birdman missions with points (game patch "Bonus games and Birdman"): a stage with
+    /// such missions counts only them, as the game does.</param>
+    public SaveProgress(SaveSlot slot, Func<Vehicle, int, IReadOnlyList<int>?>? limits, IReadOnlyList<Classes.FieldUnlock>? unlocks,
+        IReadOnlySet<TestId>? birdmanPoints)
     {
         Slot = slot;
         _limits = limits;
+        _rules = Classes.MenuUnlocks.Effective(unlocks);
+        _birdmanPoints = birdmanPoints ?? new HashSet<TestId>();
     }
 
     private readonly Func<Vehicle, int, IReadOnlyList<int>?>? _limits;
+
+    private readonly List<Classes.FieldUnlock> _rules;
+
+    private readonly IReadOnlySet<TestId> _birdmanPoints;
 
     /// <summary>The limit of a medal of a class of a vehicle (the project's, or the original one).</summary>
     public int LimitOf(Vehicle vehicle, int classIndex, Medal medal) =>
@@ -129,68 +146,25 @@ public sealed class SaveProgress
     }
 
     /// <summary>True if the game lets the player choose this class with this vehicle.</summary>
-    public bool IsClassOpen(Vehicle vehicle, int classIndex)
-    {
-        if (classIndex == 0)
-        {
-            return true;
-        }
+    public bool IsClassOpen(Vehicle vehicle, int classIndex) => IsFieldOpen(vehicle, classIndex);
 
-        // Class A for any vehicle needs a Beginner medal with all three vehicles.
-        if (Vehicles.Main.Any(v => ClassMedal(v, 0) == Medal.None))
-        {
-            return false;
-        }
-
-        for (int c = 1; c < classIndex; c++)
-        {
-            if (ClassMedal(vehicle, c) == Medal.None)
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /// <summary>True if Class A is still closed and the Beginner class can be raised to open it.</summary>
+    /// <summary>True if Class A is still closed for a vehicle (it can be opened, see <see cref="OpenField"/>).</summary>
     public bool CanOpenClassA => !IsClassOpen(Vehicle.HangGlider, 1);
 
-    /// <summary>
-    /// Opens Class A: raises the Beginner results of all three vehicles to the bronze limit (70),
-    /// and gives the Class A tests that have no result 0 points.
-    /// </summary>
+    /// <summary>Opens Class A for all three vehicles (<see cref="OpenField"/>).</summary>
     public void OpenClassA()
     {
         foreach (Vehicle vehicle in Vehicles.Main)
         {
-            RaiseClass(vehicle, 0, LimitOf(vehicle, 0, Medal.Bronze));
-        }
-
-        foreach (Vehicle vehicle in Vehicles.Main)
-        {
-            ClearNoResults(vehicle, 1);
+            OpenField(vehicle, 1);
         }
     }
 
-    /// <summary>True if Class B or Pilot (<paramref name="classIndex"/> 2 or 3) can be opened for the vehicle.</summary>
-    public bool CanOpenClass(Vehicle vehicle, int classIndex) =>
-        classIndex >= 2 && IsClassOpen(vehicle, classIndex - 1) && !IsClassOpen(vehicle, classIndex);
+    /// <summary>True if a class of a vehicle is closed (it can be opened, see <see cref="OpenField"/>).</summary>
+    public bool CanOpenClass(Vehicle vehicle, int classIndex) => !IsClassOpen(vehicle, classIndex);
 
-    /// <summary>
-    /// Opens Class B or Pilot for a vehicle: raises the class before to its bronze limit, and gives the
-    /// tests of the new class that have no result 0 points.
-    /// </summary>
-    public void OpenClass(Vehicle vehicle, int classIndex)
-    {
-        if (!CanOpenClass(vehicle, classIndex))
-        {
-            return;
-        }
-
-        RaiseClass(vehicle, classIndex - 1, LimitOf(vehicle, classIndex - 1, Medal.Bronze));
-        ClearNoResults(vehicle, classIndex);
-    }
+    /// <summary>Opens a class of a vehicle (<see cref="OpenField"/>).</summary>
+    public void OpenClass(Vehicle vehicle, int classIndex) => OpenField(vehicle, classIndex);
 
     // ----- Bonus games (Cannonball, Sky Diving, Jumble Hopper) -----
 
@@ -293,74 +267,13 @@ public sealed class SaveProgress
     }
 
     /// <summary>True if the game lets the player choose this level.</summary>
-    public bool IsLevelOpen(Vehicle bonusGame, int level)
-    {
-        if (!IsBonusGameOpen(bonusGame))
-        {
-            return false;
-        }
+    public bool IsLevelOpen(Vehicle bonusGame, int level) => IsFieldOpen(bonusGame, level);
 
-        for (int l = 0; l < level; l++)
-        {
-            if (LevelTotal(bonusGame, l) < LimitOf(bonusGame, l, Medal.Bronze))
-            {
-                return false;
-            }
-        }
+    /// <summary>True if the level is closed (it can be opened, see <see cref="OpenField"/>).</summary>
+    public bool CanOpenLevel(Vehicle bonusGame, int level) => !IsLevelOpen(bonusGame, level);
 
-        return true;
-    }
-
-    /// <summary>
-    /// True if the level is closed and can be opened in one step: level 1 when the required license
-    /// class is open for all three vehicles, the other levels when the level before is open.
-    /// </summary>
-    public bool CanOpenLevel(Vehicle bonusGame, int level)
-    {
-        if (IsLevelOpen(bonusGame, level))
-        {
-            return false;
-        }
-
-        return level == 0
-            ? Vehicles.Main.All(v => IsClassOpen(v, RequiredClass(bonusGame)))
-            : IsLevelOpen(bonusGame, level - 1);
-    }
-
-    /// <summary>
-    /// Opens a level: level 1 raises the required license class of all three vehicles to silver,
-    /// the other levels raise the level before to 70 points. The new level's tests that have no
-    /// result get 0 points.
-    /// </summary>
-    public void OpenLevel(Vehicle bonusGame, int level)
-    {
-        if (!CanOpenLevel(bonusGame, level))
-        {
-            return;
-        }
-
-        if (level == 0)
-        {
-            int classIndex = RequiredClass(bonusGame);
-            foreach (Vehicle vehicle in Vehicles.Main)
-            {
-                RaiseClass(vehicle, classIndex, LimitOf(vehicle, classIndex, Medal.Silver));
-            }
-        }
-        else
-        {
-            int needed = LimitOf(bonusGame, level - 1, Medal.Bronze);
-            if (LevelTotal(bonusGame, level - 1) < needed)
-            {
-                SetLevelValue(bonusGame, level - 1, needed);
-            }
-        }
-
-        if (LevelValue(bonusGame, level) == SaveSlot.NoResult)
-        {
-            SetLevelValue(bonusGame, level, 0);
-        }
-    }
+    /// <summary>Opens a level (<see cref="OpenField"/>).</summary>
+    public void OpenLevel(Vehicle bonusGame, int level) => OpenField(bonusGame, level);
 
     // ----- Birdman -----
 
@@ -368,68 +281,158 @@ public sealed class SaveProgress
     public const int BirdmanStages = 4;
 
     /// <summary>True if the game opens this Birdman stage (0-3).</summary>
-    public bool IsBirdmanStageOpen(int stage)
+    public bool IsBirdmanStageOpen(int stage) => IsFieldOpen(Vehicle.Birdman, stage);
+
+    /// <summary>True if the Birdman stage is closed (it can be opened, see <see cref="OpenField"/>).</summary>
+    public bool CanOpenBirdmanStage(int stage) => stage is >= 0 and < BirdmanStages && !IsBirdmanStageOpen(stage);
+
+    /// <summary>Opens a Birdman stage (<see cref="OpenField"/>).</summary>
+    public void OpenBirdmanStage(int stage) => OpenField(Vehicle.Birdman, stage);
+
+    // ----- Menu fields (any vehicle and class) -----
+
+    /// <summary>
+    /// The sum of a menu field as the game counts it: a license class or Birdman stage (a stage with missions with points
+    /// only those), a bonus level; 127 counts as 0.
+    /// </summary>
+    public int FieldTotal(Vehicle vehicle, int classIndex)
     {
-        if (!Vehicles.Main.All(v => ClassMedal(v, stage) >= Medal.Silver))
+        if (vehicle is Vehicle.Cannonball or Vehicle.SkyDiving or Vehicle.JumbleHopper)
         {
-            return false;
+            return LevelTotal(vehicle, classIndex);
         }
 
-        if (stage == 0)
+        if (vehicle == Vehicle.Birdman && BirdmanPointTests(classIndex) is { Count: > 0 } tests)
         {
-            return true;
+            return tests.Sum(t => Slot.GetResult(t) is var v && v == SaveSlot.NoResult ? 0 : v);
         }
 
-        Vehicle bonusGame = Vehicles.BonusGames[stage - 1];
-        for (int level = 0; level < 3; level++)
+        return ClassTotal(vehicle, classIndex);
+    }
+
+    /// <summary>Points of a perfect score of a field.</summary>
+    public int FieldPerfect(Vehicle vehicle, int classIndex) => vehicle switch
+    {
+        Vehicle.Cannonball or Vehicle.SkyDiving or Vehicle.JumbleHopper => MaxPoints,
+        Vehicle.Birdman when BirdmanPointTests(classIndex).Count > 0 => MaxPoints * BirdmanPointTests(classIndex).Count,
+        _ => MaxPoints * Layout.TestCount(classIndex, vehicle),
+    };
+
+    /// <summary>The medal of a field as a number: 0 none, 1 bronze, 2 silver, 3 gold, 4 perfect.</summary>
+    public int FieldMedal(Vehicle vehicle, int classIndex)
+    {
+        int total = FieldTotal(vehicle, classIndex);
+        if (total >= FieldPerfect(vehicle, classIndex) && total >= LimitOf(vehicle, classIndex, Medal.Gold))
         {
-            if (LevelTotal(bonusGame, level) < LimitOf(bonusGame, level, Medal.Silver))
+            return 4;
+        }
+
+        for (Medal medal = Medal.Gold; medal >= Medal.Bronze; medal--)
+        {
+            if (total >= LimitOf(vehicle, classIndex, medal))
             {
-                return false;
+                return (int)medal;
             }
         }
 
-        return true;
+        return 0;
     }
 
-    /// <summary>
-    /// True if the Birdman stage is closed and can be opened in one step: the license class it needs
-    /// (Beginner, A, B, Pilot) is open for all three vehicles.
-    /// </summary>
-    public bool CanOpenBirdmanStage(int stage) =>
-        stage is >= 0 and < BirdmanStages && !IsBirdmanStageOpen(stage) && Vehicles.Main.All(v => IsClassOpen(v, stage));
+    /// <summary>True if a condition is met.</summary>
+    public bool IsMet(Classes.UnlockCondition condition) =>
+        condition.Kind == Classes.UnlockKind.Medal
+            ? FieldMedal((Vehicle)condition.Vehicle, condition.Class) >= condition.Value
+            : FieldTotal((Vehicle)condition.Vehicle, condition.Class) >= condition.Value;
+
+    /// <summary>The conditions of a field (the project's or the game's).</summary>
+    public IReadOnlyList<Classes.UnlockCondition> ConditionsOf(Vehicle vehicle, int classIndex) =>
+        _rules.FirstOrDefault(f => f.Vehicle == (int)vehicle && f.Class == classIndex)?.Conditions ?? [];
+
+    /// <summary>True if the game lets the player choose this field (all its conditions are met).</summary>
+    public bool IsFieldOpen(Vehicle vehicle, int classIndex) => ConditionsOf(vehicle, classIndex).All(IsMet);
+
+    /// <summary>The conditions of a field that are not met yet.</summary>
+    public IReadOnlyList<Classes.UnlockCondition> MissingConditions(Vehicle vehicle, int classIndex) =>
+        [.. ConditionsOf(vehicle, classIndex).Where(c => !IsMet(c))];
 
     /// <summary>
-    /// Opens a Birdman stage: raises the license class it needs to silver for all three vehicles,
-    /// and for stage 2-4 every level of Cannonball / Sky Diving / Jumble Hopper to 80 points.
+    /// Opens a field: every condition that is not met gets its points (the field it names is opened first, and its tests
+    /// are raised one after the other, each up to 100, until the sum is reached), and the tests of the field that have no
+    /// result get 0 points.
     /// </summary>
-    public void OpenBirdmanStage(int stage)
+    public void OpenField(Vehicle vehicle, int classIndex) => OpenField(vehicle, classIndex, []);
+
+    private void OpenField(Vehicle vehicle, int classIndex, HashSet<(Vehicle, int)> opening)
     {
-        if (!CanOpenBirdmanStage(stage))
+        if (!opening.Add((vehicle, classIndex)))
         {
-            return;
+            return; // conditions that go round in a circle
         }
 
-        foreach (Vehicle vehicle in Vehicles.Main)
+        foreach (Classes.UnlockCondition condition in ConditionsOf(vehicle, classIndex))
         {
-            RaiseClass(vehicle, stage, LimitOf(vehicle, stage, Medal.Silver));
-        }
-
-        if (stage == 0)
-        {
-            return;
-        }
-
-        Vehicle bonusGame = Vehicles.BonusGames[stage - 1];
-        for (int level = 0; level < 3; level++)
-        {
-            int silver = LimitOf(bonusGame, level, Medal.Silver);
-            if (LevelTotal(bonusGame, level) < silver)
+            if (IsMet(condition))
             {
-                SetLevelValue(bonusGame, level, silver);
+                continue;
+            }
+
+            var other = (Vehicle)condition.Vehicle;
+            if (!IsFieldOpen(other, condition.Class))
+            {
+                OpenField(other, condition.Class, opening);
+            }
+
+            int target = condition.Kind == Classes.UnlockKind.Points
+                ? condition.Value
+                : condition.Value >= 4 ? FieldPerfect(other, condition.Class) : LimitOf(other, condition.Class, (Medal)condition.Value);
+            RaiseField(other, condition.Class, target);
+        }
+
+        if (vehicle is Vehicle.Cannonball or Vehicle.SkyDiving or Vehicle.JumbleHopper)
+        {
+            if (LevelValue(vehicle, classIndex) == SaveSlot.NoResult)
+            {
+                SetLevelValue(vehicle, classIndex, 0);
             }
         }
+        else
+        {
+            ClearNoResults(vehicle, classIndex);
+        }
     }
+
+    private void RaiseField(Vehicle vehicle, int classIndex, int target)
+    {
+        if (vehicle is Vehicle.Cannonball or Vehicle.SkyDiving or Vehicle.JumbleHopper)
+        {
+            if (LevelTotal(vehicle, classIndex) < target)
+            {
+                SetLevelValue(vehicle, classIndex, Math.Min(target, MaxPoints));
+            }
+
+            return;
+        }
+
+        IReadOnlyList<TestId> tests = vehicle == Vehicle.Birdman && BirdmanPointTests(classIndex) is { Count: > 0 } points
+            ? points
+            : [.. Enumerable.Range(0, Layout.TestCount(classIndex, vehicle)).Select(t => new TestId(classIndex, vehicle, t))];
+        ClearNoResults(vehicle, classIndex);
+        foreach (TestId id in tests)
+        {
+            int total = FieldTotal(vehicle, classIndex);
+            if (total >= target)
+            {
+                break;
+            }
+
+            int value = Slot.GetResult(id);
+            Slot.SetResult(id, Math.Min(MaxPoints, value + (target - total)));
+        }
+    }
+
+    /// <summary>The saved Birdman missions with points of a stage.</summary>
+    private IReadOnlyList<TestId> BirdmanPointTests(int stage) =>
+        [.. _birdmanPoints.Where(t => t.Vehicle == Vehicle.Birdman && t.Class == stage && Layout.IsSaved(t)).OrderBy(t => t.Test)];
 
     // ----- All results -----
 

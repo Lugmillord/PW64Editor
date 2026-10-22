@@ -327,7 +327,7 @@ public class SaveProgressTests
         SaveProgress progress = NewProgress();
         progress.OpenClassA();
         Assert.True(progress.CanOpenLevel(Vehicle.Cannonball, 0));
-        Assert.False(progress.CanOpenLevel(Vehicle.SkyDiving, 0));
+        Assert.True(progress.CanOpenLevel(Vehicle.SkyDiving, 0)); // closed fields can always be opened (Class B first)
 
         progress.OpenLevel(Vehicle.Cannonball, 0);
 
@@ -360,7 +360,7 @@ public class SaveProgressTests
     {
         SaveProgress progress = NewProgress();
         Assert.True(progress.CanOpenBirdmanStage(0));
-        Assert.False(progress.CanOpenBirdmanStage(1));
+        Assert.True(progress.CanOpenBirdmanStage(1)); // closed: it can be opened, with the fields it needs
 
         progress.OpenBirdmanStage(0);
         Assert.True(progress.IsBirdmanStageOpen(0));

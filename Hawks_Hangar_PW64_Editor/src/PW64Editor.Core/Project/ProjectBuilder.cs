@@ -77,6 +77,7 @@ public static class ProjectBuilder
                             : (ushort)0,
                         ClassTable = Classes.ClassLimits.Table(project.Settings.Classes, project.HasPatch(GamePatches.BonusGames),
                             HasOwnClassTexts(project)),
+                        UnlockTable = Classes.MenuUnlocks.Table(project.Settings.Unlocks, project.Settings.Features.AllFieldsOpen),
                     },
                     GameModuleInfo = ModuleInfo(project),
                 });

@@ -1212,6 +1212,90 @@ static s32 menu_texture(s32 medal) {
     return medal == 3 ? 0x14E : medal == 2 ? 0x14F : medal == 1 ? 0x150 : 0x14D;
 }
 
+/* Unlock conditions of the 25 menu fields (Menu tab; data area header +0x1C = address of the table, 0 = the original
+   rules). Fields: 0-11 license classes (vehicle * 4 + class), 12-20 bonus levels (12 + (vehicle - 3) * 3 + level),
+   21-24 Birdman stages. Table: u8 count[25] (padded to 0x20), then per field 8 conditions of 3 bytes: field | 0x80 for a
+   medal, u16 value (points, or the medal: 1 bronze, 2 silver, 3 gold, 4 perfect). A field is open when all its
+   conditions are met; only the sums of the fields count. */
+#define UNLOCK_TABLE_ADDRESS (*(volatile u32 *)(DATA_AREA + 0x1C))
+#define FIELDS 25
+
+static const u8 kFieldVehicle[FIELDS] = { 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6, 6 };
+static const u8 kFieldClass[FIELDS] = { 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 3, 0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 1, 2, 3 };
+
+static const u8 *unlock_table(void) {
+    u32 a = UNLOCK_TABLE_ADDRESS;
+    return DATA_HEADER->magic == DATA_MAGIC && a >= DATA_AREA && a + 0x20 + FIELDS * 24 <= DATA_AREA_END ? (const u8 *)a : 0;
+}
+
+static u32 field_of(u32 veh, u32 cls) {
+    return veh < 3 ? veh * 4 + cls : veh < 6 ? 12 + (veh - 3) * 3 + cls : 21 + cls;
+}
+
+/* The medal of a field: 0 none, 1 bronze, 2 silver, 3 gold, 4 perfect. */
+static s32 field_medal(u8 *r, u32 f, s32 *total) {
+    u32 veh = kFieldVehicle[f], cls = kFieldClass[f];
+    s32 t = GAME_LEVEL_TOTAL(r, cls, veh);
+    s32 m = class_medal_of(veh, cls, t);
+    if (m == 3 && t >= class_perfect(veh, cls)) {
+        m = 4;
+    }
+    *total = t;
+    return m;
+}
+
+static s32 field_open(u8 *r, u32 f) {
+    const u8 *t = unlock_table();
+    u32 i, n;
+    if (t == 0 || f >= FIELDS) {
+        return 1;
+    }
+    n = t[f] > 8 ? 8 : t[f];
+    for (i = 0; i < n; i++) {
+        const u8 *e = t + 0x20 + (f * 8 + i) * 3;
+        u32 g = e[0] & 0x7F;
+        s32 value = (s32)((e[1] << 8) | e[2]);
+        s32 total, medal;
+        if (g >= FIELDS) {
+            continue;
+        }
+        medal = field_medal(r, g, &total);
+        if ((e[0] & 0x80) ? medal < value : total < value) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* The arrays the drawing of the level select and the file menu use, from the conditions. */
+static void unlock_arrays(u8 *r) {
+    s32 g, l, v, c, s;
+    for (v = 0; v < 3; v++) {
+        s32 top = 0;
+        for (c = 0; c < 4; c++) {
+            if (field_open(r, field_of((u32)v, (u32)c))) {
+                top = c;
+            }
+        }
+        LS_CLASS_OPEN[v] = (u8)top;
+    }
+    for (g = 0; g < 3; g++) {
+        s32 top = -1, any = 0;
+        for (l = 0; l < 3; l++) {
+            if (field_open(r, field_of((u32)g + 3, (u32)l))) {
+                top = l;
+                any = 1;
+            }
+        }
+        LS_LEVEL_OPEN[g] = (signed char)top;
+        LS_SILVER[g + 1] = (u8)any;
+    }
+    for (s = 0; s < 4; s++) {
+        LS_STAGE_OPEN[s] = (u8)field_open(r, (u32)(21 + s));
+    }
+    LS_SILVER[0] = (u8)(LS_STAGE_OPEN[0] | LS_STAGE_OPEN[1] | LS_STAGE_OPEN[2] | LS_STAGE_OPEN[3]);
+}
+
 static void menu_common(u8 *r) {
     s32 i, v;
     for (i = 0; i < 4; i++) {
@@ -1245,6 +1329,24 @@ static void menu_common(u8 *r) {
 void module_menu_page1(void) {
     u8 *r = player_results();
     s32 i, v, c;
+    if (unlock_table() != 0) {
+        for (i = 0; i < 12; i++) {
+            GAME_SPRITE(i, SP_ENABLED, 1, SP_DIM, 46, 31, SP_POS, (i % 3) * 48 + 78, 161 - (i / 3) * 34, SP_TEX, 332,
+                        SP_COLOR, 255, 255, 255, 255, SP_END);
+        }
+        for (i = 0; i < 3; i++) {
+            GAME_SPRITE(i + 12, SP_ENABLED, 1, SP_DIM, 46, 31, SP_POS, 236, 126 - i * 34, SP_COLOR, 255, 255, 255, 255,
+                        SP_TEX, 332, SP_END);
+        }
+        for (v = 0; v < 3; v++) {
+            for (c = 0; c < 4; c++) {
+                GAME_SPRITE(v + c * 3, SP_TEX, field_open(r, field_of((u32)v, (u32)c)) ? menu_texture(class_medal(r, (u32)v, (u32)c)) : 0x14C,
+                            SP_END);
+            }
+        }
+        unlock_arrays(r);
+        return;
+    }
     for (i = 0; i < 12; i++) {
         GAME_SPRITE(i, SP_ENABLED, 1, SP_DIM, 46, 31, SP_POS, (i % 3) * 48 + 78, 161 - (i / 3) * 34, SP_TEX, 332,
                     SP_COLOR, 255, 255, 255, 255, SP_END);
@@ -1292,6 +1394,16 @@ void module_menu_page2(void) {
         GAME_SPRITE(i + 13, SP_ENABLED, 1, SP_DIM, 46, 31, SP_POS, 61, 127 - i * 34, SP_COLOR, 255, 255, 255, 255,
                     SP_TEX, 332, SP_END);
     }
+    if (unlock_table() != 0) {
+        for (g = 0; g < 3; g++) {
+            for (l = 0; l < 3; l++) {
+                GAME_SPRITE(g * 3 + l, SP_TEX, field_open(r, field_of((u32)g + 3, (u32)l)) ? menu_texture(class_medal(r, (u32)g + 3, (u32)l)) : 0x14C,
+                            SP_END);
+            }
+        }
+        unlock_arrays(r);
+        return;
+    }
     menu_common(r); /* [1..3] of LS_SILVER stay the silver of Class A/B/Pilot, which opens the bonus games */
     for (g = 0; g < 3; g++) {
         signed char open;
@@ -1336,6 +1448,15 @@ void module_file_menu(void) {
             GAME_SPRITE(k * 3 + j, SP_TEX, m == 3 ? 0x14B : m == 2 ? 0x14A : m == 1 ? 0x149 : 0x148, SP_END);
         }
     }
+    if (unlock_table() != 0) {
+        for (i = 0; i < 3; i++) {
+            GAME_SPRITE(i + 12, SP_ENABLED, 1, SP_TEX, 0x148, SP_END);
+            FM_GAME_CLOSED[i] = (u8)!(field_open(r, field_of((u32)i + 3, 0)) || field_open(r, field_of((u32)i + 3, 1))
+                                     || field_open(r, field_of((u32)i + 3, 2)));
+        }
+        FM_BIRDMAN = (u8)(field_open(r, 21) || field_open(r, 22) || field_open(r, 23) || field_open(r, 24));
+        return;
+    }
     for (i = 0; i < 3; i++) {
         GAME_SPRITE(i + 12, SP_ENABLED, 1, SP_TEX, 0x148, SP_END);
         FM_GAME_CLOSED[i] = (u8)!(class_medal(r, 0, (u32)i + 1) >= 2 && class_medal(r, 1, (u32)i + 1) >= 2
@@ -1351,6 +1472,203 @@ void module_file_menu(void) {
         }
     }
     FM_BIRDMAN = (u8)any;
+}
+
+/* The cursor of the level select with unlock conditions (func_8030EA54, ROM 0x95F84, jumps here): the original
+   moves only through prefix-open classes and levels and reaches the bonus games through the Gyrocopter's column, so with
+   free conditions the module moves the cursor itself, from open field to open field: in the direction of the stick to
+   the nearest open field (nearest row or column first, then the nearest one across); past the right edge of page 1 to
+   page 2 and past the left edge of page 2 back. A locked field cannot be chosen; if the cursor stands on one (the
+   first field when the menu opens), it moves to the first open field. State as the original: D_8034F7A0 column,
+   D_8034F7A4 row, D_8034F7B0 page, D_8034F7B8 Birdman row, D_8034F7A8 cell (column + row * 3, returned when a field
+   is chosen), D_8034F7AC "first frame" (no sound), D_8036A8C0/C4 cursor position (f32), D_8036A8C8-CA stick state. */
+#define LS_COL    (*(volatile signed char *)0x8034F7A0)
+#define LS_ROW    (*(volatile signed char *)0x8034F7A4)
+#define LS_CELL   (*(volatile u8 *)0x8034F7A8)
+#define LS_FIRST  (*(volatile u8 *)0x8034F7AC)
+#define LS_PAGE   (*(volatile u8 *)0x8034F7B0)
+#define LS_BIRD   (*(volatile u8 *)0x8034F7B8)
+#define LS_X      (*(volatile u32 *)0x8036A8C0)
+#define LS_Y      (*(volatile u32 *)0x8036A8C4)
+#define LS_DX     (*(volatile signed char *)0x8036A8C8)
+#define LS_DY     (*(volatile signed char *)0x8036A8C9)
+#define LS_HELD   (*(volatile signed char *)0x8036A8CA)
+#define GAME_DEMO_UPDATE   ((void (*)(void))0x80323020)          /* demo_80323020 */
+#define GAME_BUTTON_PRESS  ((s32(*)(s32, s32))0x803231E0)        /* demoButtonPress(player, buttons) */
+#define GAME_SFX           ((void (*)(s32))0x8033F7F8)           /* sndPlaySfx */
+s32 stick_dir(s32 player, s32 axis);
+u32 int_to_float(s32 value);
+static s32 sLastField = -1;
+
+/* A cell of the menu: page 0 (x vehicle 0-2, y class 0-3) or page 1 (y -1 Birdman row x stage 0-3; y 0-2 bonus game,
+   x level 0-2). */
+static s32 cell_field(s32 page, s32 x, s32 y) {
+    if (page == 0) {
+        return x >= 0 && x < 3 && y >= 0 && y < 4 ? (s32)field_of((u32)x, (u32)y) : -1;
+    }
+    if (y == -1) {
+        return x >= 0 && x < 4 ? 21 + x : -1;
+    }
+    return x >= 0 && x < 3 && y >= 0 && y < 3 ? (s32)field_of((u32)y + 3, (u32)x) : -1;
+}
+
+static s32 cell_x(s32 page, s32 x, s32 y) {
+    return page == 1 && y == -1 ? x * 36 : x * 48;
+}
+
+/* The nearest open cell of a page from (x, y) in direction (dx, dy); with dx = dy = 0 the nearest open cell at all.
+   Returns 1 and the cell, or 0. */
+static s32 nearest_open(u8 *r, s32 page, s32 x, s32 y, s32 dx, s32 dy, s32 *outX, s32 *outY) {
+    s32 best = 0x7FFFFFFF, found = 0;
+    s32 cy, cx;
+    for (cy = page == 1 ? -1 : 0; cy < (page == 1 ? 3 : 4); cy++) {
+        for (cx = 0; cx < (page == 1 && cy == -1 ? 4 : 3); cx++) {
+            s32 f = cell_field(page, cx, cy);
+            s32 along, across, score;
+            if (f < 0 || !field_open(r, (u32)f)) {
+                continue;
+            }
+            if (dx != 0) {
+                along = (cx - x) * dx;
+                across = cy - y;
+            } else if (dy != 0) {
+                along = (cy - y) * dy;
+                across = cell_x(page, cx, cy) - cell_x(page, x, y);
+            } else {
+                along = cy - y < 0 ? y - cy : cy - y;
+                across = cell_x(page, cx, cy) - cell_x(page, x, y);
+            }
+            if ((dx != 0 || dy != 0) && along <= 0) {
+                continue;
+            }
+            if (across < 0) {
+                across = -across;
+            }
+            score = along * 1000 + across;
+            if (score < best) {
+                best = score;
+                found = 1;
+                *outX = cx;
+                *outY = cy;
+            }
+        }
+    }
+    return found;
+}
+
+static void cursor_get(s32 *page, s32 *x, s32 *y) {
+    *page = LS_PAGE != 0 ? 1 : 0;
+    *x = LS_COL;
+    *y = *page == 1 && LS_BIRD != 0 ? -1 : LS_ROW;
+}
+
+static void cursor_set(s32 page, s32 x, s32 y) {
+    if (page != (LS_PAGE != 0 ? 1 : 0)) {
+        LS_PAGE = (u8)page;
+        if (page == 0) {
+            module_menu_page1();
+        } else {
+            module_menu_page2();
+        }
+    }
+    LS_BIRD = (u8)(page == 1 && y == -1);
+    LS_COL = (signed char)x;
+    LS_ROW = (signed char)(y < 0 ? 0 : y);
+}
+
+/* Moves the cursor in a direction; returns 1 if it moved. */
+static s32 cursor_move(u8 *r, s32 dx, s32 dy) {
+    s32 page, x, y, nx, ny;
+    cursor_get(&page, &x, &y);
+    if (nearest_open(r, page, x, y, dx, dy, &nx, &ny)) {
+        cursor_set(page, nx, ny);
+        return 1;
+    }
+    /* Past the edge to the other page: right of page 1 to the bonus games (class row 0 = the Birdman row), left of
+       page 2 back to the Gyrocopter's column. */
+    if (page == 0 && dx > 0 && nearest_open(r, 1, 0, y == 0 ? -1 : y - 1, 0, 0, &nx, &ny)) {
+        cursor_set(1, nx, ny);
+        return 1;
+    }
+    if (page == 1 && dx < 0 && nearest_open(r, 0, 2, y + 1, 0, 0, &nx, &ny)) {
+        cursor_set(0, nx, ny);
+        return 1;
+    }
+    return 0;
+}
+
+s32 module_menu_update(void) {
+    u8 *state = GAME_STATE;
+    s32 player = *(s32 *)(state + 0x9C);
+    u8 *r = player_results();
+    s32 sx, sy, page, x, y, f, cell;
+    GAME_DEMO_UPDATE();
+    sx = stick_dir(player, 0);
+    sy = stick_dir(player, 1);
+    LS_DX = 0;
+    LS_DY = 0;
+    if (sx == 0 && sy == 0) {
+        LS_HELD = 0;
+    } else if (LS_HELD == 0) {
+        LS_DX = (signed char)sx;
+        LS_DY = (signed char)-sy;
+        LS_HELD = 1;
+    }
+
+    /* On a locked field (the start of the menu): the nearest open field, else the first open one of the pages. */
+    cursor_get(&page, &x, &y);
+    f = cell_field(page, x, y);
+    if (f < 0 || !field_open(r, (u32)f)) {
+        s32 nx, ny;
+        if (nearest_open(r, page, x, y, 0, 0, &nx, &ny)) {
+            cursor_set(page, nx, ny);
+        } else if (nearest_open(r, 1 - page, 0, page == 0 ? -1 : 0, 0, 0, &nx, &ny)) {
+            cursor_set(1 - page, nx, ny);
+        }
+    }
+
+    if (LS_DX != 0) {
+        cursor_move(r, LS_DX, 0);
+    }
+    if (LS_DY != 0) {
+        cursor_move(r, 0, LS_DY);
+    }
+
+    cursor_get(&page, &x, &y);
+    if (page == 0) {
+        LS_X = int_to_float(x * 48 + 75);
+        LS_Y = int_to_float(127 - y * 34);
+    } else if (y >= 0) {
+        LS_X = int_to_float(x * 48 + 106);
+        LS_Y = int_to_float(93 - y * 34);
+    } else {
+        LS_X = int_to_float(x * 36 + 106);
+        LS_Y = int_to_float(167);
+    }
+    cell = LS_COL + LS_ROW * 3;
+    f = cell_field(page, x, y);
+    if (f != sLastField || LS_FIRST != 0) {
+        if (LS_FIRST != 0) {
+            LS_FIRST = 0;
+        } else {
+            GAME_SFX(0x74);
+        }
+        sLastField = f;
+    }
+    LS_CELL = (u8)cell;
+
+    if (GAME_BUTTON_PRESS(player, 0x9000) != 0 && f >= 0 && field_open(r, (u32)f)) {
+        u8 *p = player_flight();
+        GAME_SFX(0x6E);
+        *(u16 *)(p + 2) = kFieldVehicle[f];
+        *(u16 *)(p + 4) = kFieldClass[f];
+        return cell;
+    }
+    if (GAME_BUTTON_PRESS(player, 0x4000) != 0) {
+        GAME_SFX(0x01);
+        return -2;
+    }
+    return -1;
 }
 
 /* The points under a field of the level select (func_8030F818) show from bronze on: "lhu t2, gMed[...].bronze" at ROM
@@ -1898,12 +2216,44 @@ __asm__(".section .text\n"
 #define TEXT_LAND_OK  0xCB /* "Landing accomplished" */
 #define TEXT_LAND_OUT 0xB2 /* "Landed outside target" */
 
-/* A single-precision operation on the FPU (the module itself is built without it). Only f0, f2, f12 and
+/* A few single-precision operations on the FPU (the module itself is built without it). Only f0, f2, f4, f12 and
    f14 are used: the caller (the game) may keep values in f20 to f30. */
 __asm__(".section .text\n"
         ".set push\n"
         ".set noreorder\n"
+        ".set noat\n"
         ".set hardfloat\n"
+        /* stick_dir(player, axis): demoGetInputs (0x803230B0) as -1, 0, 1 beyond +-0.75. */
+        ".globl stick_dir\n"
+        "stick_dir:\n"
+        "    addiu $sp, $sp, -24\n"
+        "    sw $ra, 20($sp)\n"
+        "    jal 0x803230B0\n"
+        "    nop\n"
+        "    lui $at, 0x3F40\n"
+        "    mtc1 $at, $f2\n"
+        "    nop\n"
+        "    neg.s $f4, $f2\n"
+        "    c.lt.s $f2, $f0\n"
+        "    nop\n"
+        "    bc1t 1f\n"
+        "    addiu $v0, $zero, 1\n"
+        "    c.lt.s $f0, $f4\n"
+        "    nop\n"
+        "    bc1t 1f\n"
+        "    addiu $v0, $zero, -1\n"
+        "    move $v0, $zero\n"
+        "1:  lw $ra, 20($sp)\n"
+        "    jr $ra\n"
+        "    addiu $sp, $sp, 24\n"
+        /* int_to_float(value): the bits of (float) value. */
+        ".globl int_to_float\n"
+        "int_to_float:\n"
+        "    mtc1 $a0, $f0\n"
+        "    nop\n"
+        "    cvt.s.w $f0, $f0\n"
+        "    jr $ra\n"
+        "    mfc1 $v0, $f0\n"
         ".globl f_mul\n"
         "f_mul:\n"
         "    mtc1 $a0, $f0\n"

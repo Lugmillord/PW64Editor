@@ -34,10 +34,13 @@ public sealed class SaveSlotView : UserControl
     /// <param name="name">Name of the file slot.</param>
     /// <param name="changed">Called after a change.</param>
     /// <param name="limits">The project's medal limits per vehicle and class, or null for the original ones.</param>
-    public SaveSlotView(SaveSlot slot, string name, Action changed, Func<Vehicle, int, IReadOnlyList<int>?>? limits = null)
+    /// <param name="unlocks">The project's unlock conditions of the menu fields, or null for the game's rules.</param>
+    /// <param name="birdmanPoints">The Birdman missions with points.</param>
+    public SaveSlotView(SaveSlot slot, string name, Action changed, Func<Vehicle, int, IReadOnlyList<int>?>? limits = null,
+        IReadOnlyList<PW64Editor.Core.Classes.FieldUnlock>? unlocks = null, IReadOnlySet<TestId>? birdmanPoints = null)
     {
         _slot = slot;
-        _progress = new SaveProgress(slot, limits);
+        _progress = new SaveProgress(slot, limits, unlocks, birdmanPoints);
         _name = name;
         _changed = changed;
         Content = _root;
@@ -159,16 +162,6 @@ public sealed class SaveSlotView : UserControl
 
             var label = new StackPanel { Margin = new Thickness(4, 4, 0, 4) };
             label.Children.Add(Bold(Vehicles.ClassName(c)));
-            if (c == 1)
-            {
-                Button open = MakeButton(L.T("Open Class A"),
-                    L.T("Raises the Beginner test of every vehicle to its bronze limit, and gives the Class A tests 0 points."), () => { _progress.OpenClassA(); OnChanged(); });
-                open.Margin = new Thickness(0, 4, 0, 0);
-                open.HorizontalAlignment = HorizontalAlignment.Left;
-                label.Children.Add(open);
-                _refreshers.Add(() => open.Visibility = Show(_progress.CanOpenClassA));
-            }
-
             Place(grid, label, row, 0);
 
             for (int v = 0; v < Vehicles.Main.Count; v++)
@@ -179,18 +172,7 @@ public sealed class SaveSlotView : UserControl
                 cell.Children.Add(summary);
                 _refreshers.Add(() => summary.Text = ClassSummary(vehicle, c));
 
-                if (c >= 2)
-                {
-                    int limit = _progress.LimitOf(vehicle, c - 1, Medal.Bronze);
-                    Button open = MakeButton(L.F("Open {0}", Vehicles.ClassName(c)),
-                        L.F("Raises the {0} tests of the {1} one after the other (up to 100 each) to {2} points together " +
-                            "(a bronze medal), and gives the {3} tests 0 points.", Vehicles.ClassName(c - 1), Vehicles.Name(vehicle), limit,
-                            Vehicles.ClassName(c)), () => { _progress.OpenClass(vehicle, c); OnChanged(); });
-                    open.Margin = new Thickness(0, 4, 0, 0);
-                    open.HorizontalAlignment = HorizontalAlignment.Left;
-                    cell.Children.Add(open);
-                    _refreshers.Add(() => open.Visibility = Show(_progress.CanOpenClass(vehicle, c)));
-                }
+                cell.Children.Add(OpenButton(L.F("Open {0}", Vehicles.ClassName(c)), vehicle, c));
 
                 Place(grid, cell, row, v + 1);
             }
@@ -259,20 +241,9 @@ public sealed class SaveSlotView : UserControl
                 ToolTip = _slot.Layout.BirdmanStage4
                     ? L.T("The stage is open when the points of the license tests and bonus games reach the game's limits.")
                     : L.T("Birdman has no points. The stage is open when the points below reach the game's limits.") };
-            string needs = stage == 0
-                ? L.T("Raises the Beginner test of all three license vehicles to their silver limit.")
-                : L.F("Raises the {0} tests of all three license vehicles to their silver limit, and every level of {1} to its silver limit.",
-                    Vehicles.ClassName(stage), Vehicles.Name(Vehicles.BonusGames[stage - 1]));
-            Button open = MakeButton(L.T("Open"), needs, () => { _progress.OpenBirdmanStage(stage); OnChanged(); });
-            open.Margin = new Thickness(0, 4, 0, 0);
-            open.HorizontalAlignment = HorizontalAlignment.Left;
             cell.Children.Add(check);
-            cell.Children.Add(open);
-            _refreshers.Add(() =>
-            {
-                check.IsChecked = _progress.IsBirdmanStageOpen(stage);
-                open.Visibility = Show(_progress.CanOpenBirdmanStage(stage));
-            });
+            cell.Children.Add(OpenButton(L.T("Open"), Vehicle.Birdman, stage));
+            _refreshers.Add(() => check.IsChecked = _progress.IsBirdmanStageOpen(stage));
             Place(grid, cell, row, l + 1);
         }
 
@@ -314,30 +285,43 @@ public sealed class SaveSlotView : UserControl
                 var cell = new StackPanel { Margin = new Thickness(0, 4, 0, 4) };
                 var box = new ScoreBox(() => _progress.LevelValue(game, level), value => _progress.SetLevelValue(game, level, value), OnChanged);
                 var state = new TextBlock { Foreground = Muted };
-                string needs = level == 0
-                    ? L.F("Raises the {0} tests of all three license vehicles to their silver limit, and gives level 1 0 points.",
-                        Vehicles.ClassName(SaveProgress.RequiredClass(game)))
-                    : L.F("Raises level {0} to its bronze limit ({1} points), and gives level {2} 0 points.", level,
-                        _progress.LimitOf(game, level - 1, Medal.Bronze), level + 1);
-                Button open = MakeButton(L.T("Open"), needs, () => { _progress.OpenLevel(game, level); OnChanged(); });
-                open.Margin = new Thickness(0, 4, 0, 0);
-                open.HorizontalAlignment = HorizontalAlignment.Left;
                 cell.Children.Add(box);
                 cell.Children.Add(state);
-                cell.Children.Add(open);
+                cell.Children.Add(OpenButton(L.T("Open"), game, level));
                 _refreshers.Add(() =>
                 {
                     bool isOpen = _progress.IsLevelOpen(game, level);
                     box.Update(isOpen);
                     Medal medal = _progress.LevelMedal(game, level);
                     state.Text = !isOpen ? L.T("Not opened yet") : medal == Medal.None ? L.T("No medal") : L.T(medal.ToString());
-                    open.Visibility = Show(_progress.CanOpenLevel(game, level));
                 });
                 Place(grid, cell, row, l + 1);
             }
         }
 
         return grid;
+    }
+
+    /// <summary>
+    /// A button that opens a field of the menu (<see cref="SaveProgress.OpenField"/>); shown while the field is closed,
+    /// its tooltip lists the conditions that are still missing.
+    /// </summary>
+    private Button OpenButton(string text, Vehicle vehicle, int classIndex)
+    {
+        Button open = MakeButton(text, string.Empty, () => { _progress.OpenField(vehicle, classIndex); OnChanged(); });
+        open.Margin = new Thickness(0, 4, 0, 0);
+        open.HorizontalAlignment = HorizontalAlignment.Left;
+        _refreshers.Add(() =>
+        {
+            bool closed = !_progress.IsFieldOpen(vehicle, classIndex);
+            open.Visibility = Show(closed);
+            if (closed)
+            {
+                open.ToolTip = L.F("Raises the points for: {0}. The tests of this field without a result get 0 points.",
+                    string.Join("; ", _progress.MissingConditions(vehicle, classIndex).Select(PW64Editor.Core.Classes.MenuUnlocks.Describe)));
+            }
+        });
+        return open;
     }
 
     // ----- Photo album -----

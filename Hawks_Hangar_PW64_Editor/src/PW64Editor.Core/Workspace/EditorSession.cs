@@ -835,6 +835,24 @@ public sealed class EditorSession
         Project.Save();
     }
 
+    /// <summary>The unlock conditions of the menu fields that count (the project's, or the game's).</summary>
+    public List<Classes.FieldUnlock> LoadUnlocks() => Classes.MenuUnlocks.Effective(Project.Settings.Unlocks);
+
+    /// <summary>
+    /// Saves the unlock conditions of the menu fields; rules equal to the game's are stored as none (null).
+    /// </summary>
+    /// <exception cref="ArgumentException">The rules cannot be used (<see cref="Classes.MenuUnlocks.Problem"/>).</exception>
+    public void SaveUnlocks(IReadOnlyList<Classes.FieldUnlock>? rules)
+    {
+        if (rules is not null && Classes.MenuUnlocks.Problem(rules) is { } problem)
+        {
+            throw new ArgumentException(problem, nameof(rules));
+        }
+
+        Project.Settings.Unlocks = rules is null || Classes.MenuUnlocks.IsOriginal(rules) ? null : [.. rules.Select(r => r.Clone())];
+        Project.Save();
+    }
+
     /// <summary>The Birdman mission that gets a landing pad when it has points (stage 1, mission 1, Holiday Island).</summary>
     public static readonly TestId BirdmanPadMission = new(0, Vehicle.Birdman, 0);
 

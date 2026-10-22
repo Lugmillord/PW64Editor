@@ -51,6 +51,11 @@
                 </StackPanel>
             </StackPanel>
 
+            <TextBlock Text="Testing" Style="{StaticResource SectionTitle}" Margin="0,18,0,6" />
+            <CheckBox x:Name="AllFieldsBox" Content="All menu fields open (for testing)" Checked="OnChanged" Unchecked="OnChanged" />
+            <TextBlock Style="{StaticResource Note}" Margin="22,4,0,0"
+                       Text="Every class, bonus game level and Birdman stage of the vehicle and class select can be chosen, whatever the save file holds. Overrides the conditions of the Menu tab; switch it off for a release." />
+
             <TextBlock Text="Mission settings report" Style="{StaticResource SectionTitle}" Margin="0,18,0,6" />
             <Button x:Name="ReportButton" Content="Save mission settings as a text file…" Click="OnSaveReport"
                     Style="{StaticResource DialogButton}" HorizontalAlignment="Left" />

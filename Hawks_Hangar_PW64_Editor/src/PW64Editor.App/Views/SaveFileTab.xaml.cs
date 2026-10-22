@@ -182,8 +182,12 @@ public partial class SaveFileTab : UserControl
 
         NoFileText.Visibility = Visibility.Collapsed;
         SlotTabs.Visibility = Visibility.Visible;
-        Slot1Host.Content = new SaveSlotView(_file.Slots[0], L.T("File 1"), OnSlotChanged, Limits);
-        Slot2Host.Content = new SaveSlotView(_file.Slots[1], L.T("File 2"), OnSlotChanged, Limits);
+        IReadOnlyList<PW64Editor.Core.Classes.FieldUnlock>? unlocks = _session?.Project.Settings.Unlocks;
+        IReadOnlySet<TestId> birdman = _session is not null && _session.Project.HasPatch(GamePatches.BonusGames)
+            ? PW64Editor.Core.Missions.ResultTables.BirdmanPointMissions(_session.Project.Settings.Missions)
+            : new HashSet<TestId>();
+        Slot1Host.Content = new SaveSlotView(_file.Slots[0], L.T("File 1"), OnSlotChanged, Limits, unlocks, birdman);
+        Slot2Host.Content = new SaveSlotView(_file.Slots[1], L.T("File 2"), OnSlotChanged, Limits, unlocks, birdman);
         UpdateFileState();
     }
 
