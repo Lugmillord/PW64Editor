@@ -83,16 +83,19 @@ public sealed class SaveGameLayout
     /// <summary>Bytes of a saved game that hold data; the last byte of the 256 is the checksum.</summary>
     public const int DataBytes = 255;
 
-    /// <summary>Highest class index and test index the game's tables allow (MAX_CLASSES, MAX_TESTS).</summary>
-    private const int MaxClasses = 8;
-    private const int MaxTests = 5;
+    /// <summary>Classes per vehicle the game's tables allow (MAX_CLASSES).</summary>
+    public const int MaxClasses = 8;
+
+    /// <summary>Highest number of tests per class (MAX_TESTS).</summary>
+    public const int MaxTests = 5;
 
     private readonly int[,] _testCounts = new int[MaxClasses, Vehicles.Count];
     private readonly Dictionary<TestId, int> _index = new();
 
-    private SaveGameLayout(IEnumerable<TestId> tasks, bool birdmanStage4 = false)
+    private SaveGameLayout(IEnumerable<TestId> tasks, bool birdmanStage4 = false, bool photoExtras = false)
     {
         BirdmanStage4 = birdmanStage4;
+        PhotoExtras = photoExtras;
         var defined = new bool[MaxClasses, MaxTests, Vehicles.Count];
         foreach (TestId task in tasks)
         {
@@ -122,7 +125,9 @@ public sealed class SaveGameLayout
         var saved = new List<TestId>();
         for (int v = 0; v < Vehicles.Count; v++)
         {
-            int classes = Vehicles.IsMain((Vehicle)v) || (birdmanStage4 && (Vehicle)v == Vehicle.Birdman) ? 4 : 3;
+            // The game saves 4 classes of the main vehicles and 3 of the others; with the game patch "Bonus games and
+            // Birdman" 8 of every vehicle (classes without tests take no bits).
+            int classes = birdmanStage4 ? MaxClasses : Vehicles.IsMain((Vehicle)v) ? 4 : 3;
             for (int c = 0; c < classes; c++)
             {
                 for (int t = 0; t < _testCounts[c, v]; t++)
@@ -145,6 +150,13 @@ public sealed class SaveGameLayout
     /// <summary>True if the Birdman's stage 4 is saved too (game patch "Bonus games and Birdman").</summary>
     public bool BirdmanStage4 { get; }
 
+    /// <summary>Bits behind the album in a hack built by the editor: per photo the third bit of its test and of its class
+    /// (<see cref="Code.MissionCapacity"/>).</summary>
+    public const int PhotoExtraBits = PhotoCount * 2;
+
+    /// <summary>True if the saved game has <see cref="PhotoExtraBits"/> behind the album (every hack built by the editor).</summary>
+    public bool PhotoExtras { get; }
+
     /// <summary>The tests whose results are saved, in their order in the saved game.</summary>
     public IReadOnlyList<TestId> SavedTests { get; }
 
@@ -152,7 +164,7 @@ public sealed class SaveGameLayout
     public int PhotosStartBit => ResultsStartBit + (SavedTests.Count * ResultBits);
 
     /// <summary>First bit behind the photo album; the rest up to the checksum is unused.</summary>
-    public int DataEndBit => PhotosStartBit + (PhotoCount * PhotoBits);
+    public int DataEndBit => PhotosStartBit + (PhotoCount * PhotoBits) + (PhotoExtras ? PhotoExtraBits : 0);
 
     /// <summary>Number of tests of a class (for bonus games: of a level).</summary>
     public int TestCount(int classIndex, Vehicle vehicle) =>
@@ -173,7 +185,9 @@ public sealed class SaveGameLayout
     /// <summary>Builds the layout from a list of tests, as the game builds its task table.</summary>
     /// <param name="tasks">The tests.</param>
     /// <param name="birdmanStage4">The game saves the Birdman's stage 4 (game patch "Bonus games and Birdman").</param>
-    public static SaveGameLayout FromTasks(IEnumerable<TestId> tasks, bool birdmanStage4 = false) => new(tasks, birdmanStage4);
+    /// <param name="photoExtras">The saved game has the photos' third bits behind the album (a hack built by the editor).</param>
+    public static SaveGameLayout FromTasks(IEnumerable<TestId> tasks, bool birdmanStage4 = false, bool photoExtras = false) =>
+        new(tasks, birdmanStage4, photoExtras);
 
     /// <summary>
     /// Builds the layout from the mission files (UPWT, block COMM: class, vehicle, test) of a ROM.

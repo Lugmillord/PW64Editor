@@ -8,18 +8,20 @@ namespace PW64Editor.Core.Missions;
 /// <summary>
 /// The result tables of the game patch <see cref="GamePatches.BonusGames"/>: the three tables of resultInit
 /// (results.c) moved into the data area and enlarged from [6 vehicles][4 classes][3 tests] to
-/// [7][4][5], so the Birdman has entries and every class has room for five tests. With them the Sky Diving
+/// [7][8][5], so the Birdman has entries, every class has room for five tests and every vehicle for eight classes. With them the Sky Diving
 /// levels get texts of their own (mission screen and result sheet) and the Jumble Hopper levels their own
 /// result sheets; the game shares one text for all levels there.
 /// </summary>
 /// <remarks>
-/// <para>Layout (at <see cref="Address"/> in the data area, written behind the mission entries):</para>
+/// <para>Layout (at <see cref="Address"/> in the lower data area, <see cref="DataExtension"/>; until Step 40 [7][4][5] at
+/// 0x801FD100 in the data area):</para>
 /// <code>
-/// +0x000 u32[7][4][5] text names of the mission screen ("…_S1"), pointers (sResultTestNames1)
-/// +0x230 u32[7][4][5] text names of the result sheet ("…_S2"), pointers (sResultTestNames2)
-/// +0x460 u8[7][4][5][4] point rows of the result sheet, bottom row first (sResultPtTypes)
-/// +0x690 the names of the new texts (ASCII, 0-terminated)
+/// +0x000 u32[7][8][5] text names of the mission screen ("…_S1"), pointers (sResultTestNames1)
+/// +0x460 u32[7][8][5] text names of the result sheet ("…_S2"), pointers (sResultTestNames2)
+/// +0x8C0 u8[7][8][5][4] point rows of the result sheet, bottom row first (sResultPtTypes)
+/// +0xD20 the names of the new texts (ASCII, 0-terminated)
 /// </code>
+/// <para>Classes 4–7 are 0 (no missions yet).</para>
 /// <para>The entries are the bytes the original code reads for the same vehicle, class and test, even where
 /// it reads past an entry (tests 3 and 4 read the next class, as before), so nothing changes for the
 /// missions of the game. The Birdman's names point to BD_ALL_S1 and BD_ALL_S2 (free flight, as the game), or for a
@@ -34,26 +36,31 @@ public static partial class ResultTables
     /// <summary>Vehicles in the tables.</summary>
     public const int VehicleCount = 7;
 
-    /// <summary>Classes (levels, stages) per vehicle.</summary>
-    public const int Classes = 4;
+    /// <summary>Classes (levels, stages) per vehicle the tables have room for.</summary>
+    public const int Classes = DataExtension.Classes;
+
+    /// <summary>Classes of the game (the tables of the original code and of layout version 1).</summary>
+    public const int GameClasses = 4;
 
     /// <summary>Tests per class.</summary>
     public const int Tests = 5;
 
-    /// <summary>RAM address of the tables (data area, behind the room for 128 mission entries).</summary>
-    public const uint Address = DataArea.MissionTableAddress + (DataArea.MissionCapacity * DataArea.MissionEntrySize);
+    /// <summary>RAM address of the tables (lower data area).</summary>
+    public const uint Address = DataExtension.ResultTablesAddress;
+
+    private const int NamesSize = VehicleCount * Classes * Tests * 4;
 
     /// <summary>RAM address of the names of the mission screen texts.</summary>
     public const uint MissionScreenNamesAddress = Address;
 
     /// <summary>RAM address of the names of the result sheet texts.</summary>
-    public const uint ResultSheetNamesAddress = Address + 0x230;
+    public const uint ResultSheetNamesAddress = Address + NamesSize;
 
     /// <summary>RAM address of the point rows.</summary>
-    public const uint RowsAddress = Address + 0x460;
+    public const uint RowsAddress = Address + (2 * NamesSize);
 
     /// <summary>RAM address of the names of the new texts.</summary>
-    public const uint StringsAddress = Address + 0x690;
+    public const uint StringsAddress = Address + (2 * NamesSize) + (VehicleCount * Classes * Tests * MissionLayout.ResultRows);
 
     /// <summary>RAM address of "BD_ALL_S1" in the game's data (US), the Birdman's mission screen.</summary>
     public const uint BirdmanMissionScreenName = 0x80355C44;
@@ -76,7 +83,8 @@ public static partial class ResultTables
     ];
 
     /// <summary>True if the name is one of <see cref="NewTexts"/> or a text of a Birdman mission with points.</summary>
-    public static bool IsLevelText(string name) => NewTexts.Any(t => t.Name == name) || BirdmanNamePattern().IsMatch(name) || IsGeneratedText(name);
+    public static bool IsLevelText(string name) => NewTexts.Any(t => t.Name == name) || BirdmanNamePattern().IsMatch(name) || IsGeneratedText(name)
+        || MissionPositions.IsNewPointsText(name) || MissionPositions.IsStatementText(name);
 
     /// <summary>The class letters of the Birdman's text names (as in its mission names E_BD_1_N … P_BD_4_N).</summary>
     private const string BirdmanClassLetters = "EABP";
@@ -87,7 +95,7 @@ public static partial class ResultTables
     /// <param name="test">The mission.</param>
     /// <param name="resultSheet">True for the result sheet, false for the mission screen.</param>
     public static string? BirdmanTextName(TestId test, bool resultSheet) =>
-        test.Vehicle == Vehicle.Birdman && test.Class is >= 0 and < Classes && test.Test is >= 0 and < Tests
+        test.Vehicle == Vehicle.Birdman && test.Class is >= 0 and < GameClasses && test.Test is >= 0 and < Tests
             ? $"BD_{BirdmanClassLetters[test.Class]}{test.Test + 1}_S{(resultSheet ? 2 : 1)}"
             : null;
 
@@ -96,22 +104,13 @@ public static partial class ResultTables
         settings.Where(m => m.BirdmanPoints && BirdmanTextName(m.Id, false) is not null).Select(m => m.Id).ToHashSet();
 
     /// <summary>
-    /// Bit mask of the Birdman missions with points: bit (class × 4 + test). The game module and the patched
-    /// result and test screens read it (data area header +0x14).
+    /// All texts the patch needs: <see cref="NewTexts"/>, the two texts of every Birdman mission with points (copies of
+    /// BD_ALL_S1/S2) and the points texts of the missions on places the game has no texts for (<see
+    /// cref="MissionPositions.NewPointsTextName"/>, copies of those of the class's first test).
     /// </summary>
-    public static ushort BirdmanPointsMask(IEnumerable<TestId> missions) =>
-        (ushort)missions.Where(m => m.Vehicle == Vehicle.Birdman && m.Class is >= 0 and < 4 && m.Test is >= 0 and < 4)
-            .Aggregate(0, (mask, m) => mask | (1 << ((m.Class * 4) + m.Test)));
-
-    /// <summary>The missions of a mask made by <see cref="BirdmanPointsMask"/>.</summary>
-    public static IReadOnlyList<TestId> BirdmanPointsFromMask(ushort mask) =>
-        [.. Enumerable.Range(0, 16).Where(bit => (mask & (1 << bit)) != 0).Select(bit => new TestId(bit / 4, Vehicle.Birdman, bit % 4))];
-
-    /// <summary>
-    /// All texts the patch needs: <see cref="NewTexts"/> and the two texts of every Birdman mission with points (copies of
-    /// BD_ALL_S1/S2).
-    /// </summary>
-    public static IReadOnlyList<(string Name, string Source)> TextsNeeded(IEnumerable<TestId> birdmanPoints) =>
+    /// <param name="birdmanPoints">The Birdman missions with points.</param>
+    /// <param name="missions">The missions of the game (null: the game's own), for the new places.</param>
+    public static IReadOnlyList<(string Name, string Source)> TextsNeeded(IEnumerable<TestId> birdmanPoints, IEnumerable<TestId>? missions = null) =>
     [
         .. NewTexts,
         .. birdmanPoints.OrderBy(m => (m.Class, m.Test)).SelectMany(m => new[]
@@ -119,6 +118,19 @@ public static partial class ResultTables
             (BirdmanTextName(m, false)!, "BD_ALL_S1"),
             (BirdmanTextName(m, true)!, "BD_ALL_S2"),
         }).Where(t => t.Item1 is not null),
+        .. (missions ?? []).Where(m => MissionPositions.NewPointsTextName(m, false) is not null).Distinct().OrderBy(m => (m.Vehicle, m.Class, m.Test))
+            .SelectMany(m => new[]
+            {
+                (MissionPositions.NewPointsTextName(m, false)!, MissionPositions.FirstTestPointsTextName(m, false)),
+                (MissionPositions.NewPointsTextName(m, true)!, MissionPositions.FirstTestPointsTextName(m, true)),
+            }),
+    ];
+
+    /// <summary>The names the tables hold: those of <see cref="TextsNeeded"/> for the Birdman, and every new points text.</summary>
+    private static IReadOnlyList<string> TableNames(IEnumerable<TestId> birdmanPoints) =>
+    [
+        .. TextsNeeded(birdmanPoints).Select(t => t.Name),
+        .. MissionPositions.NewPointsPlaces.SelectMany(p => new[] { MissionPositions.NewPointsTextName(p, false)!, MissionPositions.NewPointsTextName(p, true)! }),
     ];
 
     /// <summary>
@@ -146,7 +158,7 @@ public static partial class ResultTables
 
     /// <summary>Size of the tables for these Birdman missions with points.</summary>
     public static int SizeFor(IEnumerable<TestId> birdmanPoints) =>
-        ((int)(StringsAddress - Address) + TextsNeeded(birdmanPoints).Sum(t => Align4(t.Name.Length + 1)) + 7) & ~7;
+        ((int)(StringsAddress - Address) + TableNames(birdmanPoints).Sum(name => Align4(name.Length + 1)) + 7) & ~7;
 
     [System.Text.RegularExpressions.GeneratedRegex("^BD_[EABP][1-5]_S[12]$")]
     private static partial System.Text.RegularExpressions.Regex BirdmanNamePattern();
@@ -165,7 +177,7 @@ public static partial class ResultTables
         // The names of the new texts and where they are.
         var names = new Dictionary<string, uint>(StringComparer.Ordinal);
         int position = (int)(StringsAddress - Address);
-        foreach ((string name, _) in TextsNeeded(birdman))
+        foreach (string name in TableNames(birdman))
         {
             names[name] = Address + (uint)position;
             Encoding.ASCII.GetBytes(name).CopyTo(tables, position);
@@ -174,7 +186,7 @@ public static partial class ResultTables
 
         for (int v = 0; v < VehicleCount; v++)
         {
-            for (int c = 0; c < Classes; c++)
+            for (int c = 0; c < GameClasses; c++)
             {
                 for (int t = 0; t < Tests; t++)
                 {
@@ -202,9 +214,16 @@ public static partial class ResultTables
                         sheet = names[ownSheet];
                     }
 
+                    // A place of a main vehicle the game has no texts for (a fourth test, ...).
+                    if (MissionPositions.NewPointsTextName(id, false) is { } newScreen)
+                    {
+                        screen = names[newScreen];
+                        sheet = names[MissionPositions.NewPointsTextName(id, true)!];
+                    }
+
                     BinaryPrimitives.WriteUInt32BigEndian(tables.AsSpan((int)(MissionScreenNamesAddress - Address) + (entry * 4)), screen);
                     BinaryPrimitives.WriteUInt32BigEndian(tables.AsSpan((int)(ResultSheetNamesAddress - Address) + (entry * 4)), sheet);
-                    if ((Vehicle)v != Vehicle.Birdman)
+                    if ((Vehicle)v != Vehicle.Birdman && MissionPositions.NewPointsTextName(id, false) is null)
                     {
                         cleanRom.AsSpan(layout.ResultRowsOffset + (original * MissionLayout.ResultRows), MissionLayout.ResultRows)
                             .CopyTo(tables.AsSpan(RowsOffset(id)!.Value));
@@ -252,8 +271,9 @@ public static partial class ResultTables
     /// <param name="encode">Turns markup into the data of a text (for the generated texts, <see cref="GeneratedTexts"/>), or
     /// null to leave those out.</param>
     /// <param name="birdmanLimits">Own medal limits of Birdman stages (by stage), or null for none.</param>
+    /// <param name="missions">The missions of the game (null: the game's own): points texts of new places, TRY4 and TRY5.</param>
     public static byte[]? AddLevelTexts(byte[] textFile, IEnumerable<TestId> birdmanPoints, Func<string, byte[]>? encode = null,
-        IReadOnlyDictionary<int, IReadOnlyList<int>>? birdmanLimits = null)
+        IReadOnlyDictionary<int, IReadOnlyList<int>>? birdmanLimits = null, IReadOnlyList<TestId>? missions = null)
     {
         var file = Text.GameTextFile.Parse(textFile);
         List<Text.TextFileEntry> texts = file.ToEntries();
@@ -289,13 +309,13 @@ public static partial class ResultTables
 
         if (encode is not null)
         {
-            foreach ((string name, string markup) in GeneratedTexts(points, birdmanLimits))
+            foreach ((string name, string markup) in GeneratedTexts(points, birdmanLimits, missions))
             {
                 Put(name, encode(markup));
             }
         }
 
-        foreach ((string name, string source) in TextsNeeded(points))
+        foreach ((string name, string source) in TextsNeeded(points, missions))
         {
             if (texts.Any(t => t.Name == name))
             {
@@ -329,8 +349,10 @@ public static partial class ResultTables
     /// </summary>
     /// <param name="birdmanPoints">The Birdman missions with points.</param>
     /// <param name="ownLimits">Own medal limits of stages (Classes tab, by stage), or null: then 70/80/90 per mission.</param>
+    /// <param name="missions">The missions of the game (null: the game's own): TRY4 and TRY5 for classes of the main vehicles
+    /// with four or five tests.</param>
     public static IReadOnlyList<(string Name, string Markup)> GeneratedTexts(IEnumerable<TestId> birdmanPoints,
-        IReadOnlyDictionary<int, IReadOnlyList<int>>? ownLimits = null)
+        IReadOnlyDictionary<int, IReadOnlyList<int>>? ownLimits = null, IReadOnlyList<TestId>? missions = null)
     {
         var result = new List<(string, string)>();
         List<TestId> points = [.. birdmanPoints];
@@ -343,23 +365,40 @@ public static partial class ResultTables
                 continue;
             }
 
-            string prefix = $"BD_{BirdmanClassLetters[stage]}_S3_";
             IReadOnlyList<int> limits = ownLimits?.TryGetValue(stage, out IReadOnlyList<int>? own) == true && own.Count == 3
                 ? own
                 : [70 * n, 80 * n, 90 * n];
-            result.Add((prefix + "BLONDS", MedalText(tests, Header(limits[0], "Bronze Badge", 38, 43), true)));
-            result.Add((prefix + "SILVER", MedalText(tests, Header(limits[1], "Silver Badge", 45, 50), true)));
-            result.Add((prefix + "GOLD", MedalText(tests, Header(limits[2], "Gold Badge", 50, 55), true)));
-            result.Add((prefix + "PERFECT", MedalText(tests, $"[x=39][b]< {100 * n} pts[/b]. [b]for perfect score >[/b]", true)));
-            result.Add((prefix + "GREAT", MedalText(tests, "[x=78][b]< Perfect score!!! >[/b]", false)));
+            result.AddRange(MedalTexts($"BD_{BirdmanClassLetters[stage]}_S3_", tests, limits));
         }
 
-        if (Enumerable.Range(0, 4).Any(stage => points.Count(m => m.Vehicle == Vehicle.Birdman && m.Class == stage) == 4))
+        // "N tests to go" of the stage screen: the game has TRY1 ... TRY3.
+        IEnumerable<int> counts = [
+            .. Enumerable.Range(0, 4).Select(stage => points.Count(m => m.Vehicle == Vehicle.Birdman && m.Class == stage)),
+            .. (missions ?? []).Where(m => Vehicles.IsMain(m.Vehicle)).GroupBy(m => (m.Vehicle, m.Class)).Select(g => g.Count()),
+        ];
+        foreach (int n in counts.Where(n => n is 4 or 5).Distinct().Order())
         {
-            result.Add(("TRY4", "[b]4 tests to go[/b]"));
+            result.Add(($"TRY{n}", $"[b]{n} tests to go[/b]"));
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// The five medal texts of a total screen (bronze, silver, gold, perfect, "Perfect score!!!") for these tests (their
+    /// numbers in the class) and limits, laid out like the game's class texts.
+    /// </summary>
+    /// <param name="prefix">The start of the names ("BD_A_S3_", "HG_B_S3_").</param>
+    /// <param name="tests">The numbers of the tests (1-5) in their order on the screen.</param>
+    /// <param name="limits">Bronze, silver, gold.</param>
+    internal static IEnumerable<(string Name, string Markup)> MedalTexts(string prefix, IReadOnlyList<int> tests, IReadOnlyList<int> limits)
+    {
+        int n = tests.Count;
+        yield return (prefix + "BLONDS", MedalText(tests, Header(limits[0], "Bronze Badge", 38, 43), true));
+        yield return (prefix + "SILVER", MedalText(tests, Header(limits[1], "Silver Badge", 45, 50), true));
+        yield return (prefix + "GOLD", MedalText(tests, Header(limits[2], "Gold Badge", 50, 55), true));
+        yield return (prefix + "PERFECT", MedalText(tests, $"[x=39][b]< {100 * n} pts[/b]. [b]for perfect score >[/b]", true));
+        yield return (prefix + "GREAT", MedalText(tests, "[x=78][b]< Perfect score!!! >[/b]", false));
 
         // The header as the game's texts have it (centred with [x=…] by the width of the number).
         static string Header(int points, string badge, int xThreeDigits, int xTwoDigits) =>
@@ -371,11 +410,11 @@ public static partial class ResultTables
     /// (bottom-aligned: 4 - n lines), one line per mission with its number in the stage ("Test 1", "Test 4"), the total
     /// (from two missions on) and "Points to go:".
     /// </summary>
-    private static string MedalText(IReadOnlyList<int> tests, string header, bool pointsToGo)
+    internal static string MedalText(IReadOnlyList<int> tests, string header, bool pointsToGo)
     {
         int missions = tests.Count;
         var lines = new List<string> { header };
-        lines.AddRange(Enumerable.Repeat(string.Empty, 4 - missions));
+        lines.AddRange(Enumerable.Repeat(string.Empty, Math.Max(0, 4 - missions))); // five tests: the module moves the header up
         lines.AddRange(tests.Select(t => $"  Test {t}"));
         if (missions > 1)
         {
@@ -397,10 +436,47 @@ public static partial class ResultTables
     }
 
     /// <summary>True for a text of <see cref="GeneratedTexts"/>.</summary>
-    public static bool IsGeneratedText(string name) => name == "TRY4" || BirdmanMedalPattern().IsMatch(name);
+    public static bool IsGeneratedText(string name) => name is "TRY4" or "TRY5" || BirdmanMedalPattern().IsMatch(name);
 
     [System.Text.RegularExpressions.GeneratedRegex("^BD_[EABP]_S3_(BLONDS|SILVER|GOLD|PERFECT|GREAT)$")]
     private static partial System.Text.RegularExpressions.Regex BirdmanMedalPattern();
+
+    /// <summary>
+    /// Tables of layout version 1 ([7][4][5] at <paramref name="oldAddress"/>, names at +0x690) in the current layout: the
+    /// entries of classes 0–3 move to their place, the name pointers into the moved names are moved with them.
+    /// </summary>
+    public static byte[] FromVersion1(ReadOnlySpan<byte> old, uint oldAddress)
+    {
+        const int oldNames = VehicleCount * GameClasses * Tests * 4, oldStrings = 0x690;
+        int strings = old.Length > oldStrings ? old.Length - oldStrings : 0;
+        byte[] tables = new byte[(int)(StringsAddress - Address) + strings];
+        old[Math.Min(oldStrings, old.Length)..].CopyTo(tables.AsSpan((int)(StringsAddress - Address)));
+        uint oldEnd = oldAddress + (uint)old.Length;
+        uint Move(uint pointer) => pointer >= oldAddress + oldStrings && pointer < oldEnd
+            ? pointer - oldAddress - oldStrings + StringsAddress
+            : pointer;
+        for (int v = 0; v < VehicleCount; v++)
+        {
+            for (int c = 0; c < GameClasses; c++)
+            {
+                for (int t = 0; t < Tests; t++)
+                {
+                    int from = (((v * GameClasses) + c) * Tests) + t, to = (((v * Classes) + c) * Tests) + t;
+                    if ((from * 4) + 4 > old.Length)
+                    {
+                        continue;
+                    }
+
+                    BinaryPrimitives.WriteUInt32BigEndian(tables.AsSpan(to * 4), Move(BinaryPrimitives.ReadUInt32BigEndian(old[(from * 4)..])));
+                    BinaryPrimitives.WriteUInt32BigEndian(tables.AsSpan(NamesSize + (to * 4)), Move(BinaryPrimitives.ReadUInt32BigEndian(old[(oldNames + (from * 4))..])));
+                    old.Slice((2 * oldNames) + (from * MissionLayout.ResultRows), MissionLayout.ResultRows)
+                        .CopyTo(tables.AsSpan((int)(RowsAddress - Address) + (to * MissionLayout.ResultRows)));
+                }
+            }
+        }
+
+        return tables;
+    }
 
     /// <summary>Offset of a mission's four point rows in the tables, or null outside them.</summary>
     public static int? RowsOffset(TestId test) =>

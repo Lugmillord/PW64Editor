@@ -142,8 +142,15 @@ public sealed record GameModuleOptions(bool DebugOutput, bool StartupInfo = fals
     /// <summary>The result tables of the game patch <see cref="GamePatches.BonusGames"/> for the data area, or null.</summary>
     public byte[]? ResultTables { get; init; }
 
-    /// <summary>With <see cref="GamePatches.BonusGames"/>: the Birdman missions with points (bit class × 4 + test).</summary>
-    public ushort BirdmanPoints { get; init; }
+    /// <summary>With <see cref="GamePatches.BonusGames"/>: the Birdman missions with points.</summary>
+    public IReadOnlyList<SaveGame.TestId> BirdmanPointMissions { get; init; } = [];
+
+    /// <summary>The user file number of every mission in the order the game loads them, or null for the game's list
+    /// (<see cref="DataExtension.GameMissionFiles"/>).</summary>
+    public IReadOnlyList<int>? MissionFiles { get; init; }
+
+    /// <summary>The photo missions ("Shutter Bug"), or null for the game's (<see cref="DataExtension.GamePhotoMissions"/>).</summary>
+    public IReadOnlyList<SaveGame.TestId>? PhotoMissions { get; init; }
 
     /// <summary>The class table (medal limits per vehicle and class, <see cref="Classes.ClassLimits"/>), or null for the game's limits.</summary>
     public byte[]? ClassTable { get; init; }
@@ -385,7 +392,7 @@ public static class GameModule
             throw new InvalidDataException("The game module has no valid header.");
         }
 
-        if (image.Length > RomReserve || GameModuleImage.EndAddress > CodeArea.End)
+        if (image.Length > RomReserve || GameModuleImage.EndAddress > MissionCapacity.UserFilesAddress)
         {
             throw new InvalidDataException("The game module is too large for its room.");
         }
@@ -507,6 +514,25 @@ public static class GameModule
             ? rom.Slice(header.DataRomOffset, header.DataSize).ToArray()
             : null;
 
+    /// <summary>The images of the data area and of its lower part in a built ROM, or null if it has none.</summary>
+    public static DataImages? ReadDataImages(ReadOnlySpan<byte> rom, GameModuleHeader header)
+    {
+        if (ReadDataImage(rom, header) is not { } main)
+        {
+            return null;
+        }
+
+        int size = main.Length >= DataArea.HeaderSize && BinaryPrimitives.ReadUInt32BigEndian(main.AsSpan(0x04)) >= 2
+            ? (int)BinaryPrimitives.ReadUInt32BigEndian(main.AsSpan(DataArea.ExtensionSizeOffset))
+            : 0;
+        int offset = header.DataRomOffset + DataExtension.RomOffset;
+        byte[]? extension = size > 0 && size <= DataExtension.End - DataExtension.Start && (long)offset + size <= rom.Length
+            && DataExtension.IsImage(rom.Slice(offset, size))
+                ? rom.Slice(offset, size).ToArray()
+                : null;
+        return new DataImages(main, extension);
+    }
+
     /// <summary>
     /// The mission settings of a ROM built by the editor: from the data area, or (module versions before
     /// <see cref="DataAreaVersion"/>) from the table inside the module.
@@ -561,6 +587,10 @@ public static class GameModule
         var patches = new List<WordPatch>(CodeArea.Patches(romOffset, AlignedSize(imageLength)));
         patches.AddRange(DataArea.Patches());
 
+        // Up to 128 missions and five tests per class: user files, the mission list, photo missions and photos, the total
+        // screen (in every hack).
+        patches.AddRange(MissionCapacity.Patches((options.MissionFiles ?? DataExtension.GameMissionFiles).Count));
+
         // The developers' messages: _uvDebugPrintf jumps to the gate (which returns while the module is not loaded).
         if (options.DebugOutput && options.GameMessages)
         {
@@ -585,7 +615,7 @@ public static class GameModule
 
         // Live values, unlimited fuel, the time of a crash (also to stop the hard end countdown at the impact) and the
         // landing values: the vehicles' flight frame goes through the module.
-        if ((options.DebugOutput && options.Live != LiveValues.None) || options.BirdmanPoints != 0
+        if ((options.DebugOutput && options.Live != LiveValues.None) || options.BirdmanPointMissions.Count > 0
             || options.Conditions.Any(c => c.UnlimitedFuel || c.CrashTimePoints || c.PadRadius is not null || c.VehicleLimits.Count > 0
                 || c.HardEnd != HardEndScoring.Retail))
         {
@@ -818,8 +848,13 @@ public static class GameModule
     public static void Apply(byte[] rom, GameModuleOptions options, int romOffset, string info)
     {
         int dataRomOffset = romOffset - DataArea.RomReserve;
-        byte[] data = DataArea.CreateImage(options.Conditions, options.ResultTables, options.BirdmanPoints, options.ClassTable, options.UnlockTable,
-            options.EnvironmentTable);
+        DataImages images = DataArea.CreateImages(options);
+        byte[] data = images.Main, extension = images.Extension!;
+        if (data.Length > DataExtension.RomOffset || DataExtension.RomOffset + extension.Length > DataArea.RomReserve)
+        {
+            throw new InvalidDataException("The data area does not fit into its room in the ROM.");
+        }
+
         byte[] image = CreateImage(options, romOffset, info, dataRomOffset, data.Length);
         if (dataRomOffset < 0 || romOffset + RomReserve > rom.Length)
         {
@@ -835,6 +870,7 @@ public static class GameModule
         rom.AsSpan(dataRomOffset, DataArea.RomReserve).Fill(0xFF);
         data.CopyTo(rom, dataRomOffset);
         rom.AsSpan(dataRomOffset + data.Length, AlignedSize(data.Length) - data.Length).Clear();
+        extension.CopyTo(rom, dataRomOffset + DataExtension.RomOffset);
 
         rom.AsSpan(romOffset, RomReserve).Fill(0xFF);
         image.CopyTo(rom, romOffset);

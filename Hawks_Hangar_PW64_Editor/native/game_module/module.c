@@ -101,6 +101,20 @@ static char sLog[LOG_SIZE];
    one entry of 0x100 bytes per mission with settings. */
 #define DATA_AREA        0x801F5000u
 #define DATA_AREA_END    0x801FE000u
+
+/* The lower data area (DataExtension.cs), 0x801F1000-0x801F5000: 'HHMX', +4 number of missions, +8 u8[8] Birdman
+   missions with points (per stage a bit per test), +0x10 u8[7][8] photo missions (per vehicle and class a bit per test),
+   +0x80 u8[128] the mission list (user file numbers), +0x100 the result tables, +0x2800 the class table. Its image lies
+   0x9000 bytes behind the data area's in the ROM; its size is at data area header +0x24. */
+#define EXT_AREA         0x801F1000u
+#define EXT_AREA_END     0x801F5000u
+#define EXT_MAGIC        0x48484D58u /* 'HHMX' */
+#define EXT_ROM_OFFSET   0x9000u
+#define EXT_OK           (*(volatile u32 *)EXT_AREA == EXT_MAGIC)
+#define EXT_BIRDMAN(cls) (((volatile u8 *)(EXT_AREA + 0x08))[cls])
+#define EXT_PHOTO(v, c)  (((volatile u8 *)(EXT_AREA + 0x10))[(v) * 8 + (c)])
+#define MAX_CLASSES      8
+#define MAX_TESTS        5
 #define DATA_MAGIC       0x48484D44u /* 'HHMD' */
 #define DATA_ENTRY_SIZE  0x100
 #define MAX_CONDITIONS   128
@@ -1047,13 +1061,12 @@ void module_goal_jingle(s32 music) {
     GAME_SND_SET_MUSIC(vehicle < 7 ? sGoalJingle[vehicle] : 0x09);
 }
 
-/* Game patch "Bonus games and Birdman": the Birdman missions with points (bit class * 4 + test, data area header
-   +0x14, written by the editor). The patched result, total and test screens read it too (module_bm_* below). */
-#define BIRDMAN_MASK (*(volatile u16 *)(DATA_AREA + 0x14))
+/* Game patch "Bonus games and Birdman": the Birdman missions with points (lower data area +8: per stage a bit per test,
+   written by the editor). The patched result, total and test screens read it too (module_bm_* below). */
 
 /* The missions with points of a Birdman stage (bit = test), 0 for none. */
 static u32 birdman_stage(u32 cls) {
-    return DATA_HEADER->magic == DATA_MAGIC && cls < 4 ? (BIRDMAN_MASK >> (cls * 4)) & 0xFu : 0;
+    return EXT_OK && cls < MAX_CLASSES ? EXT_BIRDMAN(cls) & 0x1Fu : 0;
 }
 
 static u32 bit_count(u32 mask) {
@@ -1067,7 +1080,7 @@ static u32 bit_count(u32 mask) {
 /* The test of the n-th mission with points (counting from 0). */
 static u32 nth_bit(u32 mask, u32 n) {
     u32 t;
-    for (t = 0; t < 4; t++) {
+    for (t = 0; t < MAX_TESTS; t++) {
         if ((mask >> t) & 1) {
             if (n == 0) {
                 return t;
@@ -1075,7 +1088,7 @@ static u32 nth_bit(u32 mask, u32 n) {
             n--;
         }
     }
-    return n + 4; /* not there: past the missions, as the game would count */
+    return n + MAX_TESTS; /* not there: past the missions, as the game would count */
 }
 
 /* The stage of the current player if it is a Birdman stage with points, else 0 (mask of its missions with points). */
@@ -1084,7 +1097,7 @@ static u32 birdman_player_stage(void);
 /* ------------------------------------------------------------------ medal limits per vehicle and class */
 
 /* The Classes tab: medal limits per vehicle and class (data area header +0x18 = address of the class table, 0 = none).
-   Table: u16 limits[7 vehicles][4 classes][3] (bronze, silver, gold), then u8 flags[7][4]: 1 own limits, 2 own medal
+   Table (lower data area): u16 limits[7 vehicles][8 classes][3] (bronze, silver, gold), then u8 flags[7][8]: 1 own limits, 2 own medal
    texts of the total screen. Without a table the game's table counts (gMedalPointRequirements, 0x8034FBD4: entry =
    class for the main vehicles, vehicle + 1 for the others). A Birdman stage with points and without own limits has
    70/80/90 per mission with points. (Names from the decompilation, https://github.com/gcsmith/Pilotwings64Decomp,
@@ -1096,25 +1109,25 @@ static u32 birdman_player_stage(void);
 
 static const u16 *class_table(void) {
     u32 a = CLASS_TABLE_ADDRESS;
-    return DATA_HEADER->magic == DATA_MAGIC && a >= DATA_AREA && a + 0xC4 <= DATA_AREA_END ? (const u16 *)a : 0;
+    return DATA_HEADER->magic == DATA_MAGIC && a >= EXT_AREA && a + 7 * 8 * 7 <= EXT_AREA_END && EXT_OK ? (const u16 *)a : 0;
 }
 
 static u32 class_flags(u32 veh, u32 cls) {
     const u16 *t = class_table();
-    return t != 0 && veh < 7 && cls < 4 ? ((const u8 *)t + 0xA8)[veh * 4 + cls] : 0;
+    return t != 0 && veh < 7 && cls < MAX_CLASSES ? ((const u8 *)t + 7 * 8 * 6)[veh * 8 + cls] : 0;
 }
 
 static void class_limits(u32 veh, u32 cls, s32 out[3]) {
     const u16 *t = class_table();
     u32 stage;
     s32 i;
-    if (veh > 6 || cls > 3) {
+    if (veh > 6 || cls >= MAX_CLASSES) {
         out[0] = out[1] = out[2] = 0x7FFF;
         return;
     }
     if (t != 0 && (class_flags(veh, cls) & 1)) {
         for (i = 0; i < 3; i++) {
-            out[i] = t[(veh * 4 + cls) * 3 + i];
+            out[i] = t[(veh * 8 + cls) * 3 + i];
         }
         return;
     }
@@ -1127,12 +1140,12 @@ static void class_limits(u32 veh, u32 cls, s32 out[3]) {
     }
     if (t != 0) {
         for (i = 0; i < 3; i++) {
-            out[i] = t[(veh * 4 + cls) * 3 + i];
+            out[i] = t[(veh * 8 + cls) * 3 + i];
         }
         return;
     }
     for (i = 0; i < 3; i++) {
-        out[i] = GAME_MEDAL_TABLE[(veh < 3 ? cls : veh + 1) * 3 + i];
+        out[i] = GAME_MEDAL_TABLE[(veh < 3 ? (cls < 4 ? cls : 3) : veh + 1) * 3 + i];
     }
 }
 
@@ -2320,7 +2333,7 @@ u32 f_mul(u32 a, u32 b);
 u32 birdman_pad_index(u32 x, u32 y, u32 z);
 
 static int birdman_points(u32 cls, u32 test) {
-    return DATA_HEADER->magic == DATA_MAGIC && cls < 4 && test < 4 && ((BIRDMAN_MASK >> (cls * 4 + test)) & 1);
+    return test < MAX_TESTS && ((birdman_stage(cls) >> test) & 1);
 }
 
 /* The Birdman's landing (BirdmanData: flags +0x04, flight time +0x08, position +0x40, state +0x104 (0 flying, 1 impact,
@@ -2387,16 +2400,18 @@ s32 module_point_count(void *data, u32 a1, u32 a2, u32 vehicle) {
 s32 module_all_perfect(void) {
     s32 ok = GAME_ALL_PERFECT();
     u8 *state = GAME_STATE;
-    u32 bit;
-    if (!ok || state == 0 || DATA_HEADER->magic != DATA_MAGIC) {
+    u32 cls, test;
+    if (!ok || state == 0) {
         return ok;
     }
-    for (bit = 0; bit < 16; bit++) {
-        if ((BIRDMAN_MASK >> bit) & 1) {
-            u8 *results = (u8 *)0x80364210 + *(s32 *)(state + 0x9C) * 0x34E0;
-            short points = *(short *)(results + (bit / 4) * 0x694 + 6 * 0x30 + (bit % 4) * 0x150 + 0x6C);
-            if (points != 100) {
-                return 0;
+    for (cls = 0; cls < MAX_CLASSES; cls++) {
+        for (test = 0; test < MAX_TESTS; test++) {
+            if (birdman_points(cls, test)) {
+                u8 *results = (u8 *)0x80364210 + *(s32 *)(state + 0x9C) * 0x34E0;
+                short points = *(short *)(results + cls * 0x694 + 6 * 0x30 + test * 0x150 + 0x6C);
+                if (points != 100) {
+                    return 0;
+                }
             }
         }
     }
@@ -2414,7 +2429,7 @@ static u32 birdman_player_stage(void) {
    The total screen (taskGetTestCount, testGetPointCount) is patched below. */
 s32 module_level_points(void *data, u32 cls, u32 vehicle) {
     u32 stage = (vehicle & 0xFF) == 6 ? birdman_stage(cls & 0xFF) : 0;
-    s32 count = stage != 0 ? 4 : GAME_TEST_COUNT((s32)cls, (s32)vehicle);
+    s32 count = stage != 0 ? MAX_TESTS : GAME_TEST_COUNT((s32)cls, (s32)vehicle);
     s32 sum = 0;
     s32 t;
     for (t = 0; t < count; t++) {
@@ -2460,18 +2475,20 @@ void *module_tot_medal_text(const char *name) {
        the editor from the class's text; perfect and "great" stay the game's (their numbers do not change). */
     if (p != 0 && *(u16 *)(p + 2) < 6 && (class_flags(*(u16 *)(p + 2), *(u16 *)(p + 4)) & 2)) {
         u32 veh = *(u16 *)(p + 2);
-        u32 cls = *(u16 *)(p + 4) & 3;
+        u32 cls = *(u16 *)(p + 4) & 7;
         const char *rest = name;
         while (*rest != 0 && !(rest[0] == 'S' && rest[1] == '3' && rest[2] == '_')) {
             rest++;
         }
-        if (*rest != 0 && (rest[3] == 'B' || rest[3] == 'S' || (rest[3] == 'G' && rest[4] == 'O'))) {
+        /* Flag 4 (another number of tests than in the game): the perfect score's texts too. */
+        if (*rest != 0 && (rest[3] == 'B' || rest[3] == 'S' || (rest[3] == 'G' && rest[4] == 'O')
+                || ((class_flags(veh, *(u16 *)(p + 4)) & 4) && (rest[3] == 'P' || (rest[3] == 'G' && rest[4] == 'R'))))) {
             u32 n = 0;
             sTextName[n++] = prefixes[veh * 2];
             sTextName[n++] = prefixes[veh * 2 + 1];
             sTextName[n++] = '_';
             if (veh < 3) {
-                sTextName[n++] = "EABP"[cls];
+                sTextName[n++] = "EABPCDFG"[cls];
             } else {
                 sTextName[n++] = 'L';
                 sTextName[n++] = (char)('1' + cls);
@@ -2492,7 +2509,7 @@ void *module_tot_medal_text(const char *name) {
             sTextName[0] = 'B';
             sTextName[1] = 'D';
             sTextName[2] = '_';
-            sTextName[3] = "EABP"[*(u16 *)(p + 4) & 3];
+            sTextName[3] = "EABPCDFG"[*(u16 *)(p + 4) & 7];
             sTextName[4] = '_';
             sTextName[5] = 'S';
             sTextName[6] = '3';
@@ -2507,13 +2524,23 @@ void *module_tot_medal_text(const char *name) {
     return GAME_TEXT_BY_NAME(name);
 }
 
+/* The stage screen's "N tests to go" (test_summary.c): the game takes TRY1 ... TRY3 by the class (Beginner 1, Class A 2,
+   Class B and Pilot 3 tests). Here a main vehicle's class gets the text of its number of tests (TRY4 and TRY5 are written
+   by the editor), a Birdman stage with points that of its missions with points. */
 void *module_try_text(u32 index) {
     u32 stage = birdman_player_stage();
+    u8 *p = player_flight();
+    s32 count = 0;
     if (stage != 0) {
+        count = (s32)bit_count(stage);
+    } else if (p != 0 && *(u16 *)(p + 2) < 3) {
+        count = GAME_TEST_COUNT(*(u16 *)(p + 4), *(u16 *)(p + 2));
+    }
+    if (count >= 1 && count <= MAX_TESTS) {
         sTextName[0] = 'T';
         sTextName[1] = 'R';
         sTextName[2] = 'Y';
-        sTextName[3] = (char)('0' + bit_count(stage));
+        sTextName[3] = (char)('0' + count);
         sTextName[4] = 0;
         return GAME_TEXT_BY_NAME(sTextName);
     }
@@ -2533,26 +2560,45 @@ void *module_try_text(u32 index) {
 #define TEXT_ANOTHER_TASK 0x166
 #define TEXT_QUIT_SGI     0x1D
 
-static int tot_another_test(void) {
+/* The menu the module gives the total screen: 0 the game's (a new record: "Next"; the bonus games), 2 "Retry", "Quit",
+   3 "Retry", "Another test", "Quit". The game gives the main vehicles the three items from Class A on; here a class of a
+   main vehicle gets them when it has more than one test (so a Beginner class with more tests too, a class with one test
+   not), a Birdman stage with points when it has more than one mission with points. */
+static int tot_menu_kind(void) {
     u8 *p = player_flight();
-    return p != 0 && bit_count(birdman_player_stage()) > 1 && (GAME_TOT_RECORD(p) & 0xFF) == 0;
+    u32 veh;
+    if (p == 0 || (GAME_TOT_RECORD(p) & 0xFF) != 0) {
+        return 0;
+    }
+    veh = *(u16 *)(p + 2);
+    if (veh < 3) {
+        return GAME_TEST_COUNT(*(u16 *)(p + 4), (s32)veh) > 1 ? 3 : 2;
+    }
+    return bit_count(birdman_player_stage()) > 1 ? 3 : 0;
 }
 
 void module_tot_menu(void) {
-    if (!tot_another_test()) {
+    int kind = tot_menu_kind();
+    if (kind == 0) {
         GAME_TOT_MENU();
         return;
     }
-    TOT_MENU_ITEMS[0] = TEXT_RETRY_SGI;
-    TOT_MENU_ITEMS[1] = TEXT_ANOTHER_TASK;
-    TOT_MENU_ITEMS[2] = TEXT_QUIT_SGI;
-    TOT_MENU_COUNT = 3;
-    GAME_MENU_CREATE(0xAA, 2, 6, FLOAT_1, FLOAT_1, TOT_MENU_ITEMS, 3);
+    TOT_MENU_COUNT = 0;
+    TOT_MENU_ITEMS[TOT_MENU_COUNT++] = TEXT_RETRY_SGI;
+    if (kind == 3) {
+        TOT_MENU_ITEMS[TOT_MENU_COUNT++] = TEXT_ANOTHER_TASK;
+    }
+    TOT_MENU_ITEMS[TOT_MENU_COUNT++] = TEXT_QUIT_SGI;
+    GAME_MENU_CREATE(0xAA, 2, 6, FLOAT_1, FLOAT_1, TOT_MENU_ITEMS, TOT_MENU_COUNT);
 }
 
 s32 module_tot_choice(s32 item) {
-    if (item < 0 || !tot_another_test()) {
+    int kind = item < 0 ? 0 : tot_menu_kind();
+    if (kind == 0) {
         return GAME_TOT_CHOICE(item);
+    }
+    if (kind == 2) {
+        return item == 0 ? 3 : item == 1 ? 5 : -1; /* retry, quit */
     }
     return item == 0 ? 3 : item == 1 ? 4 : item == 2 ? 5 : -1; /* retry, another test, quit */
 }
@@ -2874,6 +2920,7 @@ static s32 run_hook(int index, s32 a0, s32 a1, s32 a2, s32 a3) {
 /* ------------------------------------------------------------------ Expansion Pak */
 
 #define GAME_MEDIA_COPY       ((void (*)(void *, u32, u32))0x8022A760) /* _uvMediaCopy(dst, rom, size) */
+void module_ext_load(u32 dataRom);
 #define GAME_VI_BLACK         ((void (*)(u8))0x8023A830)               /* osViBlack */
 #define GAME_VI_SWAP_BUFFER   ((void (*)(void *))0x8023AE20)           /* osViSwapBuffer */
 #define GAME_WRITEBACK_DCACHE ((void (*)(void))0x8023AE70)             /* osWritebackDCacheAll */
@@ -2953,6 +3000,7 @@ void module_init(s32 arg) {
     if (gHeader.dataSize != 0 && gHeader.dataSize <= DATA_AREA_END - DATA_AREA) {
         GAME_MEDIA_COPY((void *)DATA_AREA, gHeader.dataRom, gHeader.dataSize);
     }
+    module_ext_load(gHeader.dataRom); /* its lower part (missions.c) */
     if (gHeader.flags & FLAG_LANDING) {
         landing_defaults(); /* the Hang Glider's patched landing code reads them from the first flight on */
     }

@@ -39,6 +39,18 @@
             <Button x:Name="RestoreButton" Content="Restore original" Click="OnRestoreOriginal" Style="{StaticResource DialogButton}"
                     ToolTip="Sets points, conditions, time limit and point texts of this mission back to the original game (title, task and hint stay as they are)." />
         </WrapPanel>
+        <!-- The number of missions; adding a copy as the last test of a class, removing a mission (stage 7). -->
+        <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+            <TextBlock x:Name="MissionCountText" VerticalAlignment="Center" Margin="0,0,16,0" />
+            <TextBlock x:Name="CopyIntoLabel" Text="Copy into:" VerticalAlignment="Center" Margin="0,0,6,0" />
+            <ComboBox x:Name="CopyClassBox" Width="150" DisplayMemberPath="Text" SelectionChanged="OnCopyClassChanged" Margin="0,0,8,0" />
+            <Button x:Name="AddMissionButton" Content="Add copy" Click="OnAddMission" Style="{StaticResource DialogButton}" Margin="0,0,8,0"
+                    ToolTip="Adds a copy of this mission as the last test of the chosen class: file, settings, title, task, hint and point texts." />
+            <Button x:Name="RemoveMissionButton" Content="Remove mission" Click="OnRemoveMission" Style="{StaticResource DialogButton}"
+                    ToolTip="Removes this mission. The later tests of the class move up one place, with their texts and settings." />
+        </WrapPanel>
+        <TextBlock x:Name="MissionListNote" DockPanel.Dock="Top" TextWrapping="Wrap" Foreground="{StaticResource MutedTextBrush}"
+                   Margin="0,0,0,6" Visibility="Collapsed" />
         <TextBlock x:Name="InfoText" DockPanel.Dock="Top" TextWrapping="Wrap" Foreground="{StaticResource MutedTextBrush}" />
         <Border x:Name="WarningBox" DockPanel.Dock="Top" Background="#FFF4E0" BorderBrush="#E8B04B" BorderThickness="1"
                 Padding="8,5" Margin="0,6,0,0" Visibility="Collapsed">

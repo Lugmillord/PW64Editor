@@ -38,6 +38,7 @@ for f in glob.glob(os.path.join(root, '**', '*.cs'), recursive=True) + glob.glob
     for m in re.finditer(r'\b(?:L|CoreText)\.(?:T|F|K|TIn)\(\s*(?:[A-Za-z_.]+\s*,\s*)?(' + lit + r'(?:\s*\+\s*' + lit + r')*)', s):
         parts=re.findall(lit, m.group(1)); add(''.join(unesc(p) for p in parts), os.path.basename(f))
     for m in re.finditer(r'ConfirmUnsavedChangesAsync\((' + lit + r')\)', s): add(unesc(m.group(1)), 'actions')
+    for m in re.finditer(r'MissionListChangeEventArgs\((' + lit + r'),', s): add(unesc(m.group(1)), 'actions')
 extra=["Bronze","Silver","Gold","Menus and screens","In flight","Badges","Other","Not assigned yet","Levels","Tutorial","Score sheets",
 "Title screen","File select","Options","Pilot select","Pilot names","Vehicle and class select","Test summary","Results","Replay and pause menu","Photos","Ending",
 "In-flight messages","Rings, targets and balloons","General messages","Vehicle names","Pause menu","Pause menu with photo option",

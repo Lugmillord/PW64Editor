@@ -37,7 +37,10 @@ public class ClassesTests
         Assert.Equal("P_S3_SILVER", ClassTexts.TemplateName(Vehicle.Gyrocopter, 3, 1));
         Assert.Equal("BONUS_S3_GOLD", ClassTexts.TemplateName(Vehicle.JumbleHopper, 2, 2));
         Assert.True(ClassTexts.IsClassText("RP_E_S3_SILVER") && ClassTexts.IsClassText("CB_L3_S3_GOLD"));
-        Assert.False(ClassTexts.IsClassText("A_S3_GOLD") || ClassTexts.IsClassText("HG_A_S3_PERFECT") || ClassTexts.IsClassText("BD_E_S3_GOLD"));
+        Assert.False(ClassTexts.IsClassText("A_S3_GOLD") || ClassTexts.IsClassText("SD_L1_S3_PERFECT") || ClassTexts.IsClassText("BD_E_S3_GOLD"));
+        Assert.True(ClassTexts.IsClassText("HG_A_S3_PERFECT")); // a class with another number of tests has all five
+        Assert.Equal("HG_B_S3_GREAT", ClassTexts.TextName(Vehicle.HangGlider, 2, 4));
+        Assert.Null(ClassTexts.TextName(Vehicle.SkyDiving, 1, 3));
         Assert.Equal("Badges", TextCatalog.Categorize("SD_L2_S3_SILVER").Area);
         Assert.Equal("Hang Glider", TextCatalog.Categorize("HG_A_S3_GOLD").Section);
     }
@@ -67,22 +70,28 @@ public class ClassesTests
         byte[] table = ClassLimits.Table([hg, bd], true, true)!;
         Assert.Equal(ClassLimits.TableSize, table.Length);
         Assert.Equal(150, BinaryPrimitives.ReadUInt16BigEndian(table.AsSpan(((0 * 4 + 1) * 3 + 2) * 2)));
-        Assert.Equal(180, BinaryPrimitives.ReadUInt16BigEndian(table.AsSpan(((1 * 4 + 1) * 3 + 2) * 2))); // Rocket Belt A: original
-        Assert.Equal(360, BinaryPrimitives.ReadUInt16BigEndian(table.AsSpan(((6 * 4 + 0) * 3 + 2) * 2))); // Birdman stage 1: original
+        Assert.Equal(180, BinaryPrimitives.ReadUInt16BigEndian(table.AsSpan(((1 * 8 + 1) * 3 + 2) * 2))); // Rocket Belt A: original
+        Assert.Equal(360, BinaryPrimitives.ReadUInt16BigEndian(table.AsSpan(((6 * 8 + 0) * 3 + 2) * 2))); // Birdman stage 1: original
         Assert.Equal(ClassLimits.FlagOwnLimits | ClassLimits.FlagOwnTexts, table[ClassLimits.FlagsOffset + 1]);
-        Assert.Equal(ClassLimits.FlagOwnLimits, table[ClassLimits.FlagsOffset + (6 * 4) + 2]); // the Birdman: texts of its own kind
+        Assert.Equal(ClassLimits.FlagOwnLimits, table[ClassLimits.FlagsOffset + (6 * 8) + 2]); // the Birdman: texts of its own kind
         Assert.Equal(0, table[ClassLimits.FlagsOffset + 2]);
         IReadOnlyList<(Vehicle Vehicle, int Class, IReadOnlyList<int> Medals)> read = ClassLimits.ReadTable(table);
         Assert.Equal(2, read.Count);
         Assert.Equal([100, 120, 150], read[0].Medals);
 
-        // The data area: the table behind the result tables, its address in the header.
-        byte[] image = DataArea.CreateImage([], null, 0, table);
-        Assert.Equal(ClassLimits.TableAddress, Word(image, DataArea.ClassTableOffset));
-        Assert.Equal(table, DataArea.ReadClassTable(image));
-        Assert.Null(DataArea.ReadClassTable(DataArea.CreateImage([])));
-        IReadOnlyList<TestId> all = [.. Enumerable.Range(0, 16).Select(b => new TestId(b / 4, Vehicle.Birdman, b % 4))];
+        // The lower data area: the table behind the result tables, its address in the header of the data area.
+        DataImages images = DataArea.CreateImages(new GameModuleOptions(false) { ClassTable = table });
+        Assert.Equal(ClassLimits.TableAddress, Word(images.Main, DataArea.ClassTableOffset));
+        Assert.Equal(table, DataArea.ReadClassTable(images));
+        Assert.Null(DataArea.ReadClassTable(DataArea.CreateImages(new GameModuleOptions(false))));
+        IReadOnlyList<TestId> all = [.. Enumerable.Range(0, 20).Select(b => new TestId(b / 5, Vehicle.Birdman, b % 5))];
         Assert.True(ResultTables.Address + ResultTables.SizeFor(all) <= ClassLimits.TableAddress);
+
+        // A table of layout version 1 ([7][4]) is widened.
+        byte[] old = new byte[ClassLimits.Version1TableSize];
+        BinaryPrimitives.WriteUInt16BigEndian(old.AsSpan(((1 * 4 + 1) * 3 + 2) * 2), 199);
+        old[(7 * 4 * 6) + (1 * 4) + 1] = ClassLimits.FlagOwnLimits;
+        Assert.Equal((Vehicle.RocketBelt, 1, 199), ClassLimits.ReadTable(ClassLimits.FromVersion1(old)).Select(r => (r.Vehicle, r.Class, r.Medals[2])).Single());
     }
 
     [Fact]
@@ -133,8 +142,7 @@ public class ClassesTests
         // The build: class table, the patched functions, the island in the missions and on the test screen.
         byte[] built = session.Build(false).Result.RomBuild.Rom.Data;
         GameModuleHeader header = GameModule.ReadHeader(built)!;
-        byte[] image = built.AsSpan(header.DataRomOffset, header.DataSize).ToArray();
-        Assert.Equal(2, ClassLimits.ReadTable(DataArea.ReadClassTable(image)!).Count);
+        Assert.Equal(2, ClassLimits.ReadTable(DataArea.ReadClassTable(GameModule.ReadDataImages(built, header)!)!).Count);
         Assert.Equal(CodeArea.J(GameModuleImage.MenuPage1Address), Word(built, 0x94EF8));
         Assert.Equal(CodeArea.J(GameModuleImage.PointsToMedalAddress), Word(built, 0xB36A4));
         Assert.Equal(CodeArea.Jal(GameModuleImage.BronzeT2Address), Word(built, 0x971F4));
@@ -163,6 +171,6 @@ public class ClassesTests
         Assert.Equal(0x27BDFF48u, Word(built, 0x94EF8));
         Assert.Equal(0x3C0A8035u, Word(built, 0x971F4));
         GameModuleHeader header = GameModule.ReadHeader(built)!;
-        Assert.Null(DataArea.ReadClassTable(built.AsSpan(header.DataRomOffset, header.DataSize)));
+        Assert.Null(DataArea.ReadClassTable(GameModule.ReadDataImages(built, header)!));
     }
 }

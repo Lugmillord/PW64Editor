@@ -23,6 +23,19 @@ public sealed class EepromFile
         _extra = data[UsedSize..];
     }
 
+    private EepromFile(SaveSlot[] slots, byte[] extra)
+    {
+        Slots = slots;
+        _extra = extra;
+    }
+
+    /// <summary>
+    /// The file in another layout (missions added or removed, <see cref="SaveSlot.ConvertTo"/>): the results and photos go
+    /// along with their missions. If anything changes, the slots in use count as changed.
+    /// </summary>
+    public EepromFile ConvertTo(SaveGameLayout layout, SavePlaceChanges? changes = null) =>
+        new([.. Slots.Select(s => s.ConvertTo(layout, changes))], _extra.ToArray());
+
     /// <summary>The two saved games ("File 1" and "File 2" in the game).</summary>
     public IReadOnlyList<SaveSlot> Slots { get; }
 

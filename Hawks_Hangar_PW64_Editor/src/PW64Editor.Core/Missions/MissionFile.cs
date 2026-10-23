@@ -207,6 +207,21 @@ public sealed class MissionFile
         return result;
     }
 
+    /// <summary>The file with another text base name (JPTX, padded with zeros) and everything else unchanged.</summary>
+    /// <exception cref="ArgumentException">The file has no JPTX chunk, or the name does not fit into it.</exception>
+    public byte[] WithTextBase(string textBase)
+    {
+        if (!_chunks.TryGetValue("JPTX", out IffChunk? chunk) || textBase.Length >= chunk.DataSize || textBase.Any(c => c > 0x7E))
+        {
+            throw new ArgumentException("The text base name does not fit into the mission file.", nameof(textBase));
+        }
+
+        byte[] result = (byte[])_file.Clone();
+        result.AsSpan(chunk.DataOffset, chunk.DataSize).Clear();
+        Encoding.ASCII.GetBytes(textBase).CopyTo(result, chunk.DataOffset);
+        return result;
+    }
+
     private static string ReadString(byte[] file, IffChunk? chunk)
     {
         if (chunk is null)

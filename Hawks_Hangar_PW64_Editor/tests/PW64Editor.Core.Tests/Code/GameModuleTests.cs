@@ -142,12 +142,13 @@ public class GameModuleTests
                 GameModule = new GameModuleOptions(false) { RequireExpansionPak = true },
             }).Rom.Data;
 
-            // Program block from 0x801F5000 (lui 0x801F + addiu 0x5000), block 5 from 0, clearing up to 0x801F5000.
+            // Program block from 0x801F1000 (lui 0x801F + addiu 0x1000: the lower data area), block 5 from 0, clearing up to
+            // 0x801F1000.
             Assert.Equal(0x3C09801Fu, Word(built, 0x2B3AC));
-            Assert.Equal(0x25295000u, Word(built, 0x2B3B4));
+            Assert.Equal(0x25291000u, Word(built, 0x2B3B4));
             Assert.Equal(0xAC400028u, Word(built, 0x2B3E0));
             Assert.Equal(0x3C03801Fu, Word(built, 0x2B44C));
-            Assert.Equal(0x24635000u, Word(built, 0x2B450));
+            Assert.Equal(0x24631000u, Word(built, 0x2B450));
 
             // The data area image (header only) in front of the module, and its place in the module header.
             int module = built.Length - GameModule.RomReserve;

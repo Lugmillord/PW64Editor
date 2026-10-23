@@ -95,7 +95,7 @@
                 <views:ClassesTab x:Name="ClassEditor" ClassesChanged="OnClassesChanged" />
             </TabItem>
             <TabItem Header="Missions">
-                <views:MissionsTab x:Name="MissionEditor" UnsavedChangesChanged="OnUnsavedChangesChanged" />
+                <views:MissionsTab x:Name="MissionEditor" UnsavedChangesChanged="OnUnsavedChangesChanged" MissionListChangeRequested="OnMissionListChange" />
             </TabItem>
             <TabItem Header="Map">
                 <TextBlock Style="{StaticResource PlaceholderText}" Text="Editing maps will be added here in a later version." />

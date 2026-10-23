@@ -391,4 +391,86 @@ public class SaveProgressTests
         Assert.All(Enumerable.Range(0, SaveProgress.BirdmanStages), s => Assert.True(progress.IsBirdmanStageOpen(s)));
         Assert.Equal(SaveSlot.NoResult, progress.Slot.GetResult(new TestId(0, Vehicle.Birdman, 0)));
     }
+
+    [Fact]
+    public void ConvertTo_KeepsResultsAtTheirPlacesAndThePhotos()
+    {
+        SaveGameLayout old = SaveGameLayout.FromTasks(SaveGameLayout.RetailWithBirdmanStage4.SavedTests, birdmanStage4: true, photoExtras: true);
+        var b4 = new TestId(2, Vehicle.HangGlider, 3);
+        var a2 = new TestId(1, Vehicle.HangGlider, 1);
+        SaveGameLayout added = SaveGameLayout.FromTasks([.. old.SavedTests.Where(t => t != a2), b4], birdmanStage4: true, photoExtras: true);
+        var file = EepromFile.Read(new byte[EepromFile.UsedSize], old);
+        SaveSlot slot = file.Slots[0];
+        slot.StartNew();
+        foreach (TestId test in old.SavedTests)
+        {
+            slot.SetResult(test, (old.IndexOf(test) * 3) % 101);
+        }
+
+        byte[] bytes = file.ToBytes();
+        int bit = old.PhotosStartBit;
+        SaveSlot.WriteBits(bytes, ref bit, 0x5A, 8); // something in the first photo
+        bytes[SaveSlot.Size - 1] = SaveSlot.Checksum(bytes);
+        file = EepromFile.Read(bytes, old);
+        Assert.False(file.IsModified);
+
+        // The same layout changes nothing.
+        Assert.Same(file.Slots[0], file.ConvertTo(old).Slots[0]);
+        Assert.False(file.ConvertTo(old).IsModified);
+
+        EepromFile converted = file.ConvertTo(added);
+        Assert.True(converted.Slots[0].IsModified);
+        Assert.False(converted.Slots[1].IsModified); // not prepared: taken over as it is
+        EepromFile reread = EepromFile.Read(converted.ToBytes(), added);
+        foreach (TestId test in added.SavedTests.Where(t => t != b4))
+        {
+            Assert.Equal(file.Slots[0].GetResult(test), reread.Slots[0].GetResult(test));
+        }
+
+        Assert.Equal(SaveSlot.NoResult, reread.Slots[0].GetResult(b4));
+        Assert.Equal(SaveSlot.NoResult, reread.Slots[0].GetResult(a2)); // its place is gone
+        Assert.True(file.Slots[0].Photos[0].Record.SequenceEqual(reread.Slots[0].Photos[0].Record));
+        Assert.Equal(0, reread.Slots[0].UnusedBytesInUse);
+        Assert.Equal(reread.Slots[0].ComputedChecksum, reread.Slots[0].StoredChecksum);
+    }
+
+    [Fact]
+    public void ConvertTo_TakesTheResultsAndPhotosAlongWithTheirMissions()
+    {
+        SaveGameLayout old = SaveGameLayout.FromTasks(SaveGameLayout.RetailWithBirdmanStage4.SavedTests, birdmanStage4: true, photoExtras: true);
+        TestId B(int test) => new(2, Vehicle.HangGlider, test);
+        SaveGameLayout removed = SaveGameLayout.FromTasks([.. old.SavedTests.Where(t => t != B(2))], birdmanStage4: true, photoExtras: true);
+        var file = EepromFile.Read(new byte[EepromFile.UsedSize], old);
+        file.Slots[0].StartNew();
+        file.Slots[0].SetResult(B(0), 11);
+        file.Slots[0].SetResult(B(1), 22);
+        file.Slots[0].SetResult(B(2), 33);
+        file.Slots[0].SetResult(new TestId(3, Vehicle.HangGlider, 0), 44);
+
+        // A photo of the photo mission B2 (class 2, test 1; vehicle 0 = Hang Glider).
+        byte[] bytes = file.ToBytes();
+        var record = new byte[SavePhoto.RecordBytes];
+        record[9] = (byte)((1 << 6) | (2 << 4) | 1); // test 1, class 2, first object 1 (shuttle)
+        int bit = old.PhotosStartBit;
+        for (int j = 0; j < SaveGameLayout.PhotoBits; j++)
+        {
+            SaveSlot.WriteBits(bytes, ref bit, (record[j / 8] >> (j % 8)) & 1, 1);
+        }
+
+        bytes[SaveSlot.Size - 1] = SaveSlot.Checksum(bytes);
+        file = EepromFile.Read(bytes, old);
+        Assert.Equal((2, 1), (file.Slots[0].Photos[0].Class, file.Slots[0].Photos[0].Test));
+
+        // Test 1 of Class B is removed: tests 2 and 3 move up with their results and the photo.
+        var changes = new SavePlaceChanges(new Dictionary<TestId, TestId> { [B(1)] = B(0), [B(2)] = B(1) }, [B(0)]);
+        EepromFile reread = EepromFile.Read(file.ConvertTo(removed, changes).ToBytes(), removed);
+        SaveSlot slot = reread.Slots[0];
+        Assert.Equal(22, slot.GetResult(B(0)));
+        Assert.Equal(33, slot.GetResult(B(1)));
+        Assert.False(removed.IsSaved(B(2)));
+        Assert.Equal(44, slot.GetResult(new TestId(3, Vehicle.HangGlider, 0)));
+        Assert.Equal((2, 0), (slot.Photos[0].Class, slot.Photos[0].Test));
+        Assert.Equal(Vehicle.HangGlider, slot.Photos[0].Vehicle);
+        Assert.False(slot.Photos[0].IsEmpty);
+    }
 }

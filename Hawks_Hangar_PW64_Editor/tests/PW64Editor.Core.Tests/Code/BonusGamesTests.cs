@@ -27,11 +27,9 @@ public class BonusGamesTests
     }
 
     /// <summary>The data area image of a built ROM (the module header names it).</summary>
-    private static byte[] DataImage(byte[] built)
-    {
-        GameModuleHeader header = GameModule.ReadHeader(built)!;
-        return built.AsSpan(header.DataRomOffset, header.DataSize).ToArray();
-    }
+    private static DataImages DataImage(byte[] built) => GameModule.ReadDataImages(built, GameModule.ReadHeader(built)!)!;
+
+    private static readonly int Sheet = (int)(ResultTables.ResultSheetNamesAddress - ResultTables.Address);
 
     /// <summary>A name in the tables: a pointer into the game's data, or into the tables (the new names).</summary>
     private static string Name(byte[] rom, byte[] tables, uint pointer) =>
@@ -49,9 +47,9 @@ public class BonusGamesTests
         Assert.Equal("BD_ALL_S2", StringAt(rom.Data, ResultTables.BirdmanResultSheetName));
         Assert.Equal(new MedalLimits(0, 0, 0), new MissionTables(rom.Data, RomLayout.PilotwingsUsa.Missions!).MedalLimits()[7]);
 
-        // The new tables end in front of the text tables of ExpandedTexts.
-        Assert.Equal(0x801FD100u, ResultTables.Address);
-        Assert.True(ResultTables.Address + ResultTables.Size <= DataArea.End);
+        // The new tables lie in the lower data area, in front of the class table.
+        Assert.Equal(0x801F1100u, ResultTables.Address);
+        Assert.True(ResultTables.Address + ResultTables.Size <= PW64Editor.Core.Classes.ClassLimits.TableAddress);
     }
 
     [RealRomFact]
@@ -67,14 +65,14 @@ public class BonusGamesTests
 
         for (int v = 0; v < ResultTables.VehicleCount; v++)
         {
-            for (int c = 0; c < ResultTables.Classes; c++)
+            for (int c = 0; c < ResultTables.GameClasses; c++)
             {
                 for (int t = 0; t < ResultTables.Tests; t++)
                 {
                     var id = new TestId(c, (Vehicle)v, t);
-                    int entry = (((v * 4) + c) * 5) + t;
+                    int entry = (((v * 8) + c) * 5) + t;
                     uint screen = Word(tables, entry * 4);
-                    uint sheet = Word(tables, 0x230 + (entry * 4));
+                    uint sheet = Word(tables, Sheet + (entry * 4));
                     int rows = ResultTables.RowsOffset(id)!.Value;
                     if (id.Vehicle == Vehicle.Birdman)
                     {
@@ -106,10 +104,10 @@ public class BonusGamesTests
         // The project's rows, bottom row first.
         Assert.Equal([(int)PointSource.Rings, (int)PointSource.Time, 0, 0],
             tables.AsSpan(ResultTables.RowsOffset(own.Id)!.Value, 4).ToArray().Select(b => (int)b));
-        Assert.Equal("SD_L2_S1", Name(rom.Data, tables, Word(tables, ((((4 * 4) + 1) * 5) + 0) * 4)));
-        Assert.Equal("HP_L3_S2", Name(rom.Data, tables, Word(tables, 0x230 + (((((5 * 4) + 2) * 5) + 0) * 4))));
-        Assert.Equal("HP_L1_S1", Name(rom.Data, tables, Word(tables, ((((5 * 4) + 0) * 5) + 0) * 4))); // already per level
-        Assert.Equal("CB_L123_S2", Name(rom.Data, tables, Word(tables, 0x230 + (((((3 * 4) + 1) * 5) + 2) * 4))));
+        Assert.Equal("SD_L2_S1", Name(rom.Data, tables, Word(tables, ((((4 * 8) + 1) * 5) + 0) * 4)));
+        Assert.Equal("HP_L3_S2", Name(rom.Data, tables, Word(tables, Sheet + (((((5 * 8) + 2) * 5) + 0) * 4))));
+        Assert.Equal("HP_L1_S1", Name(rom.Data, tables, Word(tables, ((((5 * 8) + 0) * 5) + 0) * 4))); // already per level
+        Assert.Equal("CB_L123_S2", Name(rom.Data, tables, Word(tables, Sheet + (((((3 * 8) + 1) * 5) + 2) * 4))));
     }
 
     [RealRomFact]
@@ -146,16 +144,17 @@ public class BonusGamesTests
         Assert.Equal(new MedalLimits(280, 320, 360), session.LoadMedalLimits()[7]);
 
         byte[] built = session.Build(false).Result.RomBuild.Rom.Data;
-        byte[] image = DataImage(built);
+        DataImages image = DataImage(built);
         byte[]? tables = DataArea.ReadResultTables(image);
         Assert.NotNull(tables);
         Assert.Equal(ResultTables.Create(rom.Data, RomLayout.PilotwingsUsa.Missions!, session.Project.Settings.Missions), tables);
-        Assert.Empty(DataArea.ReadImage(image)); // no mission settings, only the tables
+        Assert.Empty(DataArea.ReadImage(image.Main)); // no mission settings, only the tables
 
-        Assert.Equal(0x3C108020u, Word(built, 0xB563C));                 // lui s0, hi(result sheet names)
-        Assert.Equal(0x8E10D330u, Word(built, 0xB5648));                 // lw s0, lo(...)(s0)
-        Assert.Equal(0x8E10D100u, Word(built, 0xB567C));                 // mission screen names
-        Assert.Equal(0x90C6D560u, Word(built, 0xB57D4));                 // point rows
+        Assert.Equal(0x3C100000u | ((ResultTables.ResultSheetNamesAddress + 0x8000) >> 16), Word(built, 0xB563C)); // lui s0, hi(names)
+        Assert.Equal(0x8E100000u | (ResultTables.ResultSheetNamesAddress & 0xFFFF), Word(built, 0xB5648)); // lw s0, lo(...)(s0)
+        Assert.Equal(0x8E100000u | (ResultTables.MissionScreenNamesAddress & 0xFFFF), Word(built, 0xB567C)); // mission screen names
+        Assert.Equal(0x90C60000u | (ResultTables.RowsAddress & 0xFFFF), Word(built, 0xB57D4));             // point rows
+        Assert.Equal(0x0018C140u, Word(built, 0xB562C));                 // the vehicle's stride: 8 classes
         Assert.Equal(0x0307C021u, Word(built, 0xB5618));                 // × 5
         Assert.Equal(0x2C210003u, Word(built, 0x6FA00));                 // save: (veh - 3) < 3
         Assert.Equal(0x26E1FFFDu, Word(built, 0x6FE14));                 // load: the delay slot of the vehicle loop
@@ -261,19 +260,19 @@ public class BonusGamesTests
         Assert.Contains(GamePatches.MissionsUsing(GamePatches.BonusGames, session.LoadMissions().Missions), u => u.Contains("mission with points", StringComparison.Ordinal));
 
         byte[] built = session.Build(false).Result.RomBuild.Rom.Data;
-        byte[] image = DataImage(built);
-        Assert.Equal(1 << ((1 * 4) + 2), DataArea.ReadBirdmanPoints(image));
+        DataImages image = DataImage(built);
+        Assert.Equal([new TestId(1, Vehicle.Birdman, 2)], DataArea.ReadBirdmanPoints(image));
         byte[] tables = DataArea.ReadResultTables(image)!;
-        int entry = (((6 * 4) + 1) * 5) + 2;
+        int entry = (((6 * 8) + 1) * 5) + 2;
         Assert.Equal("BD_A3_S1", Name(built, tables, Word(tables, entry * 4)));
-        Assert.Equal("BD_A3_S2", Name(built, tables, Word(tables, 0x230 + (entry * 4))));
-        Assert.Equal(ResultTables.BirdmanMissionScreenName, Word(tables, (((6 * 4) + 1) * 5) * 4)); // stage 2, mission 1: free flight
+        Assert.Equal("BD_A3_S2", Name(built, tables, Word(tables, Sheet + (entry * 4))));
+        Assert.Equal(ResultTables.BirdmanMissionScreenName, Word(tables, (((6 * 8) + 1) * 5) * 4)); // stage 2, mission 1: free flight
         Assert.Equal([(int)PointSource.LandingImpact, (int)PointSource.LandingAccuracy, 0, 0],
             tables.AsSpan(ResultTables.RowsOffset(id)!.Value, 4).ToArray().Select(b => (int)b));
         Assert.Equal(0, tables.AsSpan(ResultTables.RowsOffset(new TestId(1, Vehicle.Birdman, 0))!.Value, 4).ToArray().Sum(b => b));
 
         // The Birdman's entry with its four speeds (original ones where not set), and its patched landing code.
-        GameModuleCondition condition = DataArea.ReadImage(image).Single(c => c.Vehicle == 6);
+        GameModuleCondition condition = DataArea.ReadImage(image.Main).Single(c => c.Vehicle == 6);
         Assert.Equal([50f, 40f], condition.VehicleLimits);
         Assert.Equal(0x3C01801Fu, Word(built, 0x57A24));
         Assert.Equal(0xC4285050u, Word(built, 0x57A30));
@@ -309,17 +308,17 @@ public class BonusGamesTests
     [Fact]
     public void BirdmanMask_AndNames()
     {
-        TestId[] missions = [new(0, Vehicle.Birdman, 0), new(3, Vehicle.Birdman, 3), new(2, Vehicle.Birdman, 1)];
-        ushort mask = ResultTables.BirdmanPointsMask(missions);
-        Assert.Equal(0x8201, mask);
-        Assert.Equal<IEnumerable<TestId>>(missions.OrderBy(m => (m.Class, m.Test)), ResultTables.BirdmanPointsFromMask(mask));
+        TestId[] missions = [new(0, Vehicle.Birdman, 0), new(3, Vehicle.Birdman, 4), new(2, Vehicle.Birdman, 1)];
+        byte[] ext = DataExtension.Create(DataExtension.GameMissionFiles, missions, DataExtension.GamePhotoMissions);
+        Assert.Equal([1, 0, 2, 16, 0, 0, 0, 0], ext[DataExtension.BirdmanOffset..(DataExtension.BirdmanOffset + 8)]);
+        Assert.Equal<IEnumerable<TestId>>(missions.OrderBy(m => (m.Class, m.Test)), DataExtension.ReadBirdmanPoints(ext));
         Assert.Equal("BD_P4_S2", ResultTables.BirdmanTextName(new TestId(3, Vehicle.Birdman, 3), true));
         Assert.Null(ResultTables.BirdmanTextName(new TestId(0, Vehicle.HangGlider, 0), true));
         Assert.True(ResultTables.IsLevelText("BD_E1_S1"));
         Assert.False(ResultTables.IsLevelText("BD_ALL_S1"));
-        IReadOnlyList<TestId> all = [.. Enumerable.Range(0, 16).Select(b => new TestId(b / 4, Vehicle.Birdman, b % 4))];
-        Assert.True(ResultTables.Address + ResultTables.SizeFor(all) <= DataArea.End);
-        Assert.Equal(9 + 32, ResultTables.TextsNeeded(all).Count);
+        IReadOnlyList<TestId> all = [.. Enumerable.Range(0, 20).Select(b => new TestId(b / 5, Vehicle.Birdman, b % 5))];
+        Assert.True(ResultTables.Address + ResultTables.SizeFor(all) <= PW64Editor.Core.Classes.ClassLimits.TableAddress);
+        Assert.Equal(9 + 40, ResultTables.TextsNeeded(all).Count);
     }
 
     [Fact]

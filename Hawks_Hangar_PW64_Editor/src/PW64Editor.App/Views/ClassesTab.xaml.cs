@@ -85,7 +85,7 @@ public partial class ClassesTab : UserControl
         ClassGrid.Children.Clear();
         ClassGrid.RowDefinitions.Clear();
         ClassGrid.ColumnDefinitions.Clear();
-        for (int c = 0; c < 9; c++)
+        for (int c = 0; c < 10; c++)
         {
             ClassGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         }
@@ -98,13 +98,14 @@ public partial class ClassesTab : UserControl
         }
 
         ClassGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-        string[] headers = [L.T("Class"), L.T("Missions"), L.T("Island"), L.T("Bronze"), L.T("Silver"), L.T("Gold"), L.T("Perfect"), string.Empty, string.Empty];
+        string[] headers = [L.T("Class"), L.T("Missions"), L.T("Island"), L.T("Bronze"), L.T("Silver"), L.T("Gold"), L.T("Perfect"), string.Empty, string.Empty, string.Empty];
         for (int c = 0; c < headers.Length; c++)
         {
             Add(new TextBlock { Text = headers[c], FontWeight = FontWeights.SemiBold, Margin = new Thickness(0, 0, 14, 6) }, 0, c);
         }
 
         int row = 1;
+        var scaleNotes = new List<string>();
         foreach (ClassInfo info in classes)
         {
             ClassGrid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -164,9 +165,32 @@ public partial class ClassesTab : UserControl
                 : info.IsAutomatic
                     ? L.F("automatic: {0} mission(s) with points", info.BirdmanPointMissions)
                     : string.Empty;
-            Add(new TextBlock { Text = state, Foreground = (System.Windows.Media.Brush)FindResource("MutedTextBrush"), VerticalAlignment = VerticalAlignment.Center }, row, 8);
+            Add(new TextBlock { Text = state, Foreground = (System.Windows.Media.Brush)FindResource("MutedTextBrush"), VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 3, 14, 3) }, row, 8);
+
+            // The class has another number of missions than its limits were made for (missions added or removed).
+            if (info.LimitsNeedScaling)
+            {
+                IReadOnlyList<int> scaled = info.ScaledMedals();
+                var scale = new Button
+                {
+                    Content = L.T("Scale limits"),
+                    Style = (Style)FindResource("DialogButton"),
+                    Margin = new Thickness(0, 3, 0, 3),
+                    ToolTip = L.F("Converts the current limits from {0} to {1} missions: {2}.", info.LimitsForTests, info.TestCount, string.Join(" / ", scaled)),
+                };
+                scale.Click += (_, _) => ScaleMedals(info);
+                Add(scale, row, 9);
+                scaleNotes.Add(L.F("{0}: the limits are made for {1} missions, the class has {2}.",
+                    MissionCatalog.ClassName(info.Vehicle, info.Class), info.LimitsForTests, info.TestCount));
+            }
+
             row++;
         }
+
+        ScaleNote.Text = scaleNotes.Count == 0
+            ? string.Empty
+            : string.Join("\n", scaleNotes) + "\n" + L.T("\"Scale limits\" converts the current limits to the number of missions of the class (e.g. 140/160/180 for 2 missions become 210/240/270 for 3).");
+        ScaleNote.Visibility = scaleNotes.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
 
         MedalNote.Text = L.T("Points of the whole class (the sum of its missions) for the bronze, silver and gold badge; a perfect score is 100 points per mission. The limits also decide what the menus show and which classes, bonus games and Birdman stages open (with the rules of the original game).")
             + (vehicle == Vehicle.Birdman
@@ -257,11 +281,26 @@ public partial class ClassesTab : UserControl
         SaveMedals(info, values.SequenceEqual(info.DefaultMedals) ? null : values);
     }
 
-    private void SaveMedals(ClassInfo info, int[]? values)
+    private void SaveMedals(ClassInfo info, IReadOnlyList<int>? values)
     {
         ClassSettings settings = info.Settings?.Clone() ?? ClassSettings.For(info.Vehicle, info.Class);
         settings.Medals = values is null ? null : [.. values];
+
+        // Own limits are made for the class's current number of missions (stored only when it is not the game's).
+        settings.MedalsForTests = values is null || info.TestCount == MissionPositions.GameTestCount(info.Vehicle, info.Class) ? null : info.TestCount;
         Save(settings);
+    }
+
+    private void ScaleMedals(ClassInfo info)
+    {
+        IReadOnlyList<int> scaled = info.ScaledMedals();
+        if (ClassLimits.Problem([.. scaled], info.Perfect) is { } problem)
+        {
+            StatusText.Text = problem;
+            return;
+        }
+
+        SaveMedals(info, scaled.SequenceEqual(info.DefaultMedals) && info.TestCount == MissionPositions.GameTestCount(info.Vehicle, info.Class) ? null : scaled);
     }
 
     private void Save(ClassSettings settings)

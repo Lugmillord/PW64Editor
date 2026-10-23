@@ -17,8 +17,9 @@ namespace PW64Editor.Core.Classes;
 /// level select (func_8030D9C8, func_8030DED0), the file menu (fileMenu_802E8AF0), the points under the menu fields
 /// (func_8030F818), "points to the next medal" (levelSetPointsToNextMedal) and the ending (func_8032C3C4) go through
 /// it (see Menu_Unlocks.md).</para>
-/// <para>Table: u16 limits[7 vehicles][4 classes][3] (bronze, silver, gold), then u8 flags[7][4]: 1 own limits,
-/// 2 own medal texts on the total screen (<see cref="ClassTexts"/>). Entries without own limits hold the original
+/// <para>Table (lower data area, <see cref="DataExtension"/>): u16 limits[7 vehicles][8 classes][3] (bronze, silver, gold),
+/// then u8 flags[7][8]: 1 own limits, 2 own medal texts on the total screen (<see cref="ClassTexts"/>). Until Step 40 it
+/// had [7][4] and lay at 0x801FDC00 in the data area. Entries without own limits hold the original
 /// ones; a Birdman stage with points and without own limits keeps 70/80/90 per mission with points (computed by the
 /// module).</para>
 /// <para>Names of the game's functions and tables from the decompilation
@@ -26,8 +27,8 @@ namespace PW64Editor.Core.Classes;
 /// </remarks>
 public static class ClassLimits
 {
-    /// <summary>RAM address of the class table (data area, behind the result tables).</summary>
-    public const uint TableAddress = 0x801FDC00;
+    /// <summary>RAM address of the class table (lower data area).</summary>
+    public const uint TableAddress = DataExtension.ClassTableAddress;
 
     /// <summary>Size of the class table in bytes.</summary>
     public const int TableSize = (Vehicles * Classes * 3 * 2) + (Vehicles * Classes);
@@ -41,9 +42,15 @@ public static class ClassLimits
     /// <summary>Flag: the class has own medal texts.</summary>
     public const byte FlagOwnTexts = 2;
 
+    /// <summary>Flag: the class has own texts for the perfect score too (another number of tests than in the game).</summary>
+    public const byte FlagAllTexts = 4;
+
     private const int Vehicles = 7;
 
-    private const int Classes = 4;
+    private const int Classes = DataExtension.Classes;
+
+    /// <summary>Size of a class table of layout version 1 ([7][4]).</summary>
+    public const int Version1TableSize = (Vehicles * 4 * 3 * 2) + (Vehicles * 4);
 
     /// <summary>Highest limit the table can hold.</summary>
     public const int MaxLimit = 9999;
@@ -123,10 +130,14 @@ public static class ClassLimits
     /// <param name="settings">The settings of the classes.</param>
     /// <param name="bonusPatch">True if the game patch "Bonus games and Birdman" is applied.</param>
     /// <param name="ownTexts">True if the classes with own limits get own medal texts (<see cref="ClassTexts"/>).</param>
-    public static byte[]? Table(IEnumerable<ClassSettings> settings, bool bonusPatch, bool ownTexts)
+    /// <param name="missions">The missions of the game (null: the game's own): with <paramref name="ownTexts"/> the classes with
+    /// another number of tests get all their medal texts (flags 2 and 4, <see cref="ClassTexts.ChangedClasses"/>).</param>
+    public static byte[]? Table(IEnumerable<ClassSettings> settings, bool bonusPatch, bool ownTexts, IEnumerable<TestId>? missions = null)
     {
         List<ClassSettings> own = [.. settings.Where(s => s.Medals is { Count: 3 } && s.Vehicle is >= 0 and < Vehicles && s.Class is >= 0 and < Classes)];
-        if (own.Count == 0)
+        IReadOnlyList<(Vehicle Vehicle, int Class, int Tests)> changed = ownTexts ? ClassTexts.ChangedClasses(missions) : [];
+        // Classes 4-7 have no missions yet; their entries hold the limits of class 3 (Pilot) or the bonus entries.
+        if (own.Count == 0 && changed.Count == 0)
         {
             return null;
         }
@@ -147,6 +158,11 @@ public static class ClassLimits
                 {
                     table[FlagsOffset + (v * Classes) + c] = (byte)(FlagOwnLimits
                         | (ownTexts && ClassTexts.HasOwnTexts((Vehicle)v) ? FlagOwnTexts : 0));
+                }
+
+                if (changed.Any(x => (int)x.Vehicle == v && x.Class == c))
+                {
+                    table[FlagsOffset + (v * Classes) + c] |= FlagOwnTexts | FlagAllTexts;
                 }
             }
         }
@@ -185,6 +201,19 @@ public static class ClassLimits
         return result;
     }
 
-    /// <summary>True if the data area has room for the class table behind the result tables.</summary>
-    internal static bool FitsBehind(uint resultTablesEnd) => resultTablesEnd <= TableAddress && TableAddress + TableSize <= DataArea.End;
+    /// <summary>A class table of layout version 1 ([7][4]) in the current layout ([7][8]).</summary>
+    public static byte[] FromVersion1(ReadOnlySpan<byte> old)
+    {
+        byte[] table = new byte[TableSize];
+        for (int v = 0; v < Vehicles; v++)
+        {
+            for (int c = 0; c < 4; c++)
+            {
+                old.Slice(((v * 4) + c) * 6, 6).CopyTo(table.AsSpan(((v * Classes) + c) * 6));
+                table[FlagsOffset + (v * Classes) + c] = old[(Vehicles * 4 * 6) + (v * 4) + c];
+            }
+        }
+
+        return table;
+    }
 }

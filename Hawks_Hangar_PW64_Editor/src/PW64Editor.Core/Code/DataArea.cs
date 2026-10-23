@@ -56,8 +56,8 @@ public static class DataArea
     /// <summary>Header: magic number 'HHMD'.</summary>
     public const uint Magic = 0x48484D44;
 
-    /// <summary>Layout version of the data area.</summary>
-    public const uint Version = 1;
+    /// <summary>Layout version of the data area (2: the mission tables in the lower data area, <see cref="DataExtension"/>).</summary>
+    public const uint Version = 2;
 
     /// <summary>Size of the header in front of the mission entries.</summary>
     public const int HeaderSize = 0x100;
@@ -95,7 +95,8 @@ public static class DataArea
     /// <summary>Header offset of the size of the result tables (0 = none).</summary>
     public const int ResultTablesSizeOffset = 0x10;
 
-    /// <summary>Header offset of the mask of the Birdman missions with points (u16, <see cref="Missions.ResultTables.BirdmanPointsMask"/>).</summary>
+    /// <summary>Header offset of the mask of the Birdman missions with points (u16, bit class × 4 + test; layout version 1 only,
+    /// since version 2 they are in the lower data area, <see cref="DataExtension"/>).</summary>
     public const int BirdmanPointsOffset = 0x14;
 
     /// <summary>Header: RAM address of the class table (<see cref="Classes.ClassLimits"/>), 0 = none.</summary>
@@ -116,63 +117,68 @@ public static class DataArea
     /// </summary>
     public const uint LiveBirdmanAddress = Start + 0x50;
 
+    /// <summary>Header: size of the image of the lower data area (<see cref="DataExtension"/>, 0 = none; version 2).</summary>
+    public const int ExtensionSizeOffset = 0x24;
+
+    /// <summary>Layout version 1 (until Step 40): the result tables [7][4][5] at this address of the data area.</summary>
+    public const uint Version1ResultTablesAddress = MissionTableAddress + (MissionCapacity * MissionEntrySize);
+
+    /// <summary>Layout version 1: the class table [7][4] at this address.</summary>
+    public const uint Version1ClassTableAddress = 0x801FDC00;
+
     /// <summary>
-    /// The image as the module copies it into the data area: header, the used entries and, if given, the
-    /// result tables at their place behind the room for all entries.
+    /// The images of the data area and of its lower part for a build: the mission entries, the unlock and environment
+    /// tables in the data area; the mission list, the Birdman missions with points, the photo missions, the result tables
+    /// and the class table in the lower part (<see cref="DataExtension"/>).
+    /// </summary>
+    /// <exception cref="InvalidDataException">A table does not fit.</exception>
+    public static DataImages CreateImages(GameModuleOptions options)
+    {
+        IReadOnlyList<int> files = options.MissionFiles ?? DataExtension.GameMissionFiles;
+        byte[] extension = DataExtension.Create(files, options.BirdmanPointMissions, options.PhotoMissions ?? DataExtension.GamePhotoMissions,
+            options.ResultTables, options.ClassTable);
+        byte[] main = CreateImage(options.Conditions, options.UnlockTable, options.EnvironmentTable,
+            options.ResultTables?.Length ?? 0, options.ClassTable is not null, extension.Length);
+        return new DataImages(main, extension);
+    }
+
+    /// <summary>
+    /// The image of the data area as the module copies it: header and the used entries, and the unlock table at its place.
     /// </summary>
     /// <param name="missions">Missions with settings.</param>
-    /// <param name="resultTables">The result tables of <see cref="GamePatches.BonusGames"/> (<see cref="Missions.ResultTables.Create"/>), or null.</param>
-    /// <exception cref="InvalidDataException">More missions than the table has room for, or the tables do not fit.</exception>
-    /// <param name="birdmanPoints">The mask of the Birdman missions with points (header +0x14).</param>
-    public static byte[] CreateImage(IReadOnlyList<GameModuleCondition> missions, byte[]? resultTables = null, ushort birdmanPoints = 0,
-        byte[]? classTable = null, byte[]? unlockTable = null, byte[]? environmentTable = null)
+    /// <param name="unlockTable">The unlock table, or null.</param>
+    /// <param name="environmentTable">The island table of the environments, or null.</param>
+    /// <param name="resultTablesSize">Size of the result tables in the lower data area (0 = none).</param>
+    /// <param name="classTable">True if the lower data area has the class table.</param>
+    /// <param name="extensionSize">Size of the image of the lower data area.</param>
+    /// <exception cref="InvalidDataException">More missions than the table has room for, or a table does not fit.</exception>
+    public static byte[] CreateImage(IReadOnlyList<GameModuleCondition> missions, byte[]? unlockTable = null, byte[]? environmentTable = null,
+        int resultTablesSize = 0, bool classTable = false, int extensionSize = 0)
     {
         if (missions.Count > MissionCapacity)
         {
             throw new InvalidDataException($"The mission settings table has room for {MissionCapacity} missions.");
         }
 
-        int tablesOffset = (int)(Missions.ResultTables.Address - Start);
-        if (resultTables is not null && (tablesOffset + resultTables.Length > End - Start || tablesOffset + resultTables.Length > RomReserve))
-        {
-            throw new InvalidDataException("The result tables do not fit into the data area.");
-        }
-
-        int classOffset = (int)(Classes.ClassLimits.TableAddress - Start);
-        if (classTable is not null && (classTable.Length != Classes.ClassLimits.TableSize
-            || !Classes.ClassLimits.FitsBehind(Missions.ResultTables.Address + (uint)(resultTables?.Length ?? 0))))
-        {
-            throw new InvalidDataException("The class table does not fit into the data area.");
-        }
-
         int unlockOffset = (int)(Classes.MenuUnlocks.TableAddress - Start);
         if (unlockTable is not null && (unlockTable.Length != Classes.MenuUnlocks.TableSize
-            || Classes.ClassLimits.TableAddress + Classes.ClassLimits.TableSize > Classes.MenuUnlocks.TableAddress
-            || Classes.MenuUnlocks.TableAddress + Classes.MenuUnlocks.TableSize > End
-            || !Classes.ClassLimits.FitsBehind(Missions.ResultTables.Address + (uint)(resultTables?.Length ?? 0))))
+            || Classes.MenuUnlocks.TableAddress < MissionTableAddress + (MissionCapacity * MissionEntrySize)
+            || Classes.MenuUnlocks.TableAddress + Classes.MenuUnlocks.TableSize > End))
         {
             throw new InvalidDataException("The unlock table does not fit into the data area.");
         }
 
-        byte[] image = new byte[unlockTable is not null ? unlockOffset + unlockTable.Length
-            : classTable is not null ? classOffset + classTable.Length
-            : resultTables is null ? HeaderSize + (missions.Count * MissionEntrySize) : tablesOffset + resultTables.Length];
+        byte[] image = new byte[unlockTable is not null ? unlockOffset + unlockTable.Length : HeaderSize + (missions.Count * MissionEntrySize)];
         BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(0x00), Magic);
         BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(0x04), Version);
         BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(0x08), (uint)missions.Count);
         BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(0x0C), MissionEntrySize);
-        BinaryPrimitives.WriteUInt16BigEndian(image.AsSpan(BirdmanPointsOffset), birdmanPoints);
+        BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(ResultTablesSizeOffset), (uint)resultTablesSize);
         BinaryPrimitives.WriteSingleBigEndian(image.AsSpan((int)(LiveViewAddress - Start)), 2000f); // the game's view distance
-        if (resultTables is not null)
+        BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(ExtensionSizeOffset), (uint)((extensionSize + 7) & ~7));
+        if (classTable)
         {
-            BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(ResultTablesSizeOffset), (uint)resultTables.Length);
-            resultTables.CopyTo(image, tablesOffset);
-        }
-
-        if (classTable is not null)
-        {
-            BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(ClassTableOffset), Classes.ClassLimits.TableAddress);
-            classTable.CopyTo(image, classOffset);
+            BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(ClassTableOffset), DataExtension.ClassTableAddress);
         }
 
         if (unlockTable is not null)
@@ -272,30 +278,76 @@ public static class DataArea
         entry[0x14] = c.HardEndMusic;
     }
 
-    /// <summary>The result tables of an image made by <see cref="CreateImage"/>, or null if it has none.</summary>
-    public static byte[]? ReadResultTables(ReadOnlySpan<byte> image)
+    private static bool IsImage(ReadOnlySpan<byte> image) => image.Length >= HeaderSize && BinaryPrimitives.ReadUInt32BigEndian(image) == Magic;
+
+    private static uint VersionOf(ReadOnlySpan<byte> image) => IsImage(image) ? BinaryPrimitives.ReadUInt32BigEndian(image[0x04..]) : 0;
+
+    /// <summary>
+    /// The result tables of a build ([7][8][5], <see cref="Missions.ResultTables"/>), or null if it has none. Tables of layout
+    /// version 1 ([7][4][5] in the data area) come back in the current layout.
+    /// </summary>
+    public static byte[]? ReadResultTables(DataImages images)
     {
-        if (image.Length < HeaderSize || BinaryPrimitives.ReadUInt32BigEndian(image) != Magic)
+        if (!IsImage(images.Main))
         {
             return null;
         }
 
-        int size = (int)BinaryPrimitives.ReadUInt32BigEndian(image[ResultTablesSizeOffset..]);
-        int offset = (int)(Missions.ResultTables.Address - Start);
-        return size > 0 && offset + (long)size <= image.Length ? image.Slice(offset, size).ToArray() : null;
+        int size = (int)BinaryPrimitives.ReadUInt32BigEndian(images.Main.AsSpan(ResultTablesSizeOffset));
+        if (size <= 0)
+        {
+            return null;
+        }
+
+        if (VersionOf(images.Main) >= 2)
+        {
+            return images.Extension is { } ext ? DataExtension.ReadTable(ext, DataExtension.ResultTablesAddress, size) : null;
+        }
+
+        int offset = (int)(Version1ResultTablesAddress - Start);
+        return offset + (long)size <= images.Main.Length
+            ? Missions.ResultTables.FromVersion1(images.Main.AsSpan(offset, size), Version1ResultTablesAddress)
+            : null;
     }
 
-    /// <summary>The class table of an image made by <see cref="CreateImage"/>, or null if it has none.</summary>
-    public static byte[]? ReadClassTable(ReadOnlySpan<byte> image)
+    /// <summary>The class table of a build ([7][8], <see cref="Classes.ClassLimits"/>), or null; version 1 tables ([7][4]) are widened.</summary>
+    public static byte[]? ReadClassTable(DataImages images)
     {
-        if (image.Length < HeaderSize || BinaryPrimitives.ReadUInt32BigEndian(image) != Magic
-            || BinaryPrimitives.ReadUInt32BigEndian(image[ClassTableOffset..]) != Classes.ClassLimits.TableAddress)
+        if (!IsImage(images.Main))
         {
             return null;
         }
 
-        int offset = (int)(Classes.ClassLimits.TableAddress - Start);
-        return offset + Classes.ClassLimits.TableSize <= image.Length ? image.Slice(offset, Classes.ClassLimits.TableSize).ToArray() : null;
+        uint address = BinaryPrimitives.ReadUInt32BigEndian(images.Main.AsSpan(ClassTableOffset));
+        if (VersionOf(images.Main) >= 2)
+        {
+            return address == DataExtension.ClassTableAddress && images.Extension is { } ext
+                ? DataExtension.ReadTable(ext, DataExtension.ClassTableAddress, Classes.ClassLimits.TableSize)
+                : null;
+        }
+
+        int offset = (int)(Version1ClassTableAddress - Start);
+        return address == Version1ClassTableAddress && offset + Classes.ClassLimits.Version1TableSize <= images.Main.Length
+            ? Classes.ClassLimits.FromVersion1(images.Main.AsSpan(offset, Classes.ClassLimits.Version1TableSize))
+            : null;
+    }
+
+    /// <summary>The Birdman missions with points of a build (version 1: the mask of header +0x14, bit class × 4 + test).</summary>
+    public static IReadOnlyList<SaveGame.TestId> ReadBirdmanPoints(DataImages images)
+    {
+        if (!IsImage(images.Main))
+        {
+            return [];
+        }
+
+        if (VersionOf(images.Main) >= 2)
+        {
+            return images.Extension is { } ext ? DataExtension.ReadBirdmanPoints(ext) : [];
+        }
+
+        ushort mask = BinaryPrimitives.ReadUInt16BigEndian(images.Main.AsSpan(BirdmanPointsOffset));
+        return [.. Enumerable.Range(0, 16).Where(bit => (mask & (1 << bit)) != 0)
+            .Select(bit => new SaveGame.TestId(bit / 4, SaveGame.Vehicle.Birdman, bit % 4))];
     }
 
     /// <summary>The unlock table of an image made by <see cref="CreateImage"/>, or null if it has none.</summary>
@@ -320,12 +372,6 @@ public static class DataArea
                 ? image.Slice(offset, Missions.WeatherEnvironments.TableSize).ToArray()
                 : null;
     }
-
-    /// <summary>The mask of the Birdman missions with points of an image (0 for none or not an image).</summary>
-    public static ushort ReadBirdmanPoints(ReadOnlySpan<byte> image) =>
-        image.Length >= HeaderSize && BinaryPrimitives.ReadUInt32BigEndian(image) == Magic
-            ? BinaryPrimitives.ReadUInt16BigEndian(image[BirdmanPointsOffset..])
-            : (ushort)0;
 
     /// <summary>Reads the mission entries of an image made by <see cref="CreateImage"/>.</summary>
     /// <exception cref="InvalidDataException">Not a data area image.</exception>
@@ -425,8 +471,8 @@ public static class DataArea
     /// </summary>
     public static IReadOnlyList<WordPatch> Patches()
     {
-        uint hi = (Start + 0x8000) >> 16;   // lui/addiu pair: addiu adds a signed value
-        uint lo = Start & 0xFFFF;
+        uint hi = (DataExtension.Start + 0x8000) >> 16;   // lui/addiu pair: addiu adds a signed value
+        uint lo = DataExtension.Start & 0xFFFF;
         return
         [
             // uvMemInitBlocks: start of the program block. The original loads 0x80200000 with one lui and needs
@@ -447,3 +493,8 @@ public static class DataArea
         ];
     }
 }
+
+/// <summary>The image of the data area and the image of its lower part (<see cref="DataExtension"/>) of a build.</summary>
+/// <param name="Main">The data area (header, mission entries, unlock table).</param>
+/// <param name="Extension">The lower data area, or null (builds before layout version 2).</param>
+public sealed record DataImages(byte[] Main, byte[]? Extension);

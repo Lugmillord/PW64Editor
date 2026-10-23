@@ -59,6 +59,13 @@ public sealed class ProjectSettings
     /// <summary>Changed result sheets and generated point texts of missions (only missions with changes).</summary>
     public List<Missions.MissionSettings> Missions { get; set; } = [];
 
+    /// <summary>
+    /// The game's mission files that are no missions of the hack any more (their user file numbers): they stay in the ROM,
+    /// so no file number moves, but the mission list leaves them out. Added missions are files of the project behind the
+    /// game's files (<see cref="HackProject.GetOverrides"/>).
+    /// </summary>
+    public List<int> RemovedMissions { get; set; } = [];
+
     /// <summary>Changed classes: own medal limits and islands (Classes tab; only classes with changes).</summary>
     public List<Classes.ClassSettings> Classes { get; set; } = [];
 

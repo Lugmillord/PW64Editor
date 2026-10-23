@@ -147,7 +147,9 @@ public partial class MissionsTab : UserControl
     public void Load(EditorSession session)
     {
         _session = session;
-        TestId? selected = SelectedMission?.Id;
+        TestId? selected = _selectAfterLoad ?? SelectedMission?.Id;
+        _selectAfterLoad = null;
+        _copyClassOf = null;
         _drafts.Clear();
         _customTime.Clear();
         try
@@ -527,6 +529,7 @@ public partial class MissionsTab : UserControl
         try
         {
             ShowWarnings(mission);
+            ShowMissionList(mission);
             if (mission is null)
             {
                 InfoText.Text = _missions.Count == 0 ? L.T("No missions.") : string.Empty;

@@ -164,6 +164,26 @@ public static class ProjectImporter
             throw new ProjectException(CoreText.F("The game files of the ROM cannot be read: {0}", ex.Message), ex);
         }
 
+        // Added and removed missions: the mission list of the lower data area (user file numbers in the order the game
+        // loads them). Added missions are files behind the game's; removed ones stay in the ROM but leave the list.
+        DataImages? dataImages = module is null ? null : GameModule.ReadDataImages(hack, module);
+        IReadOnlyList<int> missionList = dataImages?.Extension is { } extension ? DataExtension.ReadMissionFiles(extension) : [];
+        int cleanCount = cleanFs.Files.Count;
+        List<GameFile> addedMissions = missionList.Count == 0
+            ? []
+            : [.. hackFs.Files.Where(f => f.TableIndex >= cleanCount && f.FileType == MissionFile.FormType
+                && f.Group == FileTypeLimits.UserFileGroup && missionList.Contains(f.GroupIndex)).OrderBy(f => f.TableIndex)];
+        if (missionList.Count > 0)
+        {
+            settings.RemovedMissions.AddRange(DataExtension.GameMissionFiles.Where(n => !missionList.Contains(n)));
+        }
+
+        IReadOnlyList<TestId>? missionIds = MissionIds(hackFs, missionList);
+        if (addedMissions.Count > 0 || settings.RemovedMissions.Count > 0)
+        {
+            notes.Add(Info(CoreText.F("Missions: {0} added, {1} of the game's removed.", addedMissions.Count, settings.RemovedMissions.Count)));
+        }
+
         // The classes (Classes tab): own medal limits from the class table, islands from the test screen's table.
         settings.Classes = ReadClasses(hack, cleanRom.Data, layout, module, out bool classTexts);
         if (module is not null && GameModule.ReadDataImage(hack, module) is { } unlockImage && DataArea.ReadUnlockTable(unlockImage) is { } unlockTable
@@ -194,8 +214,8 @@ public static class ProjectImporter
             try
             {
                 GameFile cleanText = Text.GameTextFile.FindFile(cleanFs);
-                IReadOnlyList<TestId> birdman = module is not null && GameModule.ReadDataImage(hack, module) is { } image
-                    ? ResultTables.BirdmanPointsFromMask(DataArea.ReadBirdmanPoints(image))
+                IReadOnlyList<TestId> birdman = module is not null && GameModule.ReadDataImages(hack, module) is { } images
+                    ? DataArea.ReadBirdmanPoints(images)
                     : [];
                 List<MissionSettings> birdmanSettings = [.. birdman.Select(id =>
                 {
@@ -204,7 +224,7 @@ public static class ProjectImporter
                     return m;
                 })];
                 if (ProjectBuilder.AddGeneratedTexts(bonusPatch, classTexts, birdmanSettings, settings.Classes, cleanText.Data,
-                        Text.TextFont.Load(cleanFs)) is { } built)
+                        Text.TextFont.Load(cleanFs), missionIds) is { } built)
                 {
                     patchTexts = (cleanText.TableIndex, built);
                 }
@@ -231,8 +251,33 @@ public static class ProjectImporter
             }
         }
 
-        List<GameFile> changed = CompareFiles(cleanFs, hackFs, notes, generated);
+        // A removed mission of the game is the original file with "no vehicle" in its COMM block, as the build makes it.
+        foreach (GameFile removed in cleanFs.Files.Where(f => f.FileType == MissionFile.FormType && f.Group == FileTypeLimits.UserFileGroup
+                     && settings.RemovedMissions.Contains(f.GroupIndex)))
+        {
+            try
+            {
+                MissionFile file = MissionFile.Parse(removed.Data);
+                MissionComm comm = file.Comm.Clone();
+                comm.Id = comm.Id with { Vehicle = (Vehicle)MissionComm.NoVehicle };
+                generated.Add((removed.TableIndex, file.WithComm(comm)));
+            }
+            catch (InvalidDataException)
+            {
+                // damaged: compared as it is
+            }
+        }
+
+        List<GameFile> changed = CompareFiles(cleanFs, hackFs, notes, generated, addedMissions.Count);
         List<GameFile> hackFiles = cleanFs.Files.Select(f => changed.FirstOrDefault(c => c.TableIndex == f.TableIndex) ?? f).ToList();
+        changed.AddRange(addedMissions);
+        hackFiles.AddRange(addedMissions);
+
+        // The missions of the hack: those of the mission list (without it, all mission files of the game).
+        List<GameFile> missionFiles = missionList.Count == 0
+            ? [.. hackFiles.Where(f => f.FileType == MissionFile.FormType)]
+            : [.. missionList.Select(n => hackFiles.FirstOrDefault(f => f.FileType == MissionFile.FormType && f.Group == FileTypeLimits.UserFileGroup
+                && f.GroupIndex == n)).OfType<GameFile>()];
 
         // Music, and where the audio data lies.
         Dictionary<int, byte[]> songs = CompareMusic(hack, cleanRom.Data, layout, notes, out int? sequenceOffset);
@@ -267,7 +312,7 @@ public static class ProjectImporter
         }
 
         // Missions.
-        ReadMissions(hack, cleanRom.Data, layout, module, hackFiles, settings, notes);
+        ReadMissions(hack, cleanRom.Data, layout, module, missionFiles, cleanFs, dataImages, settings, notes);
 
         int textIndex = -1;
         try
@@ -488,9 +533,11 @@ public static class ProjectImporter
     /// <param name="clean">The clean ROM's files.</param>
     /// <param name="hack">The hack's files.</param>
     /// <param name="notes">The report.</param>
-    /// <param name="builtTextFile">The text file a build makes from the original one by itself (game patch "Bonus games and
-    /// Birdman"), or null: the hack's text file is no change if it is this one.</param>
-    private static List<GameFile> CompareFiles(GameFileSystem clean, GameFileSystem hack, List<ImportNote> notes, IReadOnlyList<(int Index, byte[] Data)> generated)
+    /// <param name="generated">Files the build makes from the original ones by itself (texts, environments, removed
+    /// missions): a hack file equal to one of them is no change of its own.</param>
+    /// <param name="addedMissions">Number of the added missions among the files behind the game's (taken over by the caller).</param>
+    private static List<GameFile> CompareFiles(GameFileSystem clean, GameFileSystem hack, List<ImportNote> notes, IReadOnlyList<(int Index, byte[] Data)> generated,
+        int addedMissions)
     {
         var changed = new List<GameFile>();
         int otherType = 0;
@@ -513,7 +560,7 @@ public static class ProjectImporter
             }
         }
 
-        int added = hack.Files.Count(f => clean.Files.All(c => c.TableIndex != f.TableIndex));
+        int added = hack.Files.Count(f => clean.Files.All(c => c.TableIndex != f.TableIndex)) - addedMissions;
         int missing = clean.Files.Count(c => hack.Files.All(f => f.TableIndex != c.TableIndex));
         notes.Add(Info(CoreText.F("{0} changed game files taken over as replacement files.", changed.Count)));
         if (added > 0)
@@ -626,7 +673,7 @@ public static class ProjectImporter
             return existing;
         }
 
-        if (module is not null && GameModule.ReadDataImage(hack, module) is { } image && DataArea.ReadClassTable(image) is { } table)
+        if (module is not null && GameModule.ReadDataImages(hack, module) is { } images && DataArea.ReadClassTable(images) is { } table)
         {
             ownTexts = table.AsSpan(Classes.ClassLimits.FlagsOffset).ToArray().Any(f => (f & Classes.ClassLimits.FlagOwnTexts) != 0);
             foreach ((Vehicle vehicle, int classIndex, IReadOnlyList<int> medals) in Classes.ClassLimits.ReadTable(table))
@@ -802,13 +849,40 @@ public static class ProjectImporter
         return weather.IsEmpty ? null : weather;
     }
 
-    /// <summary>The mission settings: the entries of the data area, changed result rows and hidden demo buttons.</summary>
-    private static void ReadMissions(byte[] hack, byte[] clean, RomLayout layout, GameModuleHeader? module, IReadOnlyList<GameFile> hackFiles,
-        ProjectSettings settings, List<ImportNote> notes)
+    /// <summary>The places of the hack's missions in the order of its mission list, or null without one (or if a file is damaged).</summary>
+    private static IReadOnlyList<TestId>? MissionIds(GameFileSystem hack, IReadOnlyList<int> missionList)
     {
-        List<MissionComm> comms = hackFiles.Where(f => f.FileType == MissionFile.FormType)
-            .Select(f => MissionFile.Parse(f.Data).Comm)
+        if (missionList.Count == 0)
+        {
+            return null;
+        }
+
+        try
+        {
+            return [.. missionList
+                .Select(n => hack.Files.FirstOrDefault(f => f.FileType == MissionFile.FormType && f.Group == FileTypeLimits.UserFileGroup && f.GroupIndex == n))
+                .OfType<GameFile>()
+                .Select(f => MissionFile.Parse(f.Data).Comm.Id)];
+        }
+        catch (InvalidDataException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The mission settings: the entries of the data area, changed result rows, photo missions and hidden demo buttons.
+    /// </summary>
+    /// <param name="missionFiles">The hack's missions (the files of its mission list).</param>
+    /// <param name="cleanFs">The game's files (which of them are the game's photo missions).</param>
+    private static void ReadMissions(byte[] hack, byte[] clean, RomLayout layout, GameModuleHeader? module, IReadOnlyList<GameFile> missionFiles,
+        GameFileSystem cleanFs, DataImages? images, ProjectSettings settings, List<ImportNote> notes)
+    {
+        List<(GameFile File, MissionComm Comm)> missions = missionFiles
+            .Select(f => (f, MissionFile.Parse(f.Data).Comm))
+            .Where(m => (byte)m.Item2.Id.Vehicle != MissionComm.NoVehicle)
             .ToList();
+        List<MissionComm> comms = [.. missions.Select(m => m.Comm)];
 
         IReadOnlyList<GameModuleCondition> entries = [];
         if (module is not null)
@@ -824,16 +898,16 @@ public static class ProjectImporter
         }
 
         // Game patch "Bonus games and Birdman": the Birdman missions with points and their rows (in the data area's tables).
-        byte[]? image = module is null ? null : GameModule.ReadDataImage(hack, module);
-        IReadOnlyList<TestId> birdmanPoints = image is null ? [] : ResultTables.BirdmanPointsFromMask(DataArea.ReadBirdmanPoints(image));
-        byte[]? resultTables = image is null ? null : DataArea.ReadResultTables(image);
+        IReadOnlyList<TestId> birdmanPoints = images is null ? [] : DataArea.ReadBirdmanPoints(images);
+        byte[]? resultTables = images is null ? null : DataArea.ReadResultTables(images);
 
         MissionTables? cleanTables = layout.Missions is null ? null : new MissionTables(clean, layout.Missions);
         MissionTables? hackTables = layout.Missions is null ? null : new MissionTables(hack, layout.Missions);
         HashSet<Vehicle> hiddenDemos = HiddenDemos(hack);
+        IReadOnlyList<TestId>? photoMissions = images?.Extension is { } extension ? DataExtension.ReadPhotoMissions(extension) : null;
 
         int withSettings = 0, rowsChanged = 0;
-        foreach (MissionComm comm in comms)
+        foreach ((GameFile file, MissionComm comm) in missions)
         {
             TestId id = comm.Id;
             MissionSettings mission = MissionSettings.For(id);
@@ -892,9 +966,12 @@ public static class ProjectImporter
                 }
             }
 
-            if (birdmanPoints.Contains(id))
+            // The rows of the Birdman missions with points and of the places the game has no test at are only in the
+            // data area's tables.
+            bool newPlace = MissionPositions.NewPointsTextName(id, false) is not null;
+            if (birdmanPoints.Contains(id) || newPlace)
             {
-                mission.BirdmanPoints = true;
+                mission.BirdmanPoints = !newPlace;
                 if (resultTables is not null && ResultTables.RowsOffset(id) is { } offset && offset + MissionLayout.ResultRows <= resultTables.Length)
                 {
                     List<int> stored = [.. resultTables.AsSpan(offset, MissionLayout.ResultRows).ToArray().Select(b => (int)b)];
@@ -903,6 +980,17 @@ public static class ProjectImporter
                     {
                         mission.ResultRows = rows;
                     }
+                }
+            }
+
+            // Photo missions ("Shutter Bug"): only a difference to the game's photo missions (by their file) is a setting.
+            if (photoMissions is not null)
+            {
+                bool photo = photoMissions.Contains(id);
+                bool gamePhoto = file.TableIndex < cleanFs.Files.Count && ProjectMissions.IsGamePhotoFile(cleanFs, file.TableIndex);
+                if (photo != gamePhoto)
+                {
+                    mission.PhotoMission = photo;
                 }
             }
 

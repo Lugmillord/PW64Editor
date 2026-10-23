@@ -12,11 +12,16 @@ namespace PW64Editor.Core.Classes;
 /// texts (HG_A_S3_GOLD, SD_L2_S3_SILVER, …), written by the editor from the shared text of the project with the new
 /// number; the game module shows them (module_tot_medal_text). The texts for a perfect score and "Perfect score!!!" do
 /// not name a limit and stay shared. The Birdman's stage texts are written by <see cref="Missions.ResultTables"/>.
+/// A class of a main vehicle with another number of tests than in the game (more or fewer missions) gets all five texts,
+/// written anew with one line per test (the game's list its tests), also without own limits.
 /// </summary>
 public static partial class ClassTexts
 {
     /// <summary>The medal texts with a limit: bronze ("BLONDS" in the game's names), silver, gold.</summary>
     public static IReadOnlyList<string> Medals { get; } = ["BLONDS", "SILVER", "GOLD"];
+
+    /// <summary>All five medal texts of a total screen: bronze, silver, gold, perfect score and "Perfect score!!!".</summary>
+    public static IReadOnlyList<string> AllMedals { get; } = ["BLONDS", "SILVER", "GOLD", "PERFECT", "GREAT"];
 
     private static readonly string[] Prefixes = ["HG", "RP", "GC", "CB", "SD", "HP"];
 
@@ -27,11 +32,24 @@ public static partial class ClassTexts
 
     /// <summary>Name of a class's own medal text (medal 0 bronze, 1 silver, 2 gold), or null for the Birdman.</summary>
     public static string? TextName(Vehicle vehicle, int classIndex, int medal) =>
-        !HasOwnTexts(vehicle) || medal is < 0 or > 2 || classIndex is < 0 or > 3
+        !HasOwnTexts(vehicle) || medal is < 0 or > 4 || classIndex is < 0 or > 3 || (medal > 2 && !Vehicles.IsMain(vehicle))
             ? null
             : Vehicles.IsMain(vehicle)
-                ? $"{Prefixes[(int)vehicle]}_{ClassLetters[classIndex]}_S3_{Medals[medal]}"
-                : $"{Prefixes[(int)vehicle]}_L{classIndex + 1}_S3_{Medals[medal]}";
+                ? $"{Prefixes[(int)vehicle]}_{ClassLetters[classIndex]}_S3_{AllMedals[medal]}"
+                : $"{Prefixes[(int)vehicle]}_L{classIndex + 1}_S3_{AllMedals[medal]}";
+
+    /// <summary>
+    /// The classes of the main vehicles whose number of tests differs from the game's (they get all five texts of their own),
+    /// with their tests.
+    /// </summary>
+    /// <param name="missions">The missions of the game, or null for the game's own.</param>
+    public static IReadOnlyList<(Vehicle Vehicle, int Class, int Tests)> ChangedClasses(IEnumerable<TestId>? missions) =>
+        missions is null
+            ? []
+            : [.. missions.Where(m => Vehicles.IsMain(m.Vehicle) && m.Class is >= 0 and < 4).GroupBy(m => (m.Vehicle, m.Class))
+                .Select(g => (g.Key.Vehicle, g.Key.Class, Tests: g.Select(m => m.Test).Distinct().Count()))
+                .Where(c => c.Tests != Missions.MissionPositions.GameTestCount(c.Vehicle, c.Class))
+                .OrderBy(c => (c.Vehicle, c.Class))];
 
     /// <summary>The game's text the own text is made from.</summary>
     public static string TemplateName(Vehicle vehicle, int classIndex, int medal) =>
@@ -40,7 +58,7 @@ public static partial class ClassTexts
     /// <summary>True for the name of a class's own medal text.</summary>
     public static bool IsClassText(string name) => NamePattern().IsMatch(name);
 
-    [GeneratedRegex("^((HG|RP|GC)_[EABP]|(CB|SD|HP)_L[123])_S3_(BLONDS|SILVER|GOLD)$")]
+    [GeneratedRegex("^((HG|RP|GC)_[EABP]_S3_(BLONDS|SILVER|GOLD|PERFECT|GREAT)|(CB|SD|HP)_L[123]_S3_(BLONDS|SILVER|GOLD))$")]
     private static partial Regex NamePattern();
 
     // The header: "[x=50][b]< 180 pts[/b]…" (the position centres the line by the width of the number).
@@ -67,10 +85,24 @@ public static partial class ClassTexts
     /// <summary>The own texts of the classes with own limits: name, markup (from the templates of the project's texts).</summary>
     /// <param name="classes">The settings of the classes.</param>
     /// <param name="markupOf">The markup of a text of the project by name, or null if it does not exist.</param>
-    public static IReadOnlyList<(string Name, string Markup)> Generated(IEnumerable<ClassSettings> classes, Func<string, string?> markupOf)
+    /// <param name="missions">The missions of the game (null: the game's own): classes with another number of tests.</param>
+    public static IReadOnlyList<(string Name, string Markup)> Generated(IEnumerable<ClassSettings> classes, Func<string, string?> markupOf,
+        IEnumerable<TestId>? missions = null)
     {
         var result = new List<(string, string)>();
-        foreach (ClassSettings settings in classes.Where(c => c.Medals is { Count: 3 } && HasOwnTexts(c.VehicleId) && c.Vehicle is >= 0 and < 6)
+        List<ClassSettings> classList = [.. classes];
+        IReadOnlyList<(Vehicle Vehicle, int Class, int Tests)> changed = ChangedClasses(missions);
+        foreach ((Vehicle vehicle, int classIndex, int tests) in changed)
+        {
+            IReadOnlyList<int> limits = classList.FirstOrDefault(c => c.VehicleId == vehicle && c.Class == classIndex)?.Medals is { Count: 3 } own
+                ? own
+                : ClassLimits.Original(vehicle, classIndex, false);
+            string prefix = $"{Prefixes[(int)vehicle]}_{ClassLetters[classIndex]}_S3_";
+            result.AddRange(Missions.ResultTables.MedalTexts(prefix, [.. Enumerable.Range(1, tests)], limits));
+        }
+
+        foreach (ClassSettings settings in classList.Where(c => c.Medals is { Count: 3 } && HasOwnTexts(c.VehicleId) && c.Vehicle is >= 0 and < 6
+                && !changed.Any(x => x.Vehicle == c.VehicleId && x.Class == c.Class))
             .OrderBy(c => (c.Vehicle, c.Class)))
         {
             for (int medal = 0; medal < 3; medal++)
@@ -96,10 +128,11 @@ public static partial class ClassTexts
     /// <param name="font">The font of the game (to read and write the texts).</param>
     /// <returns>The new text file, or null if nothing changed.</returns>
     /// <exception cref="InvalidDataException">The text file is damaged, or a generated text cannot be encoded.</exception>
-    public static byte[]? Add(byte[] textFile, IEnumerable<ClassSettings> classes, TextFont font)
+    /// <param name="missions">The missions of the game (null: the game's own).</param>
+    public static byte[]? Add(byte[] textFile, IEnumerable<ClassSettings> classes, TextFont font, IReadOnlyList<TestId>? missions = null)
     {
         List<ClassSettings> own = [.. classes.Where(c => c.Medals is { Count: 3 })];
-        if (own.Count == 0)
+        if (own.Count == 0 && ChangedClasses(missions).Count == 0)
         {
             return null;
         }
@@ -110,7 +143,7 @@ public static partial class ClassTexts
         string? MarkupOf(string name) => texts.FirstOrDefault(t => t.Name == name) is { } entry ? codec.Decode(entry.Data) : null;
 
         bool changed = false;
-        foreach ((string name, string markup) in Generated(own, MarkupOf))
+        foreach ((string name, string markup) in Generated(own, MarkupOf, missions))
         {
             TextEncodeResult encoded = codec.Encode(markup);
             if (!encoded.Success)

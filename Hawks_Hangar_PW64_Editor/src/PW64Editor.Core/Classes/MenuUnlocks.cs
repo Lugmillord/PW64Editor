@@ -180,7 +180,9 @@ public static class MenuUnlocks
     }
 
     /// <summary>What is wrong with the rules (the first problem), or null.</summary>
-    public static string? Problem(IReadOnlyList<FieldUnlock> rules)
+    /// <param name="rules">The rules.</param>
+    /// <param name="layout">The project's missions (their tests), or null for the game's.</param>
+    public static string? Problem(IReadOnlyList<FieldUnlock> rules, SaveGameLayout? layout = null)
     {
         foreach (FieldUnlock field in rules)
         {
@@ -207,10 +209,10 @@ public static class MenuUnlocks
                     return CoreText.F("{0}: a condition has a value the game cannot use.", name);
                 }
 
-                if (condition.Kind == UnlockKind.Points && condition.Value > HighestPoints((Vehicle)condition.Vehicle, condition.Class))
+                if (condition.Kind == UnlockKind.Points && condition.Value > HighestPoints((Vehicle)condition.Vehicle, condition.Class, layout))
                 {
                     return CoreText.F("{0}: {1} can give at most {2} points, so the condition can never be met.", name,
-                        FieldName((Vehicle)condition.Vehicle, condition.Class), HighestPoints((Vehicle)condition.Vehicle, condition.Class));
+                        FieldName((Vehicle)condition.Vehicle, condition.Class), HighestPoints((Vehicle)condition.Vehicle, condition.Class, layout));
                 }
             }
         }
@@ -221,10 +223,13 @@ public static class MenuUnlocks
     }
 
     /// <summary>The most points a field can have: 100 per test, 100 per bonus game level.</summary>
-    public static int HighestPoints(Vehicle vehicle, int classIndex) =>
+    /// <param name="vehicle">The vehicle.</param>
+    /// <param name="classIndex">The class.</param>
+    /// <param name="layout">The project's missions (their tests), or null for the game's.</param>
+    public static int HighestPoints(Vehicle vehicle, int classIndex, SaveGameLayout? layout = null) =>
         vehicle is Vehicle.Cannonball or Vehicle.SkyDiving or Vehicle.JumbleHopper
             ? SaveProgress.MaxPoints
-            : SaveProgress.MaxPoints * SaveGameLayout.RetailWithBirdmanStage4.TestCount(classIndex, vehicle);
+            : SaveProgress.MaxPoints * (layout ?? SaveGameLayout.RetailWithBirdmanStage4).TestCount(classIndex, vehicle);
 
     /// <summary>
     /// The unlock table for the data area, or null for the game's rules (no own rules and not every field open).

@@ -19,6 +19,12 @@ public sealed class ClassSettings
     public List<int>? Medals { get; set; }
 
     /// <summary>
+    /// The number of missions the own limits were made for, or null for the game's number of tests of the class (the
+    /// Classes tab offers to scale the limits when the class has another number).
+    /// </summary>
+    public int? MedalsForTests { get; set; }
+
+    /// <summary>
     /// The island of the class (0 Holiday Island … 3 Ever-Frost Island), or null for the original one: the island the
     /// missions of the class are flown on (each mission's COMM byte 3) and the one the test screen shows.
     /// </summary>
@@ -41,6 +47,7 @@ public sealed class ClassSettings
         Vehicle = Vehicle,
         Class = Class,
         Medals = Medals is null ? null : [.. Medals],
+        MedalsForTests = MedalsForTests,
         Island = Island,
     };
 }

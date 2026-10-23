@@ -136,12 +136,14 @@ def main():
         elf = os.path.join(tmp, 'module.elf')
         binary = os.path.join(tmp, 'module.bin')
         weather_obj = os.path.join(tmp, 'weather.o')
+        missions_obj = os.path.join(tmp, 'missions.o')
         run('mips-linux-gnu-gcc', *CFLAGS, '-c', os.path.join(HERE, 'module.c'), '-o', obj)
+        run('mips-linux-gnu-gcc', *CFLAGS, '-c', os.path.join(HERE, 'missions.c'), '-o', missions_obj)
         # weather.c uses the FPU (snow and rain); only integers and pointers cross between the two files.
         run('mips-linux-gnu-gcc', *[f if f != '-msoft-float' else '-mhard-float' for f in CFLAGS], '-c',
             os.path.join(HERE, 'weather.c'), '-o', weather_obj)
         run('mips-linux-gnu-ld', '-T', os.path.join(HERE, 'module.ld'), '--no-warn-rwx-segments', '--no-warn-mismatch',
-            obj, weather_obj, '-o', elf)
+            obj, weather_obj, missions_obj, '-o', elf)
         undefined = run('mips-linux-gnu-nm', '-u', elf).strip()
         if undefined:
             sys.exit('Undefined symbols (the module must not need libgcc):\n' + undefined)
@@ -268,6 +270,14 @@ def main():
         f'    public const uint EnvLevelAddress = 0x{symbols["module_env_level"]:08X};',
         f'    public const uint EnvTintAddress = 0x{symbols["module_env_tint"]:08X};',
         f'    public const uint EnvPaletteAddress = 0x{symbols["module_env_palette"]:08X};',
+        f'    public const uint ShutterBugAddress = 0x{symbols["module_shutter_bug"]:08X};',
+        f'    public const uint PhotoRecordAddress = 0x{symbols["module_photo_record"]:08X};',
+        f'    public const uint PhotoAlbumAddress = 0x{symbols["module_photo_album"]:08X};',
+        f'    public const uint PhotoPackAddress = 0x{symbols["module_photo_pack"]:08X};',
+        f'    public const uint PhotoUnpackAddress = 0x{symbols["module_photo_unpack"]:08X};',
+        f'    public const uint TotalPointsAddress = 0x{symbols["module_tot_points"]:08X};',
+        f'    public const uint TotalUnitsAddress = 0x{symbols["module_tot_units"]:08X};',
+        f'    public const uint TotalHeaderAddress = 0x{symbols["module_tot_header"]:08X};',
         '',
         '    /// <summary>Number of missions the settings table in the data area has room for.</summary>',
         f'    public const int ConditionsCapacity = {CONDITIONS_CAPACITY};',

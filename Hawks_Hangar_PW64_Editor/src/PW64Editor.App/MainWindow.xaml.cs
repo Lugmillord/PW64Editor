@@ -333,6 +333,33 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// Adds or removes a mission (Missions tab): edits are saved or discarded first, because the change moves texts and
+    /// files; then all tabs are read again (other missions, texts, classes and save layout).
+    /// </summary>
+    private async void OnMissionListChange(object? sender, MissionListChangeEventArgs e)
+    {
+        if (!await ConfirmUnsavedChangesAsync(e.Action))
+        {
+            return;
+        }
+
+        try
+        {
+            MissionListChange change = e.Change(_session);
+            MissionEditor.SelectAfterLoad(change.Select);
+            SaveEditor.ExpectMissionChanges(change.Places);
+            ReloadProject();
+            SetStatus(change.Status);
+        }
+        catch (Exception ex) when (Ui.IsExpectedError(ex))
+        {
+            ReloadProject();
+            SetStatus(L.T("Failed."));
+            Ui.ShowError(this, ex.Message);
+        }
+    }
+
     private async void OnGameFiles(object sender, RoutedEventArgs e)
     {
         // The window can add or remove the text file, which reloads the texts.

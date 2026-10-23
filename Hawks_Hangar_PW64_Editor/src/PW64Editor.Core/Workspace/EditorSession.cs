@@ -25,7 +25,7 @@ public sealed record NewText(int Index, string Name, string Markup);
 /// small and the logic can be tested without a UI. Methods may take a moment (building
 /// recompresses data, patches are verified); call them from a background thread in a UI.
 /// </remarks>
-public sealed class EditorSession
+public sealed partial class EditorSession
 {
     private GameFileSystem? _cleanFileSystem;
 
@@ -269,7 +269,7 @@ public sealed class EditorSession
         // limits get own medal texts: until a text is saved they exist only here (and in the build, which adds them the
         // same way).
         if (ProjectBuilder.AddGeneratedTexts(Project.HasPatch(GamePatches.BonusGames), ProjectBuilder.HasOwnClassTexts(Project),
-                Project.Settings.Missions, Project.Settings.Classes, data, font) is { } withTexts)
+                Project.Settings.Missions, Project.Settings.Classes, data, font, MissionIdsOrNull()) is { } withTexts)
         {
             data = withTexts;
         }
@@ -705,27 +705,19 @@ public sealed class EditorSession
     /// </summary>
     public MissionCatalogResult LoadMissions()
     {
-        Dictionary<int, FileOverride> overrides = Project.GetOverrides().ToDictionary(o => o.TableIndex);
         var sources = new List<MissionSource>();
         var problems = new List<string>();
-        foreach (GameFile file in CleanFileSystem.Files.Where(f => f.FileType == MissionFile.FormType))
+        try
         {
-            byte[] data = file.Data;
-            bool fromProject = false;
-            if (overrides.TryGetValue(file.TableIndex, out FileOverride? replacement))
+            foreach (ProjectMission mission in CurrentMissions())
             {
-                try
-                {
-                    data = File.ReadAllBytes(replacement.Path);
-                    fromProject = true;
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                {
-                    problems.Add(CoreText.F("Mission file {0}: {1}", file.GroupIndex, ex.Message));
-                }
+                sources.Add(new MissionSource(mission.File.TableIndex, mission.File.GroupIndex, mission.File.Data,
+                    mission.Added || HasOverride(mission.File.TableIndex)));
             }
-
-            sources.Add(new MissionSource(file.TableIndex, file.GroupIndex, data, fromProject));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ProjectException)
+        {
+            problems.Add(ex.Message);
         }
 
         MissionTables? tables = Layout.Missions is { } layout ? new MissionTables(CleanRom.Data, layout, Project.HasPatch(GamePatches.BonusGames),
@@ -745,6 +737,7 @@ public sealed class EditorSession
     public void SaveMission(MissionInfo mission, MissionComm comm, MissionSettings? settings)
     {
         GameFile original = CleanFileSystem.Files.FirstOrDefault(f => f.TableIndex == mission.TableIndex)
+            ?? AddedMissionFile(mission)
             ?? throw new ProjectException(CoreText.F("The game has no file with table index {0}.", mission.TableIndex));
         byte[] data = mission.File.WithComm(comm);
 
@@ -756,7 +749,7 @@ public sealed class EditorSession
             data = MissionFile.Parse(data).WithLandingPad(pad);
         }
 
-        if (data.AsSpan().SequenceEqual(original.Data))
+        if (original.TableIndex < CleanFileSystem.Files.Count && data.AsSpan().SequenceEqual(original.Data))
         {
             Project.RemoveOverride(original.TableIndex);
         }
@@ -844,7 +837,7 @@ public sealed class EditorSession
     /// <exception cref="ArgumentException">The rules cannot be used (<see cref="Classes.MenuUnlocks.Problem"/>).</exception>
     public void SaveUnlocks(IReadOnlyList<Classes.FieldUnlock>? rules)
     {
-        if (rules is not null && Classes.MenuUnlocks.Problem(rules) is { } problem)
+        if (rules is not null && Classes.MenuUnlocks.Problem(rules, CurrentSaveLayout()) is { } problem)
         {
             throw new ArgumentException(problem, nameof(rules));
         }

@@ -96,6 +96,13 @@ public sealed class MissionSettings
     /// <summary>Weather and view settings that are not in the mission file (fog colour, view distance, fog, rain), or null.</summary>
     public MissionWeather? Weather { get; set; }
 
+    /// <summary>
+    /// The mission is a photo mission ("Shutter Bug": the test screen offers the photo, the HUD says "Photo", the album shows
+    /// the points), or null for the game's rule: the game's photo missions (Hang Glider Class A test 1, Class B test 2, Pilot
+    /// test 3) stay photo missions wherever their test moves. A copy of a photo mission is one too.
+    /// </summary>
+    public bool? PhotoMission { get; set; }
+
     /// <summary>The mission these settings belong to.</summary>
     [JsonIgnore]
     public TestId Id => new(Class, (Vehicle)Vehicle, Test);
@@ -104,7 +111,8 @@ public sealed class MissionSettings
     [JsonIgnore]
     public bool IsEmpty => ResultRows is null && !GenerateTexts && Footnote.Count == 0 && TextPoints.Count == 0
         && AutoFootnote is null && Conditions is null && !HideDemo && StartFuel is null && !UnlimitedFuel && !HardEndZero && HardEndJingle is null
-        && TouchdownCurve is null && Landing.Count == 0 && RunwayWidths is null && !BirdmanPoints && (Weather is null || Weather.IsEmpty);
+        && TouchdownCurve is null && Landing.Count == 0 && RunwayWidths is null && !BirdmanPoints && (Weather is null || Weather.IsEmpty)
+        && PhotoMission is null;
 
     /// <summary>Empty settings for a mission.</summary>
     public static MissionSettings For(TestId id) => new() { Vehicle = (int)id.Vehicle, Class = id.Class, Test = id.Test };
@@ -131,7 +139,18 @@ public sealed class MissionSettings
         RunwayWidths = RunwayWidths is null ? null : [.. RunwayWidths],
         BirdmanPoints = BirdmanPoints,
         Weather = Weather?.Clone(),
+        PhotoMission = PhotoMission,
     };
+
+    /// <summary>A copy for another mission (the same settings at another place).</summary>
+    public MissionSettings CloneFor(TestId id)
+    {
+        MissionSettings copy = Clone();
+        copy.Vehicle = (int)id.Vehicle;
+        copy.Class = id.Class;
+        copy.Test = id.Test;
+        return copy;
+    }
 }
 
 /// <summary>The jingle the game plays when a mission's hard end time is reached.</summary>

@@ -50,6 +50,7 @@ public sealed class MissionTables
 
     private string? OwnName(TestId test, bool resultSheet) =>
         ResultTables.LevelTextName(test, resultSheet)
+        ?? MissionPositions.NewPointsTextName(test, resultSheet)
         ?? (test.Vehicle != Vehicle.Birdman ? null
             : _birdmanPoints.Contains(test) ? ResultTables.BirdmanTextName(test, resultSheet)
             : resultSheet ? "BD_ALL_S2" : "BD_ALL_S1"); // the patched resultInit reads the free flight's names from the tables
@@ -60,6 +61,11 @@ public sealed class MissionTables
     /// </summary>
     public IReadOnlyList<int> ResultRows(TestId test)
     {
+        if (MissionPositions.NewPointsTextName(test, false) is not null)
+        {
+            return new int[MissionLayout.ResultRows]; // a place the game has no test at: no rows of the game
+        }
+
         int? index = FlatIndex(test);
         if (index is not { } i)
         {
@@ -72,7 +78,7 @@ public sealed class MissionTables
 
     /// <summary>ROM offset of the 4 result rows of a test (bottom row first), or null outside the table.</summary>
     public int? ResultRowsOffset(TestId test) =>
-        FlatIndex(test) is { } index ? _layout.ResultRowsOffset + (index * MissionLayout.ResultRows) : null;
+        MissionPositions.NewPointsTextName(test, false) is null && FlatIndex(test) is { } index ? _layout.ResultRowsOffset + (index * MissionLayout.ResultRows) : null;
 
     /// <summary>The island the class menu shows for a vehicle and class (0-3), or null outside the table.</summary>
     public int? ClassIsland(Vehicle vehicle, int classIndex) =>

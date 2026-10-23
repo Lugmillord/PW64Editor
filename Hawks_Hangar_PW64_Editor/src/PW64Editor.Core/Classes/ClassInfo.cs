@@ -23,4 +23,18 @@ public sealed record ClassInfo(Vehicle Vehicle, int Class, ClassSettings? Settin
 
     /// <summary>True for a Birdman stage whose limits follow its missions with points.</summary>
     public bool IsAutomatic => !HasOwnMedals && Vehicle == Vehicle.Birdman && BirdmanPointMissions > 0;
+
+    /// <summary>The number of missions the current limits were made for (own limits: as stored; otherwise the game's tests).</summary>
+    public int LimitsForTests => (HasOwnMedals ? Settings!.MedalsForTests : null) ?? Missions.MissionPositions.GameTestCount(Vehicle, Class);
+
+    /// <summary>
+    /// True if the limits were made for another number of missions than the class has (only the classes that can get more
+    /// tests; not a Birdman stage whose limits follow its missions with points).
+    /// </summary>
+    public bool LimitsNeedScaling => Missions.MissionPositions.CanAddTests(Vehicle) && !IsAutomatic && TestCount > 0 && LimitsForTests > 0
+        && LimitsForTests != TestCount;
+
+    /// <summary>The current limits scaled from <see cref="LimitsForTests"/> to <see cref="TestCount"/> missions (rounded).</summary>
+    public IReadOnlyList<int> ScaledMedals() =>
+        [.. Medals.Select(m => (int)Math.Round(m * (double)TestCount / Math.Max(1, LimitsForTests), MidpointRounding.AwayFromZero))];
 }

@@ -74,19 +74,19 @@ public static class GamePatches
     /// <remarks>
     /// <list type="number">
     ///   <item>resultInit (results.c, the only reader of the three result tables): the tables are read from the data
-    ///         area (<see cref="ResultTables"/>, [7][4][5] instead of [6][4][3]). In the index computation "x * 4 - x"
-    ///         (× 3) becomes "x * 4 + x" (× 5) for the vehicle and the class, and the addresses point to the new
-    ///         tables.</item>
+    ///         area (<see cref="ResultTables"/>, [7][8][5] instead of [6][4][3]). In the index computation "x * 4 - x"
+    ///         (× 3) becomes "x * 4 + x" (× 5) for the vehicle and the class, the vehicle's "× 16" becomes "× 32" (8
+    ///         classes), and the addresses point to the new tables.</item>
     ///   <item>saveFileWrite and saveFileLoad (save.c): the game saved 4 classes for the main vehicles and 3 for all
-    ///         others, so the Birdman's stage 4 was lost when the game was switched off. Now only Cannonball, Sky
-    ///         Diving and the Jumble Hopper have 3 ("v0 = 4 - ((veh - 3) &lt; 3)"); the Birdman gets 4. The four
+    ///         others, so the Birdman's stage 4 was lost when the game was switched off. Now every vehicle has 8 classes
+    ///         (room for more classes; a class without tests takes no bits), so the Birdman's stage 4 is saved. Its four
     ///         results take 28 bits, so the photo album of a saved game lies 28 bits further back than without the
     ///         patch.</item>
     ///   <item>gMedalPointRequirements: entry 7 (the Birdman, medal index = vehicle + 1) was 0/0/0 and becomes
     ///         280/320/360 points per stage.</item>
     ///   <item>levelSetPointsToNextMedal goes through the module: with every medal reached the game showed
     ///         "100 - points" to go for all but the main vehicles; the Birdman gets "100 × missions - points".</item>
-    ///   <item>Birdman missions with points (<see cref="MissionSettings.BirdmanPoints"/>, a mask in the data area header):
+    ///   <item>Birdman missions with points (<see cref="MissionSettings.BirdmanPoints"/>, a table in the lower data area):
     ///         resultInit takes the Birdman's texts from the tables; the result sheet and the test screen show line,
     ///         numbers and top score for them (checks "veh != BIRDMAN" through the module); the test screen reads their
     ///         points from (class, test); "all perfect" needs 100 points in each of them. The module ends such a mission
@@ -119,20 +119,22 @@ public static class GamePatches
             CodePatch.FromWords("result sheet names, resultInit", 0xB5618,
                 [0x0307C023, 0x00197080, 0x01D97023],
                 [0x0307C021, 0x00197080, 0x01D97021]),
+            // ... and the vehicle's stride × 160 bytes (8 classes × 5 tests × 4) instead of × 80: "sll t8, t8, 4" -> 5.
+            CodePatch.FromWords("result sheet names (8 classes), resultInit", 0xB562C, [0x0018C100], [0x0018C140]),
             CodePatch.FromWords("result sheet name table, resultInit", 0xB563C,
                 [0x3C108035, 0x020E8021, 0x1000000E, 0x8E10FC40],
                 [0x3C100000 | Hi(sheet), 0x020E8021, 0x1000000E, 0x8E100000 | Lo(sheet)]),
             // Mission screen names (0x8032E120).
             CodePatch.FromWords("mission screen names, resultInit", 0xB5650,
                 [0x0327C823, 0x0019C900, 0x000FC080, 0x030FC023],
-                [0x0327C821, 0x0019C900, 0x000FC080, 0x030FC021]),
+                [0x0327C821, 0x0019C940, 0x000FC080, 0x030FC021]),
             CodePatch.FromWords("mission screen name table, resultInit", 0xB5674,
                 [0x3C108035, 0x02188021, 0x8E10FD60],
                 [0x3C100000 | Hi(screen), 0x02188021, 0x8E100000 | Lo(screen)]),
             // Point rows (0x8032E208, 0x8032E22C, 0x8032E2A4).
             CodePatch.FromWords("point rows, resultInit", 0xB5738,
-                [0x0327C823, 0x0302C023],
-                [0x0327C821, 0x0302C021]),
+                [0x0327C823, 0x0302C023, 0x0018C080, 0x0019C900],
+                [0x0327C821, 0x0302C021, 0x0018C080, 0x0019C940]),
             CodePatch.FromWords("point row table, resultInit", 0xB575C,
                 [0x3C068035, 0x8DEE009C],
                 [0x3C060000 | Hi(rows), 0x8DEE009C]),
@@ -255,14 +257,15 @@ public static class GamePatches
 
     /// <summary>
     /// "slti at, sV, 3; bnez at, +3; (delay); b +2; li v0, 3; li v0, 4" becomes
-    /// "addiu at, sV, -3; sltiu at, at, 3; (delay); li v0, 4; subu v0, v0, at; nop".
+    /// "addiu at, sV, -3; sltiu at, at, 3; (delay); li v0, 8; nop; nop": eight classes for every vehicle (classes without
+    /// tests take no bits, so the saved game of the missions of the game only gains the Birdman's stage 4).
     /// </summary>
     private static CodePatch SaveClasses(string description, int romOffset, int register, uint delay)
     {
         uint r = (uint)register << 21;
         return CodePatch.FromWords(description, romOffset,
             [0x28010003 | r, 0x14200003, delay, 0x10000002, 0x24020003, 0x24020004],
-            [0x24010000 | r | 0xFFFD, 0x2C210003, delay, 0x24020004, 0x00411023, 0x00000000]);
+            [0x24010000 | r | 0xFFFD, 0x2C210003, delay, 0x24020000 | (uint)SaveGameLayout.MaxClasses, 0x00000000, 0x00000000]);
     }
 
     /// <summary>

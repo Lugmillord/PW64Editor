@@ -17,7 +17,10 @@ public sealed class SavePhoto
 
     private readonly byte[] _record;
 
-    public SavePhoto(byte[] record)
+    /// <param name="record">The 172 bits.</param>
+    /// <param name="extraBits">The two bits behind the album in a hack built by the editor: bit 0 the third bit of the test,
+    /// bit 1 that of the class.</param>
+    public SavePhoto(byte[] record, int extraBits = 0)
     {
         if (record.Length != RecordBytes)
         {
@@ -25,7 +28,11 @@ public sealed class SavePhoto
         }
 
         _record = record.ToArray();
+        ExtraBits = extraBits & 3;
     }
+
+    /// <summary>The two bits behind the album (hacks built by the editor): bit 0 test bit 2, bit 1 class bit 2.</summary>
+    public int ExtraBits { get; }
 
     /// <summary>The stored bits (172 bits, the last 4 bits of the last byte are 0).</summary>
     public ReadOnlySpan<byte> Record => _record;
@@ -45,10 +52,18 @@ public sealed class SavePhoto
     private uint Word16 => (uint)((_record[16] << 24) | (_record[17] << 16) | (_record[18] << 8) | _record[19]);
 
     /// <summary>Class (for bonus games the level) in which the photo was taken.</summary>
-    public int Class => (int)((Word8 >> 20) & 3);
+    public int Class => (int)((Word8 >> 20) & 3) | ((ExtraBits & 2) << 1);
 
     /// <summary>Test in which the photo was taken.</summary>
-    public int Test => (int)((Word8 >> 22) & 3);
+    public int Test => (int)((Word8 >> 22) & 3) | ((ExtraBits & 1) << 2);
+
+    /// <summary>The photo with another class and test (its mission moved); the third bits go into <see cref="ExtraBits"/>.</summary>
+    public SavePhoto WithPlace(int classIndex, int test)
+    {
+        byte[] record = _record.ToArray();
+        record[9] = (byte)((record[9] & 0x0F) | ((classIndex & 3) << 4) | ((test & 3) << 6));
+        return new SavePhoto(record, ((test >> 2) & 1) | (((classIndex >> 2) & 1) << 1));
+    }
 
     /// <summary>Vehicle with which the photo was taken.</summary>
     public Vehicle Vehicle => (Vehicle)((Word16 >> 9) & 7);

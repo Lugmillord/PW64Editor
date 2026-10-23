@@ -43,7 +43,7 @@ public static class ProjectBuilder
         List<GameFile> files = fileSystem.Files.ToList();
         IReadOnlyList<FileOverride> overrides = project.GetOverrides();
 
-        foreach (FileOverride replacement in overrides)
+        foreach (FileOverride replacement in overrides.Where(o => o.TableIndex < fileSystem.Files.Count))
         {
             int position = files.FindIndex(f => f.TableIndex == replacement.TableIndex);
             string name = Path.GetFileName(replacement.Path);
@@ -56,7 +56,28 @@ public static class ProjectBuilder
             files[position] = ApplyOverride(files[position], replacement, name);
         }
 
-        AddLevelTexts(project, fileSystem, files);
+        // Added missions: behind the game's files. Removed ones stay (so no file number moves), with "no vehicle" in their
+        // COMM block, so nothing takes them for the mission of their place; the mission list leaves them out.
+        files.AddRange(ProjectMissions.AddedFiles(project, fileSystem));
+        for (int i = 0; i < fileSystem.Files.Count; i++)
+        {
+            if (files[i].FileType == Missions.MissionFile.FormType && project.Settings.RemovedMissions.Contains(files[i].GroupIndex))
+            {
+                Missions.MissionFile removed = Missions.MissionFile.Parse(files[i].Data);
+                Missions.MissionComm comm = removed.Comm.Clone();
+                comm.Id = comm.Id with { Vehicle = (SaveGame.Vehicle)Missions.MissionComm.NoVehicle };
+                files[i] = files[i] with { Data = removed.WithComm(comm) };
+            }
+        }
+
+        IReadOnlyList<ProjectMission> missionList = ProjectMissions.Missions(project, files, fileSystem.Files.Count);
+        if (ProjectMissions.Problem([.. missionList.Select(m => m.Id)]) is { } missionProblem)
+        {
+            throw new ProjectException(missionProblem);
+        }
+
+        IReadOnlyList<SaveGame.TestId> missionIds = [.. missionList.Select(m => m.Id)];
+        AddLevelTexts(project, fileSystem, files, missionIds);
         CheckTextFile(project, fileSystem, files);
         ApplyMissionSettings(project, files);
         bool addedEnvironments = AddEnvironments(files);
@@ -73,11 +94,13 @@ public static class ProjectBuilder
                     GameModule = ModuleOptions(project, fileSystem, files) with
                     {
                         ResultTables = BonusResultTables(project, cleanRom, layout),
-                        BirdmanPoints = project.HasPatch(GamePatches.BonusGames)
-                            ? Missions.ResultTables.BirdmanPointsMask(Missions.ResultTables.BirdmanPointMissions(project.Settings.Missions))
-                            : (ushort)0,
+                        BirdmanPointMissions = project.HasPatch(GamePatches.BonusGames)
+                            ? [.. Missions.ResultTables.BirdmanPointMissions(project.Settings.Missions)]
+                            : [],
                         ClassTable = Classes.ClassLimits.Table(project.Settings.Classes, project.HasPatch(GamePatches.BonusGames),
-                            HasOwnClassTexts(project)),
+                            HasOwnClassTexts(project), missionIds),
+                        MissionFiles = [.. missionList.Select(m => m.File.GroupIndex)],
+                        PhotoMissions = ProjectMissions.PhotoMissions(missionList, fileSystem, project.Settings.Missions),
                         UnlockTable = Classes.MenuUnlocks.Table(project.Settings.Unlocks, project.Settings.Features.AllFieldsOpen),
                         EnvironmentTable = addedEnvironments ? Missions.WeatherEnvironments.Table() : null,
                     },
@@ -506,10 +529,11 @@ public static class ProjectBuilder
             patches.Add(new DataPatch(layout.Missions.ClassIslandsOffset + (island.Vehicle * 4) + island.Class, [(byte)island.Island.Value], "class island"));
         }
 
-        // The Birdman has no entry in the game's table: its rows only exist in the tables of the game patch "Bonus games
-        // and Birdman" (BonusResultTables).
+        // The Birdman and the places the game has no test at (a fourth test, ...) have no entry in the game's table: their
+        // rows only exist in the tables of the game patch "Bonus games and Birdman" (BonusResultTables).
         List<Missions.MissionSettings> changed = project.Settings.Missions
-            .Where(m => m.ResultRows is not null && m.Id.Vehicle != SaveGame.Vehicle.Birdman).ToList();
+            .Where(m => m.ResultRows is not null && m.Id.Vehicle != SaveGame.Vehicle.Birdman
+                && Missions.MissionPositions.NewPointsTextName(m.Id, false) is null).ToList();
         if (changed.Count == 0)
         {
             return patches;
@@ -569,7 +593,7 @@ public static class ProjectBuilder
     /// <see cref="GamePatches.BonusGames"/> the texts of the levels and of the Birdman missions with points, and the
     /// medal texts of classes with own limits (<see cref="Classes.ClassTexts"/>).
     /// </summary>
-    private static void AddLevelTexts(HackProject project, GameFileSystem cleanFileSystem, List<GameFile> files)
+    private static void AddLevelTexts(HackProject project, GameFileSystem cleanFileSystem, List<GameFile> files, IReadOnlyList<SaveGame.TestId> missions)
     {
         GameFile originalText;
         try
@@ -585,7 +609,7 @@ public static class ProjectBuilder
         try
         {
             if (AddGeneratedTexts(project.HasPatch(GamePatches.BonusGames), HasOwnClassTexts(project), project.Settings.Missions,
-                    project.Settings.Classes, files[position].Data, Text.TextFont.Load(cleanFileSystem)) is { } withTexts)
+                    project.Settings.Classes, files[position].Data, Text.TextFont.Load(cleanFileSystem), missions) is { } withTexts)
             {
                 files[position] = files[position] with { Data = withTexts };
             }
@@ -605,8 +629,10 @@ public static class ProjectBuilder
     /// </summary>
     /// <returns>The new text file, or null if nothing changed.</returns>
     /// <exception cref="InvalidDataException">The text file is damaged.</exception>
+    /// <param name="missionIds">The missions of the project (null: the game's own): points texts of new places, TRY4/TRY5 and the
+    /// medal texts of classes with another number of tests.</param>
     public static byte[]? AddGeneratedTexts(bool bonusPatch, bool classTexts, IEnumerable<Missions.MissionSettings> missions,
-        IEnumerable<Classes.ClassSettings> classes, byte[] textFile, Text.TextFont font)
+        IEnumerable<Classes.ClassSettings> classes, byte[] textFile, Text.TextFont font, IReadOnlyList<SaveGame.TestId>? missionIds = null)
     {
         List<Classes.ClassSettings> classList = [.. classes];
         byte[] data = textFile;
@@ -617,14 +643,14 @@ public static class ProjectBuilder
                 .Where(c => c.VehicleId == SaveGame.Vehicle.Birdman && c.Medals is { Count: 3 })
                 .ToDictionary(c => c.Class, c => (IReadOnlyList<int>)c.Medals!);
             if (Missions.ResultTables.AddLevelTexts(data, Missions.ResultTables.BirdmanPointMissions(missions),
-                    Workspace.EditorSession.EncodeFor(font), birdmanLimits) is { } withLevels)
+                    Workspace.EditorSession.EncodeFor(font), birdmanLimits, missionIds) is { } withLevels)
             {
                 data = withLevels;
                 changed = true;
             }
         }
 
-        if (classTexts && Classes.ClassTexts.Add(data, classList, font) is { } withClasses)
+        if (classTexts && Classes.ClassTexts.Add(data, classList, font, missionIds) is { } withClasses)
         {
             data = withClasses;
             changed = true;

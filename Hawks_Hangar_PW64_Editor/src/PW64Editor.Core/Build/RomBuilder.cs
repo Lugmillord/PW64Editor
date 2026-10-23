@@ -70,7 +70,8 @@ public static class RomBuilder
         ArgumentNullException.ThrowIfNull(layout);
         ArgumentNullException.ThrowIfNull(options);
 
-        ValidateFiles(files);
+        // With the game module the game holds 256 user files (MissionCapacity), without it 128.
+        ValidateFiles(files, options.GameModule is { IsNeeded: true } ? MissionCapacity.UserFiles : FileTypeLimits.UserFileLimit);
 
         var newEntries = files.Select(f => new FileTableEntry(f.FileType, f.Size)).ToList();
         int fileSystemEnd = layout.FileSystemOffset + newEntries.Sum(e => e.Size);
@@ -306,7 +307,7 @@ public static class RomBuilder
         tableForm.CopyTo(region);
     }
 
-    private static void ValidateFiles(IReadOnlyList<GameFile> files)
+    private static void ValidateFiles(IReadOnlyList<GameFile> files, int userFileLimit)
     {
         var groupCounts = new Dictionary<string, int>();
 
@@ -342,7 +343,7 @@ public static class RomBuilder
 
         foreach ((string group, int count) in groupCounts)
         {
-            int limit = FileTypeLimits.GetLimit(group);
+            int limit = group == FileTypeLimits.UserFileGroup ? userFileLimit : FileTypeLimits.GetLimit(group);
             if (count > limit)
             {
                 throw new InvalidDataException(

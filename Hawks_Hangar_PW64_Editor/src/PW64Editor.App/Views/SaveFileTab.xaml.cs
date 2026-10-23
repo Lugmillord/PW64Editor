@@ -38,6 +38,7 @@ public partial class SaveFileTab : UserControl
         {
             _file = EepromFile.Load(path, _layout);
             _path = path;
+            LayoutNote.Visibility = Visibility.Collapsed;
             ShowFile();
         }
         catch (Exception ex) when (Ui.IsExpectedError(ex))
@@ -70,10 +71,18 @@ public partial class SaveFileTab : UserControl
     /// <summary>True if the open save file has changes that are not saved yet.</summary>
     public bool HasUnsavedChanges => _file?.IsModified == true;
 
+    /// <summary>How the missions moved since the last <see cref="Load"/> (a mission removed), or null.</summary>
+    private SavePlaceChanges? _pendingChanges;
+
+    /// <summary>
+    /// Tells the tab how the missions move before the next <see cref="Load"/>: the open save file takes its results and
+    /// photos along with their missions.
+    /// </summary>
+    public void ExpectMissionChanges(SavePlaceChanges? changes) => _pendingChanges = changes;
+
     /// <summary>
     /// Takes the layout of the saved results from the game (it depends on the missions and on the game patch
-    /// "Bonus games and Birdman", which saves the Birdman's stage 4). New missions cannot be added yet, so the
-    /// clean ROM's missions are used.
+    /// "Bonus games and Birdman", which saves the Birdman's stage 4) and the project's missions (added and removed ones).
     /// </summary>
     public void Load(EditorSession session)
     {
@@ -81,7 +90,7 @@ public partial class SaveFileTab : UserControl
         bool birdmanStage4 = session.Project.HasPatch(GamePatches.BonusGames);
         try
         {
-            _layout = SaveGameLayout.FromGameFiles(session.CleanFileSystem, birdmanStage4);
+            _layout = session.CurrentSaveLayout();
         }
         catch (Exception ex) when (ex is InvalidDataException or ArgumentException or IndexOutOfRangeException)
         {
@@ -89,10 +98,20 @@ public partial class SaveFileTab : UserControl
             _layout = birdmanStage4 ? SaveGameLayout.RetailWithBirdmanStage4 : SaveGameLayout.Retail;
         }
 
-        // An open file without changes is read again with the new layout.
-        if (_file is not null && !_file.IsModified)
+        // An open file goes over to the new layout (missions added or removed): the results and photos go along with their
+        // missions, unsaved changes are kept. It then has to be saved so the game reads it with its missions.
+        SavePlaceChanges? changes = _pendingChanges;
+        _pendingChanges = null;
+        if (_file is not null)
         {
-            _file = EepromFile.Read(_file.ToBytes(), _layout);
+            bool changed = _file.Slots.Any(slot => !SaveSlot.SameLayout(slot.Layout, _layout)) || changes is { IsEmpty: false };
+            _file = _file.ConvertTo(_layout, changes);
+            if (changed && _file.IsModified)
+            {
+                LayoutNote.Text = L.T("The missions of the project have changed: the save file was converted to them (the results and photos go along with their missions). Save it so the game reads it with the new missions.");
+                LayoutNote.Visibility = Visibility.Visible;
+            }
+
             ShowFile();
         }
     }
@@ -164,6 +183,7 @@ public partial class SaveFileTab : UserControl
             File.WriteAllBytes(path, data);
             _file = EepromFile.Read(data, _layout);
             _path = path;
+            LayoutNote.Visibility = Visibility.Collapsed;
             ShowFile();
         }
         catch (Exception ex) when (Ui.IsExpectedError(ex))

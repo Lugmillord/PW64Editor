@@ -180,7 +180,19 @@ public sealed class MissionComm
     public MissionComm Clone() => new((byte[])_data.Clone());
 
     /// <summary>Class, vehicle and test of the mission.</summary>
-    public TestId Id => new(_data[0], (Vehicle)_data[1], _data[2]);
+    public TestId Id
+    {
+        get => new(_data[0], (Vehicle)_data[1], _data[2]);
+        set
+        {
+            _data[0] = checked((byte)value.Class);
+            _data[1] = checked((byte)value.Vehicle);
+            _data[2] = checked((byte)value.Test);
+        }
+    }
+
+    /// <summary>The vehicle number of a mission file the game does not load any more (a removed mission): no vehicle.</summary>
+    public const byte NoVehicle = 0xFF;
 
     /// <summary>The island (0 Holiday, 1 Crescent, 2 Little States, 3 Ever-Frost).</summary>
     public int Island

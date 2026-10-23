@@ -153,6 +153,59 @@ public sealed class SaveSlot
         IsModified = true;
     }
 
+    /// <summary>True if both layouts store the same tests in the same order and the photos the same way.</summary>
+    public static bool SameLayout(SaveGameLayout a, SaveGameLayout b) =>
+        a.SavedTests.SequenceEqual(b.SavedTests) && a.PhotoExtras == b.PhotoExtras;
+
+    /// <summary>
+    /// The slot in another layout (missions added or removed): each result goes along with its mission (<paramref name="changes"/>:
+    /// the later tests of a class move up when one is removed), places without a mission before get <see cref="NoResult"/>,
+    /// the results of removed missions are dropped; the photos are kept, a photo of a mission that moved gets its new class
+    /// and test. A slot in use that changes counts as changed (it must be saved so the game reads it right); the bits
+    /// between the results and the end of the old or new data are cleared, the bytes behind them kept. Empty and unprepared
+    /// slots are taken over as they are.
+    /// </summary>
+    /// <param name="layout">The new layout.</param>
+    /// <param name="changes">How the missions moved, or null if none moved (results stay at their class and test).</param>
+    public SaveSlot ConvertTo(SaveGameLayout layout, SavePlaceChanges? changes = null)
+    {
+        changes ??= SavePlaceChanges.None;
+        if (SameLayout(Layout, layout) && changes.IsEmpty)
+        {
+            return this;
+        }
+
+        if (State != SaveSlotState.InUse)
+        {
+            return new SaveSlot(ToBytes(), layout) { IsModified = IsModified };
+        }
+
+        byte[] data = _raw.ToArray();
+        int end = Math.Min(Math.Max(Layout.DataEndBit, layout.DataEndBit), DataBytes * 8);
+        for (int bit = SaveGameLayout.ResultsStartBit; bit < end; bit++)
+        {
+            data[bit / 8] &= (byte)~(1 << (bit % 8));
+        }
+
+        var converted = new SaveSlot(data, layout) { IsModified = true };
+        for (int i = 0; i < layout.SavedTests.Count; i++)
+        {
+            converted._results[i] = changes.Source(layout.SavedTests[i]) is { } source ? GetResult(source) : NoResult;
+        }
+
+        converted._photos.Clear();
+        foreach (SavePhoto photo in _photos)
+        {
+            SavePhoto kept = layout.PhotoExtras ? photo : new SavePhoto(photo.Record.ToArray());
+            var place = new TestId(photo.Class, photo.Vehicle, photo.Test);
+            converted._photos.Add(!photo.IsEmpty && changes.Moved.TryGetValue(place, out TestId to) ? kept.WithPlace(to.Class, to.Test) : kept);
+        }
+
+        return converted;
+    }
+
+    private const int DataBytes = SaveGameLayout.DataBytes;
+
     /// <summary>The 256 bytes of the slot. A changed slot in use gets a new checksum.</summary>
     public byte[] ToBytes()
     {
@@ -182,6 +235,14 @@ public sealed class SaveSlot
             }
         }
 
+        if (Layout.PhotoExtras)
+        {
+            foreach (SavePhoto photo in _photos)
+            {
+                WriteBits(data, ref bit, photo.ExtraBits, 2);
+            }
+        }
+
         data[Size - 1] = Checksum(data);
         return data;
     }
@@ -203,6 +264,14 @@ public sealed class SaveSlot
             }
 
             _photos.Add(new SavePhoto(record));
+        }
+
+        if (Layout.PhotoExtras)
+        {
+            for (int p = 0; p < SaveGameLayout.PhotoCount; p++)
+            {
+                _photos[p] = new SavePhoto(_photos[p].Record.ToArray(), ReadBits(_raw, ref bit, 2));
+            }
         }
     }
 
