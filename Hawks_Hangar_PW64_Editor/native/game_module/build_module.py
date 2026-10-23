@@ -135,8 +135,13 @@ def main():
         obj = os.path.join(tmp, 'module.o')
         elf = os.path.join(tmp, 'module.elf')
         binary = os.path.join(tmp, 'module.bin')
+        weather_obj = os.path.join(tmp, 'weather.o')
         run('mips-linux-gnu-gcc', *CFLAGS, '-c', os.path.join(HERE, 'module.c'), '-o', obj)
-        run('mips-linux-gnu-ld', '-T', os.path.join(HERE, 'module.ld'), '--no-warn-rwx-segments', obj, '-o', elf)
+        # weather.c uses the FPU (snow and rain); only integers and pointers cross between the two files.
+        run('mips-linux-gnu-gcc', *[f if f != '-msoft-float' else '-mhard-float' for f in CFLAGS], '-c',
+            os.path.join(HERE, 'weather.c'), '-o', weather_obj)
+        run('mips-linux-gnu-ld', '-T', os.path.join(HERE, 'module.ld'), '--no-warn-rwx-segments', '--no-warn-mismatch',
+            obj, weather_obj, '-o', elf)
         undefined = run('mips-linux-gnu-nm', '-u', elf).strip()
         if undefined:
             sys.exit('Undefined symbols (the module must not need libgcc):\n' + undefined)
@@ -250,6 +255,19 @@ def main():
         f'    public const uint MenuUpdateAddress = 0x{symbols["module_menu_update"]:08X};',
         '    /// <summary>RAM address of module_touchdown_curve (the Gyrocopter\'s touchdown point in the scoring function).</summary>',
         f'    public const uint TouchdownCurveAddress = 0x{symbols["module_touchdown_curve"]:08X};',
+        '',
+        '    /// <summary>RAM addresses of the weather functions (weather.c): mission start and end, the fog range, snow and rain,',
+        '    /// and Sky Diving below the clouds.</summary>',
+        f'    public const uint EnvStartAddress = 0x{symbols["module_env_start"]:08X};',
+        f'    public const uint EnvEndAddress = 0x{symbols["module_env_end"]:08X};',
+        f'    public const uint FogFactorAddress = 0x{symbols["module_fog_factor"]:08X};',
+        f'    public const uint EffectUpdateAddress = 0x{symbols["module_effect_update"]:08X};',
+        f'    public const uint EffectDrawAddress = 0x{symbols["module_effect_draw"]:08X};',
+        f'    public const uint SkyDivingBelowAddress = 0x{symbols["module_sd_below"]:08X};',
+        f'    public const uint EnvIdAddress = 0x{symbols["module_env_id"]:08X};',
+        f'    public const uint EnvLevelAddress = 0x{symbols["module_env_level"]:08X};',
+        f'    public const uint EnvTintAddress = 0x{symbols["module_env_tint"]:08X};',
+        f'    public const uint EnvPaletteAddress = 0x{symbols["module_env_palette"]:08X};',
         '',
         '    /// <summary>Number of missions the settings table in the data area has room for.</summary>',
         f'    public const int ConditionsCapacity = {CONDITIONS_CAPACITY};',

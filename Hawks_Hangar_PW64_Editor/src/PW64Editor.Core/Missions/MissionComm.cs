@@ -196,6 +196,60 @@ public sealed class MissionComm
         set => _data[4] = checked((byte)value);
     }
 
+    /// <summary>Time of day and weather (COMM byte 8, envGetCurrentId).</summary>
+    public WeatherCondition Weather
+    {
+        get => (WeatherCondition)_data[8];
+        set => _data[8] = checked((byte)value);
+    }
+
+    /// <summary>Snow (or the rain of the game module) falls (COMM byte 9 = 1).</summary>
+    public bool Snow
+    {
+        get => _data[9] == 1;
+        set => _data[9] = value ? (byte)1 : (byte)0;
+    }
+
+    /// <summary>The wind (units per second: x, y, z; COMM +0x10, env_802E14E8).</summary>
+    public (float X, float Y, float Z) Wind
+    {
+        get => (ReadFloat(0x10), ReadFloat(0x14), ReadFloat(0x18));
+        set
+        {
+            WriteFloat(0x10, value.X);
+            WriteFloat(0x14, value.Y);
+            WriteFloat(0x18, value.Z);
+        }
+    }
+
+    /// <summary>How far the wind's strength may change (± units per second, COMM +0x1C).</summary>
+    public float WindSpeedRange
+    {
+        get => ReadFloat(0x1C);
+        set => WriteFloat(0x1C, value);
+    }
+
+    /// <summary>How fast the wind's strength changes (COMM +0x20; each frame a random step of up to half of it × the frame time).</summary>
+    public float WindSpeedRate
+    {
+        get => ReadFloat(0x20);
+        set => WriteFloat(0x20, value);
+    }
+
+    /// <summary>How far the wind's direction may change (± degrees, COMM +0x24).</summary>
+    public float WindDirectionRange
+    {
+        get => ReadFloat(0x24);
+        set => WriteFloat(0x24, value);
+    }
+
+    /// <summary>How fast the wind's direction changes (degrees, COMM +0x28; as <see cref="WindSpeedRate"/>).</summary>
+    public float WindDirectionRate
+    {
+        get => ReadFloat(0x28);
+        set => WriteFloat(0x28, value);
+    }
+
     /// <summary>One of the five score curves.</summary>
     public ScoreCurve GetCurve(ScoreCurveKind kind) => ScoreCurve.Read(_data.AsSpan(CurveOffset((int)kind)));
 

@@ -178,18 +178,24 @@ public partial class MissionsTab : UserControl
 
         SourceText.Text = L.F("{0} missions. Changes are saved together with the texts (Ctrl+S).", _missions.Count);
 
+        // The lists are always filled anew: the vehicle items are records, so selecting the same vehicle again raises no
+        // SelectionChanged, and the test list would keep the missions as loaded before (a draft made from them would bring
+        // back the state before the last save).
         Vehicle vehicle = selected?.Vehicle ?? Vehicle.HangGlider;
+        _filling = true;
         VehicleBox.SelectedItem = ((IEnumerable<VehicleItem>)VehicleBox.ItemsSource).FirstOrDefault(v => v.Vehicle == vehicle)
             ?? ((IEnumerable<VehicleItem>)VehicleBox.ItemsSource).FirstOrDefault();
-        if (selected is { } id && ((IEnumerable<TestItem>?)TestBox.ItemsSource)?.FirstOrDefault(t => t.Mission.Id == id) is { } item)
+        _filling = false;
+        if (VehicleBox.SelectedItem is VehicleItem shownVehicle)
         {
-            TestBox.SelectedItem = item;
+            FillTests(shownVehicle.Vehicle);
+            List<TestItem> tests = [.. (IEnumerable<TestItem>)TestBox.ItemsSource!];
+            _filling = true;
+            TestBox.SelectedItem = (selected is { } id ? tests.FirstOrDefault(t => t.Mission.Id == id) : null) ?? tests.FirstOrDefault();
+            _filling = false;
         }
 
-        if (_missions.Count == 0)
-        {
-            ShowMission(null);
-        }
+        ShowMission(SelectedMission);
 
         UnsavedChangesChanged?.Invoke(this, EventArgs.Empty);
     }
@@ -318,6 +324,8 @@ public partial class MissionsTab : UserControl
     {
         if (!_drafts.TryGetValue(mission.Id, out MissionDraft? draft))
         {
+            // Always from the missions as loaded last (a list item may still hold an older state).
+            mission = _missions.FirstOrDefault(m => m.Id == mission.Id) ?? mission;
             draft = new MissionDraft(mission, Row(ScreenName(mission))?.Markup);
             _drafts[mission.Id] = draft;
         }
@@ -557,6 +565,7 @@ public partial class MissionsTab : UserControl
             StartFuelBox.IsEnabled = !draft.Settings.UnlimitedFuel;
             UnlimitedFuelBox.IsChecked = draft.Settings.UnlimitedFuel;
             HideDemoBox.IsChecked = draft.Settings.HideDemo;
+            ShowWeather(draft);
             ShowResults(draft);
         }
         finally

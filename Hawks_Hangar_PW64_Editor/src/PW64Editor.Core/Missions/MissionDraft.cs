@@ -595,6 +595,163 @@ public sealed class MissionDraft
         Settings.UnlimitedFuel = unlimited && CanSetFuel;
     }
 
+    // ----- Weather and view
+
+    /// <summary>The weather settings to change (created when needed; dropped again by <see cref="TidyWeather"/> when empty).</summary>
+    private MissionWeather EditWeather => Settings.Weather ??= new MissionWeather();
+
+    private void TidyWeather()
+    {
+        if (Settings.Weather is { IsEmpty: true })
+        {
+            Settings.Weather = null;
+        }
+    }
+
+    /// <summary>The time of day and weather (mission file).</summary>
+    public WeatherCondition Weather => Comm.Weather;
+
+    /// <summary>Changes the time of day and weather.</summary>
+    public void SetWeather(WeatherCondition condition)
+    {
+        Comm.Weather = condition;
+    }
+
+    /// <summary>What falls: nothing, snow (the game's), or rain (game module).</summary>
+    public WeatherEffect Effect => !Comm.Snow ? WeatherEffect.None : Settings.Weather?.Rain == true ? WeatherEffect.Rain : WeatherEffect.Snow;
+
+    /// <summary>Chooses what falls; the speed and colour that were the default of the other kind follow the new kind.</summary>
+    public void SetEffect(WeatherEffect effect)
+    {
+        Comm.Snow = effect != WeatherEffect.None;
+        EditWeather.Rain = effect == WeatherEffect.Rain;
+
+        TidyWeather();
+    }
+
+    /// <summary>Fall speed (units per second): the setting or the default of the kind.</summary>
+    public float FallSpeed => Settings.Weather?.FallSpeed ?? WeatherCatalog.DefaultFallSpeed(Effect);
+
+    /// <summary>Changes the fall speed (0–30; the default of the kind: no setting).</summary>
+    public void SetFallSpeed(float speed)
+    {
+        speed = Math.Clamp((float)Math.Round(speed, 1), 0, WeatherCatalog.MaxFallSpeed);
+        EditWeather.FallSpeed = speed == WeatherCatalog.DefaultFallSpeed(Effect) ? null : speed;
+        TidyWeather();
+    }
+
+    /// <summary>Number of flakes or drops.</summary>
+    public int Density => Settings.Weather?.Density ?? WeatherCatalog.DefaultDensity;
+
+    /// <summary>Changes the number of flakes or drops (200–1200).</summary>
+    public void SetDensity(int count)
+    {
+        count = Math.Clamp(count, WeatherCatalog.MinDensity, WeatherCatalog.MaxDensity);
+        EditWeather.Density = count == WeatherCatalog.DefaultDensity ? null : count;
+        TidyWeather();
+    }
+
+    /// <summary>Colour of the snow or rain (0xRRGGBB).</summary>
+    public uint EffectColor => WeatherCatalog.ParseHex(Settings.Weather?.EffectColor) ?? WeatherCatalog.DefaultEffectColor(Effect);
+
+    /// <summary>Changes the colour of the snow or rain.</summary>
+    public void SetEffectColor(uint rgb)
+    {
+        EditWeather.EffectColor = rgb == WeatherCatalog.DefaultEffectColor(Effect) ? null : WeatherCatalog.Hex(rgb);
+        TidyWeather();
+    }
+
+    /// <summary>The fog colour (0xRRGGBB): the setting or the environment's.</summary>
+    public uint FogColor => WeatherCatalog.ParseHex(Settings.Weather?.FogColor) ?? WeatherCatalog.OriginalFogColor(Comm.Island, Comm.Weather);
+
+    /// <summary>True if the fog colour is the environment's.</summary>
+    public bool FogColorIsOriginal => WeatherCatalog.ParseHex(Settings.Weather?.FogColor) is null;
+
+    /// <summary>Changes the fog colour (null: the environment's).</summary>
+    public void SetFogColor(uint? rgb)
+    {
+        EditWeather.FogColor = rgb is { } c ? WeatherCatalog.Hex(c) : null;
+        TidyWeather();
+    }
+
+    /// <summary>True if the sky is tinted with the fog colour.</summary>
+    public bool SkyTint => Settings.Weather?.SkyTint == true;
+
+    /// <summary>Tints the sky with the fog colour or not.</summary>
+    public void SetSkyTint(bool tint)
+    {
+        EditWeather.SkyTint = tint;
+        TidyWeather();
+    }
+
+    /// <summary>The view distance (m).</summary>
+    public float ViewDistance => Settings.Weather?.ViewDistance ?? WeatherCatalog.DefaultViewDistance;
+
+    /// <summary>Changes the view distance (1000–2100 m); the fog start stays within it.</summary>
+    public void SetViewDistance(float meters)
+    {
+        meters = Math.Clamp((float)Math.Round(meters), WeatherCatalog.MinViewDistance, WeatherCatalog.MaxViewDistance);
+        EditWeather.ViewDistance = meters == WeatherCatalog.DefaultViewDistance ? null : meters;
+        if (EditWeather.FogStart is { } start && start > meters)
+        {
+            EditWeather.FogStart = meters;
+        }
+
+        TidyWeather();
+    }
+
+    /// <summary>True if the fog follows the view distance as in the game.</summary>
+    public bool FogAligned => Settings.Weather?.FogStart is null;
+
+    /// <summary>Lets the fog follow the view distance, or gives it its own start and density (starting with the game's).</summary>
+    public void SetFogAligned(bool aligned)
+    {
+        if (aligned)
+        {
+            EditWeather.FogStart = null;
+            EditWeather.FogDensity = null;
+        }
+        else if (EditWeather.FogStart is null)
+        {
+            EditWeather.FogStart = (float)Math.Round(WeatherCatalog.GameFogStart(ViewDistance));
+            EditWeather.FogDensity = 100;
+        }
+
+        TidyWeather();
+    }
+
+    /// <summary>Where the fog starts (m).</summary>
+    public float FogStart => Settings.Weather?.FogStart ?? (float)Math.Round(WeatherCatalog.GameFogStart(ViewDistance));
+
+    /// <summary>How thick the fog is at the view distance (%).</summary>
+    public float FogDensity => Settings.Weather?.FogDensity ?? 100;
+
+    /// <summary>Changes the fog start (m, within the view distance) and density (%, 10–100).</summary>
+    public void SetFog(float start, float density)
+    {
+        EditWeather.FogStart = Math.Clamp((float)Math.Round(start), 0, ViewDistance);
+        EditWeather.FogDensity = Math.Clamp((float)Math.Round(density), 10, 100);
+        TidyWeather();
+    }
+
+    /// <summary>The wind: where it blows to (degrees, 0 = north) and its strength (units per second).</summary>
+    public (float Direction, float Strength) Wind => WeatherCatalog.WindOf(Comm.Wind);
+
+    /// <summary>Changes the wind's direction and strength (its vertical part stays).</summary>
+    public void SetWind(float direction, float strength)
+    {
+        Comm.Wind = WeatherCatalog.WindVector(direction, Math.Max(0, strength), Comm.Wind.Z);
+    }
+
+    /// <summary>Changes how much and how fast the wind's strength and direction vary.</summary>
+    public void SetWindVariation(float speedRange, float speedRate, float directionRange, float directionRate)
+    {
+        Comm.WindSpeedRange = Math.Max(0, speedRange);
+        Comm.WindSpeedRate = Math.Max(0, speedRate);
+        Comm.WindDirectionRange = Math.Max(0, directionRange);
+        Comm.WindDirectionRate = Math.Max(0, directionRate);
+    }
+
     /// <summary>True if this mission has a "View Demo" button that can be hidden (Beginner of HG, RB, GC).</summary>
     public bool CanHideDemo => DemoButton.HasButton(Mission.Id);
 
@@ -673,6 +830,7 @@ public sealed class MissionDraft
             && (a.TouchdownCurve ?? []).SequenceEqual(other.TouchdownCurve ?? []) && (a.TouchdownCurve is null) == (other.TouchdownCurve is null)
             && a.Landing.Count == other.Landing.Count && a.Landing.All(p => other.Landing.TryGetValue(p.Key, out float v) && v == p.Value)
             && a.BirdmanPoints == other.BirdmanPoints
+            && (a.Weather is null || a.Weather.IsEmpty ? other.Weather is null || other.Weather.IsEmpty : a.Weather.SameAs(other.Weather))
             && (a.RunwayWidths ?? []).SequenceEqual(other.RunwayWidths ?? []) && (a.RunwayWidths is null) == (other.RunwayWidths is null)
             && (a.Conditions is null ? other.Conditions is null : a.Conditions.SameAs(other.Conditions))
             && a.TextPoints.Count == other.TextPoints.Count

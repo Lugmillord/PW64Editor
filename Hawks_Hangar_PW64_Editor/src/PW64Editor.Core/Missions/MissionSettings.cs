@@ -93,6 +93,9 @@ public sealed class MissionSettings
     /// </summary>
     public bool BirdmanPoints { get; set; }
 
+    /// <summary>Weather and view settings that are not in the mission file (fog colour, view distance, fog, rain), or null.</summary>
+    public MissionWeather? Weather { get; set; }
+
     /// <summary>The mission these settings belong to.</summary>
     [JsonIgnore]
     public TestId Id => new(Class, (Vehicle)Vehicle, Test);
@@ -101,7 +104,7 @@ public sealed class MissionSettings
     [JsonIgnore]
     public bool IsEmpty => ResultRows is null && !GenerateTexts && Footnote.Count == 0 && TextPoints.Count == 0
         && AutoFootnote is null && Conditions is null && !HideDemo && StartFuel is null && !UnlimitedFuel && !HardEndZero && HardEndJingle is null
-        && TouchdownCurve is null && Landing.Count == 0 && RunwayWidths is null && !BirdmanPoints;
+        && TouchdownCurve is null && Landing.Count == 0 && RunwayWidths is null && !BirdmanPoints && (Weather is null || Weather.IsEmpty);
 
     /// <summary>Empty settings for a mission.</summary>
     public static MissionSettings For(TestId id) => new() { Vehicle = (int)id.Vehicle, Class = id.Class, Test = id.Test };
@@ -127,6 +130,7 @@ public sealed class MissionSettings
         Landing = new Dictionary<LandingValue, float>(Landing),
         RunwayWidths = RunwayWidths is null ? null : [.. RunwayWidths],
         BirdmanPoints = BirdmanPoints,
+        Weather = Weather?.Clone(),
     };
 }
 

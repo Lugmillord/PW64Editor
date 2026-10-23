@@ -185,6 +185,26 @@ public static class MissionReport
 
         Value(text, "Out of area deduction", comm.OutOfAreaDeduction, original.OutOfAreaDeduction);
 
+        // Weather and view.
+        Line(text, $"Weather: {comm.Weather} ({(int)comm.Weather}){Was(comm.Weather.ToString(), original.Weather.ToString())}, "
+            + $"snow byte {(comm.Snow ? 1 : 0)}{Was(comm.Snow ? "1" : "0", original.Snow ? "1" : "0")}");
+        (float direction, float strength) = WeatherCatalog.WindOf(comm.Wind);
+        Line(text, $"Wind: x {Num(comm.Wind.X)}, y {Num(comm.Wind.Y)}, z {Num(comm.Wind.Z)} (towards {Num(direction)}°, {Num(strength)} units/s); "
+            + $"strength ±{Num(comm.WindSpeedRange)} rate {Num(comm.WindSpeedRate)}, direction ±{Num(comm.WindDirectionRange)}° rate {Num(comm.WindDirectionRate)}°");
+        if (settings?.Weather is { IsEmpty: false } weather)
+        {
+            Line(text, $"Weather settings: effect {(comm.Snow ? weather.Rain ? "rain" : "snow" : "off")}, fall speed {Num(weather.FallSpeed ?? -1)}, "
+                + $"density {weather.Density?.ToString(CultureInfo.InvariantCulture) ?? "default"}, effect colour {weather.EffectColor ?? "default"}, "
+                + $"fog colour {weather.FogColor ?? "environment"}{(weather.SkyTint ? " (sky tinted)" : string.Empty)}, "
+                + $"view distance {Num(weather.ViewDistance ?? WeatherCatalog.DefaultViewDistance)} m, "
+                + $"fog {(weather.FogStart is { } fogStart ? $"from {Num(fogStart)} m, {Num(weather.FogDensity ?? 100)} % at the view distance" : "with the view distance")}");
+            if (WeatherCatalog.ToModule(weather, comm) is { } module)
+            {
+                Line(text, $"Weather in the game module: fog colour {(module.FogColor is { } fog ? WeatherCatalog.Hex(fog) : "-")}, view {Num(module.ViewDistance ?? 0)}, "
+                    + $"fog command {(module.FogRange is { } r ? $"{r.Multiplier}/{r.Offset}" : "-")}, effect {(module.Effect is { } e ? $"{(e.Rain ? "rain" : "snow")} 0x{e.Color:X4} {Num(e.FallSpeed)} × {e.Count}" : "-")}");
+            }
+        }
+
         // Conditions.
         Line(text, string.Empty);
         Line(text, $"Condition byte: {comm.Condition} ({(int)comm.Condition}){Was(comm.Condition.ToString(), original.Condition.ToString())}, "

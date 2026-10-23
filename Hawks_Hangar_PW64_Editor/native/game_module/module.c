@@ -153,8 +153,24 @@ typedef struct {
     u32 limits[4];   /* +0x70 f32 bits: HG landing vertical/forward, good vertical/forward (km/h); GC crash, crash
                         beside a pad; RB crash, hard landing, hard landing sideways (units per second); Birdman landing
                         vertical/forward (km/h) */
-    u8 reserved[DATA_ENTRY_SIZE - 0x80];
+    /* Weather and view (weather.c): */
+    u8 weather;      /* +0x80 WEATHER_... */
+    u8 effect;       /* +0x81 1 snow, 2 rain (with COMM byte 9 = 1) */
+    u16 effectColor; /* +0x82 RGBA 5551 */
+    u8 fogColor[4];  /* +0x84 r, g, b, 0 */
+    u32 viewDistance; /* +0x88 f32 bits, game units (camera's far distance) */
+    s32 fogMul;      /* +0x8C gSPFogPosition multiplier 128000 / (max - min), depth 0-1000 */
+    s32 fogOffset;   /* +0x90 its offset (500 - min) * 256 / (max - min) */
+    u32 fallSpeed;   /* +0x94 f32 bits, units per second */
+    u16 density;     /* +0x98 snow flakes or rain drops */
+    u8 reserved[DATA_ENTRY_SIZE - 0x9A];
 } Condition;
+
+#define WEATHER_FOG_COLOR 1u  /* the environment's fog colour */
+#define WEATHER_SKY_TINT  2u  /* the sky (and the clear colour) tinted with it */
+#define WEATHER_VIEW      4u  /* own view distance */
+#define WEATHER_FOG_RANGE 8u  /* own fog start and density */
+#define WEATHER_EFFECT   16u  /* own snow/rain settings */
 
 #define gConditions ((const Condition *)(DATA_AREA + 0x100))
 
@@ -619,6 +635,15 @@ static void overlay_install(void) {
     }
 }
 
+/* For weather.c: sets the game's frame callback (the snow), keeping the overlay in front of it while it is shown. */
+void module_set_frame_callback(void *callback) {
+    if (GAME_GFX_CALLBACK == (void *)overlay) {
+        sOtherCallback = (FrameCallback)callback;
+    } else {
+        GAME_GFX_CALLBACK = callback;
+    }
+}
+
 static void screen_newline(void) {
     int i;
     if (sScreenCount == OVL_ROWS) {
@@ -855,6 +880,19 @@ static const Condition *current_condition(void) {
         }
     }
     return 0;
+}
+
+/* For weather.c: the entry of the mission being flown if it has weather settings, or 0. */
+const void *module_weather_entry(void) {
+    const Condition *c = current_condition();
+    return c != 0 && c->weather != 0 ? (const void *)c : 0;
+}
+
+/* For weather.c: a debug message with one number. */
+void module_message_int(const char *fmt, s32 value) {
+    if (gHeader.flags & FLAG_DEBUG) {
+        message(fmt, value);
+    }
 }
 
 static int has_required(const Condition *c) {

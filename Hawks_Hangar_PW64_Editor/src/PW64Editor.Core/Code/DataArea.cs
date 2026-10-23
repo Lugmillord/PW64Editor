@@ -26,13 +26,18 @@ namespace PW64Editor.Core.Code;
 /// +0x18 curve (0x54 bytes, as in the mission file): the Gyrocopter's touchdown point
 /// +0x6C f32 radius of the landing pads (game units)
 /// +0x70 f32[4] speed limits of the vehicle (LandingValues.SpeedsOf; HG km/h, GC and RB units per second)
-/// +0x80 ... reserved (0)
+/// +0x80 u8  weather flags: 1 fog colour, 2 sky tinted, 4 view distance, 8 fog range, 16 snow/rain settings
+/// +0x81 u8  1 snow, 2 rain                +0x82 u16 colour of the snow/rain (RGBA 5551)
+/// +0x84 u8[3] fog colour r, g, b          +0x88 f32 view distance (game units)
+/// +0x8C s32 fog multiplier, +0x90 s32 fog offset (gSPFogPosition: 128000 / (max − min), (500 − min) × 256 / (max − min))
+/// +0x94 f32 fall speed (units per second) +0x98 u16 number of flakes/drops
+/// +0x9A ... reserved (0)
 /// </code>
 /// <para>Header: +0x00 'HHMD', +0x04 version, +0x08 missions, +0x0C entry size, +0x10 size of the result tables
 /// (0 = none), +0x14 u16 the Birdman missions with points (bit class × 4 + test), +0x18 RAM address of the class table
 /// (medal limits per vehicle and class, <see cref="Classes.ClassLimits"/>; 0 = none), +0x1C RAM address of the unlock
 /// table (conditions of the menu fields, <see cref="Classes.MenuUnlocks"/>; 0 = the game's rules). At +0x50 the Birdman's two landing
-/// limits, which its patched code reads. At +0x40 the values the game code reads while flying (written by the module in every flight frame,
+/// limits, which its patched code reads. At +0x60 the view distance for cameraInit (weather). At +0x20 the RAM address of the island table of the environments (header +0x80, <see cref="Missions.WeatherEnvironments"/>; 0 = none). At +0x40 the values the game code reads while flying (written by the module in every flight frame,
 /// see <see cref="LiveLandingAddress"/>).</para>
 /// <para>Behind the room for <see cref="MissionCapacity"/> entries (at <see cref="Missions.ResultTables.Address"/>)
 /// the result tables of the game patch <see cref="GamePatches.BonusGames"/>, when it is applied; the image then
@@ -100,6 +105,12 @@ public static class DataArea
     public const int UnlockTableOffset = 0x1C;
 
     /// <summary>
+    /// RAM address of the view distance (f32) cameraInit gives a camera when the weather patches are applied (its
+    /// "2000.0f" loads it); the module writes the mission's view distance there at the start of a mission (weather.c).
+    /// </summary>
+    public const uint LiveViewAddress = Start + 0x60;
+
+    /// <summary>
     /// RAM address of the Birdman's two current landing limits (f32 km/h: vertical, forward), which its patched landing
     /// code loads instead of the immediates 50 (module: the mission's values or the original ones).
     /// </summary>
@@ -114,7 +125,7 @@ public static class DataArea
     /// <exception cref="InvalidDataException">More missions than the table has room for, or the tables do not fit.</exception>
     /// <param name="birdmanPoints">The mask of the Birdman missions with points (header +0x14).</param>
     public static byte[] CreateImage(IReadOnlyList<GameModuleCondition> missions, byte[]? resultTables = null, ushort birdmanPoints = 0,
-        byte[]? classTable = null, byte[]? unlockTable = null)
+        byte[]? classTable = null, byte[]? unlockTable = null, byte[]? environmentTable = null)
     {
         if (missions.Count > MissionCapacity)
         {
@@ -151,6 +162,7 @@ public static class DataArea
         BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(0x08), (uint)missions.Count);
         BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(0x0C), MissionEntrySize);
         BinaryPrimitives.WriteUInt16BigEndian(image.AsSpan(BirdmanPointsOffset), birdmanPoints);
+        BinaryPrimitives.WriteSingleBigEndian(image.AsSpan((int)(LiveViewAddress - Start)), 2000f); // the game's view distance
         if (resultTables is not null)
         {
             BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(ResultTablesSizeOffset), (uint)resultTables.Length);
@@ -167,6 +179,17 @@ public static class DataArea
         {
             BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(UnlockTableOffset), Classes.MenuUnlocks.TableAddress);
             unlockTable.CopyTo(image, unlockOffset);
+        }
+
+        if (environmentTable is not null)
+        {
+            if (environmentTable.Length != Missions.WeatherEnvironments.TableSize)
+            {
+                throw new InvalidDataException("The environment table has the wrong size.");
+            }
+
+            BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(Missions.WeatherEnvironments.TableAddressOffset), Missions.WeatherEnvironments.TableAddress);
+            environmentTable.CopyTo(image, (int)(Missions.WeatherEnvironments.TableAddress - Start));
         }
 
         for (int i = 0; i < missions.Count; i++)
@@ -217,6 +240,33 @@ public static class DataArea
             entry[4 + t] = t < c.Required.Count ? c.Required[t] : (byte)0;
         }
 
+        if (c.Weather is { IsEmpty: false } w)
+        {
+            entry[0x80] = (byte)((w.FogColor is not null ? 1 : 0) | (w.FogColor is not null && w.SkyTint ? 2 : 0)
+                | (w.ViewDistance is not null ? 4 : 0) | (w.FogRange is not null ? 8 : 0) | (w.Effect is not null ? 16 : 0));
+            if (w.FogColor is { } fog)
+            {
+                entry[0x84] = (byte)(fog >> 16);
+                entry[0x85] = (byte)(fog >> 8);
+                entry[0x86] = (byte)fog;
+            }
+
+            BinaryPrimitives.WriteSingleBigEndian(entry[0x88..], w.ViewDistance ?? 0);
+            if (w.FogRange is { } range)
+            {
+                BinaryPrimitives.WriteInt32BigEndian(entry[0x8C..], range.Multiplier);
+                BinaryPrimitives.WriteInt32BigEndian(entry[0x90..], range.Offset);
+            }
+
+            if (w.Effect is { } effect)
+            {
+                entry[0x81] = (byte)(effect.Rain ? 2 : 1);
+                BinaryPrimitives.WriteUInt16BigEndian(entry[0x82..], effect.Color);
+                BinaryPrimitives.WriteSingleBigEndian(entry[0x94..], effect.FallSpeed);
+                BinaryPrimitives.WriteUInt16BigEndian(entry[0x98..], (ushort)Math.Clamp(effect.Count, 1, 1200));
+            }
+        }
+
         BinaryPrimitives.WriteSingleBigEndian(entry[0x0C..], c.MinimumAltitude ?? 0);
         BinaryPrimitives.WriteSingleBigEndian(entry[0x10..], c.MinimumDistance ?? 0);
         entry[0x14] = c.HardEndMusic;
@@ -259,6 +309,16 @@ public static class DataArea
 
         int offset = (int)(Classes.MenuUnlocks.TableAddress - Start);
         return offset + Classes.MenuUnlocks.TableSize <= image.Length ? image.Slice(offset, Classes.MenuUnlocks.TableSize).ToArray() : null;
+    }
+
+    /// <summary>The environment table of an image made by <see cref="CreateImage"/>, or null if it has none.</summary>
+    public static byte[]? ReadEnvironmentTable(ReadOnlySpan<byte> image)
+    {
+        int offset = (int)(Missions.WeatherEnvironments.TableAddress - Start);
+        return image.Length >= HeaderSize && BinaryPrimitives.ReadUInt32BigEndian(image) == Magic
+            && BinaryPrimitives.ReadUInt32BigEndian(image[Missions.WeatherEnvironments.TableAddressOffset..]) == Missions.WeatherEnvironments.TableAddress
+                ? image.Slice(offset, Missions.WeatherEnvironments.TableSize).ToArray()
+                : null;
     }
 
     /// <summary>The mask of the Birdman missions with points of an image (0 for none or not an image).</summary>
@@ -335,7 +395,28 @@ public static class DataArea
             TouchdownCurve = curve,
             PadRadius = (landing & 1) != 0 ? BinaryPrimitives.ReadSingleBigEndian(entry[0x6C..]) : null,
             VehicleLimits = limits,
+            Weather = full ? ReadWeather(entry) : null,
         };
+    }
+
+    /// <summary>The weather fields of an entry (+0x80), or null if it has none.</summary>
+    private static GameModuleWeather? ReadWeather(ReadOnlySpan<byte> entry)
+    {
+        byte flags = entry[0x80];
+        if (flags == 0)
+        {
+            return null;
+        }
+
+        return new GameModuleWeather(
+            (flags & 1) != 0 ? ((uint)entry[0x84] << 16) | ((uint)entry[0x85] << 8) | entry[0x86] : null,
+            (flags & 2) != 0,
+            (flags & 4) != 0 ? BinaryPrimitives.ReadSingleBigEndian(entry[0x88..]) : null,
+            (flags & 8) != 0 ? (BinaryPrimitives.ReadInt32BigEndian(entry[0x8C..]), BinaryPrimitives.ReadInt32BigEndian(entry[0x90..])) : null,
+            (flags & 16) != 0
+                ? new GameModuleEffect(entry[0x81] == 2, BinaryPrimitives.ReadUInt16BigEndian(entry[0x82..]),
+                    BinaryPrimitives.ReadSingleBigEndian(entry[0x94..]), BinaryPrimitives.ReadUInt16BigEndian(entry[0x98..]))
+                : null);
     }
 
     /// <summary>

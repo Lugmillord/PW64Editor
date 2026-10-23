@@ -47,12 +47,37 @@ public sealed record GameModuleCondition(byte Class, byte Vehicle, byte Test, bo
     /// </summary>
     public IReadOnlyList<float> VehicleLimits { get; init; } = [];
 
+    /// <summary>Weather and view of the mission (fog colour, sky, view distance, fog range, snow/rain), or null for none.</summary>
+    public GameModuleWeather? Weather { get; init; }
+
     /// <summary>True if the entry has conditions for the points (otherwise the game's own condition counts).</summary>
     public bool HasConditions => CrashGivesZero || CrashTimePoints || MinimumAltitude is not null || MinimumDistance is not null || Required.Any(r => r != 0);
 
     /// <summary>True if the entry changes a landing (touchdown curve, pad radius or speed limits).</summary>
     public bool HasLandingValues => TouchdownCurve is not null || PadRadius is not null || VehicleLimits.Count > 0;
 }
+
+/// <summary>
+/// The weather and view of a mission as the game module uses them (data area entry +0x80; weather.c).
+/// </summary>
+/// <param name="FogColor">The fog colour (0xRRGGBB) of the mission's environment, or null for the environment's own.</param>
+/// <param name="SkyTint">With <paramref name="FogColor"/>: the sky dome and the clear colour are tinted with it.</param>
+/// <param name="ViewDistance">The camera's far distance (game units), or null for the game's 2000.</param>
+/// <param name="FogRange">The fog as gSPFogPosition sets it: multiplier 128000 / (max − min) and offset (500 − min) × 256 / (max − min),
+/// with min (start) and max (full fog) in the game's depth units (0 near … 1000 far), or null for the game's factor 0.996.</param>
+/// <param name="Effect">Snow or rain settings (with COMM byte 9 = 1), or null for the game's snow.</param>
+public sealed record GameModuleWeather(uint? FogColor, bool SkyTint, float? ViewDistance, (int Multiplier, int Offset)? FogRange, GameModuleEffect? Effect)
+{
+    /// <summary>True if the entry changes nothing.</summary>
+    public bool IsEmpty => FogColor is null && ViewDistance is null && FogRange is null && Effect is null;
+}
+
+/// <summary>Snow or rain of a mission (game module).</summary>
+/// <param name="Rain">Rain (streaks) instead of snow (pixels).</param>
+/// <param name="Color">The colour as RGBA 5551.</param>
+/// <param name="FallSpeed">Units per second.</param>
+/// <param name="Count">Number of flakes or drops (at most 1200).</param>
+public sealed record GameModuleEffect(bool Rain, ushort Color, float FallSpeed, int Count);
 
 /// <summary>How a mission is scored when its hard end time is reached (game module).</summary>
 public enum HardEndScoring
@@ -126,8 +151,13 @@ public sealed record GameModuleOptions(bool DebugOutput, bool StartupInfo = fals
     /// <summary>The unlock table (conditions of the menu fields, <see cref="Classes.MenuUnlocks"/>), or null for the game's rules.</summary>
     public byte[]? UnlockTable { get; init; }
 
+    /// <summary>The island table of the environments (<see cref="Missions.WeatherEnvironments.Table"/>) when a mission uses a
+    /// time of day / weather the game lacks on its island, or null.</summary>
+    public byte[]? EnvironmentTable { get; init; }
+
     /// <summary>True if the module is built into the ROM.</summary>
-    public bool IsNeeded => RequireExpansionPak || ResultTables is not null || ClassTable is not null || UnlockTable is not null || DebugOutput || Conditions.Count > 0 || DistanceRow || PenaltyDigits.Count > 0;
+    public bool IsNeeded => RequireExpansionPak || ResultTables is not null || ClassTable is not null || UnlockTable is not null || DebugOutput || Conditions.Count > 0 || DistanceRow || PenaltyDigits.Count > 0
+        || EnvironmentTable is not null;
 }
 
 /// <summary>
@@ -642,6 +672,23 @@ public static class GameModule
             }
         }
 
+        // Sky Diving below the clouds: the mission's environment instead of condition 1 of the island.
+        patches.Add(new WordPatch("Sky Diving below the clouds, skydivingBelow", SkyDivingBelowRomOffset,
+            [0x8E080000, 0x24010003, 0x95020006, 0x54410006],
+            [CodeArea.Jal(GameModuleImage.SkyDivingBelowAddress), 0x00000000, 0x1000001D, 0x00402825]));
+
+        // Weather and view per mission: the start and end of a mission, the fog range, and snow and rain.
+        if (options.Conditions.Any(c => c.Weather is { IsEmpty: false }))
+        {
+            patches.AddRange(WeatherPatches());
+        }
+
+        // Times of day / weather the game lacks on an island: the choice of the environment, its level, tint and palette.
+        if (options.EnvironmentTable is not null)
+        {
+            patches.AddRange(EnvironmentPatches());
+        }
+
         // Medal limits per vehicle and class: the functions that read the game's table go through the module.
         if (options.ClassTable is { } classTable)
         {
@@ -670,6 +717,47 @@ public static class GameModule
         }
 
         return patches;
+    }
+
+    /// <summary>ROM offset of the choice of the environment below the clouds in skydivingBelow (0x80331BF8).</summary>
+    public const int SkyDivingBelowRomOffset = 0xB9128;
+
+    /// <summary>
+    /// The changes for the weather and view per mission (weather.c): taskLoad and taskDeinitLevel call the module at
+    /// the start and end of a mission (it calls func_802EB598 and func_802EB5E4 itself), uvGfxSetFogFactor (kernel,
+    /// ROM 0x21C50), snowUpdate and snowDraw jump to the module at their entry, and cameraInit loads the far distance from
+    /// <see cref="DataArea.LiveViewAddress"/>.
+    /// </summary>
+    public static IReadOnlyList<WordPatch> WeatherPatches() =>
+    [
+        new("weather, mission start (taskLoad)", 0xCC818, [0x0C0BAD66], [CodeArea.Jal(GameModuleImage.EnvStartAddress)]),
+        new("weather, mission end (taskDeinitLevel)", 0xCC8C4, [0x0C0BAD79], [CodeArea.Jal(GameModuleImage.EnvEndAddress)]),
+        new("weather, fog range (uvGfxSetFogFactor)", 0x21C50, [0x44800000, 0x3C08802A], [CodeArea.J(GameModuleImage.FogFactorAddress), 0]),
+        new("weather, snow and rain (snowUpdate)", 0xC74E4, [0x3C018035, 0xC424F854], [CodeArea.J(GameModuleImage.EffectUpdateAddress), 0]),
+        new("weather, snow and rain (snowDraw)", 0xC7460, [0x3C038037, 0x8C633EF0], [CodeArea.J(GameModuleImage.EffectDrawAddress), 0]),
+        // cameraInit: "lui at, 0x44FA; …; mtc1 at, f4" (the far distance 2000) becomes "lui at, 0x801F; …; lwc1 f4, 0x5060(at)".
+        new("weather, view distance (cameraInit)", 0x5A6D0, [0x3C0144FA], [0x3C010000 | ((DataArea.LiveViewAddress + 0x8000) >> 16)]),
+        new("weather, view distance (cameraInit)", 0x5A6D8, [0x44812000], [0xC4240000 | (DataArea.LiveViewAddress & 0xFFFF)]),
+    ];
+
+    /// <summary>
+    /// The changes for the environments the game lacks (<see cref="Missions.WeatherEnvironments"/>): envGetCurrentId
+    /// (0x802E12B4) jumps to the module at its entry; env_802E1444's calls of env_802E1A80 (the level) and env_802E1C1C (the
+    /// tint) and the entry of envLoadTerrainPal (0x802E1990) go to the module; env_802E2060 tests the sunset environments
+    /// with a mask ("lui at, hi; ori at, lo; sllv at, at, s0; bgezl at") instead of "== 5 || == 16".
+    /// </summary>
+    public static IReadOnlyList<WordPatch> EnvironmentPatches()
+    {
+        uint mask = Missions.WeatherEnvironments.SunsetMask;
+        return
+        [
+            new("environments, envGetCurrentId", 0x687E4, [0x27BDFFE0, 0xAFBF0014], [CodeArea.J(GameModuleImage.EnvIdAddress), 0]),
+            new("environments, level (env_802E1444)", 0x689B4, [0x0C0B86A0], [CodeArea.Jal(GameModuleImage.EnvLevelAddress)]),
+            new("environments, tint (env_802E1444)", 0x689BC, [0x0C0B8707], [CodeArea.Jal(GameModuleImage.EnvTintAddress)]),
+            new("environments, terrain palette (envLoadTerrainPal)", 0x68EC0, [0x27BDFFE8, 0xAFBF0014], [CodeArea.J(GameModuleImage.EnvPaletteAddress), 0]),
+            new("environments, sunset fog (env_802E2060)", 0x695A8, [0x24010005, 0x12010003, 0x24010010, 0x560100D2],
+                [0x3C010000 | (mask >> 16), 0x34210000 | (mask & 0xFFFF), 0x02010804, 0x042300D2]),
+        ];
     }
 
     /// <summary>
@@ -730,7 +818,8 @@ public static class GameModule
     public static void Apply(byte[] rom, GameModuleOptions options, int romOffset, string info)
     {
         int dataRomOffset = romOffset - DataArea.RomReserve;
-        byte[] data = DataArea.CreateImage(options.Conditions, options.ResultTables, options.BirdmanPoints, options.ClassTable, options.UnlockTable);
+        byte[] data = DataArea.CreateImage(options.Conditions, options.ResultTables, options.BirdmanPoints, options.ClassTable, options.UnlockTable,
+            options.EnvironmentTable);
         byte[] image = CreateImage(options, romOffset, info, dataRomOffset, data.Length);
         if (dataRomOffset < 0 || romOffset + RomReserve > rom.Length)
         {

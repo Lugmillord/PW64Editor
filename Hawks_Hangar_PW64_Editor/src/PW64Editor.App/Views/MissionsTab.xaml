@@ -288,6 +288,120 @@
                         </StackPanel>
                         </Expander>
 
+                        <!-- Time of day, weather, snow and rain, fog, view distance and wind; filled in code. -->
+                        <Expander x:Name="WeatherPanel" Style="{StaticResource Section}">
+                            <Expander.Header><TextBlock Text="Weather and view" Style="{StaticResource SectionHeader}" /></Expander.Header>
+                            <StackPanel Margin="18,0,0,0">
+                            <WrapPanel x:Name="WeatherTargetPanel" Margin="0,4,0,0">
+                                <TextBlock Text="Target:" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                <ComboBox x:Name="WeatherTargetBox" Width="160" DisplayMemberPath="Text" SelectionChanged="OnWeatherTargetChanged" />
+                                <TextBlock Style="{StaticResource Note}" VerticalAlignment="Center" Margin="10,0,0,0"
+                                           Text="Each target of a Cannonball level has its own weather." />
+                            </WrapPanel>
+                            <Grid Margin="0,6,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" MinWidth="190" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <TextBlock Grid.Row="0" Text="Weather / time of day:" VerticalAlignment="Center" />
+                                <ComboBox x:Name="WeatherBox" Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="2" Width="260" Margin="0,3,0,3"
+                                          SelectionChanged="OnWeatherChanged" />
+
+                                <TextBlock Grid.Row="1" Text="Weather effect:" VerticalAlignment="Center" />
+                                <ComboBox x:Name="EffectBox" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2" Width="260" Margin="0,3,0,3"
+                                          SelectionChanged="OnEffectChanged" />
+                                <TextBlock x:Name="FallSpeedLabel" Grid.Row="2" Text="Fall speed:" VerticalAlignment="Center" Margin="18,0,0,0" />
+                                <Slider x:Name="FallSpeedSlider" Grid.Row="2" Grid.Column="1" Width="220" Minimum="0" Maximum="30" SmallChange="0.5" LargeChange="5"
+                                        TickFrequency="0.5" IsSnapToTickEnabled="True" VerticalAlignment="Center" Margin="0,3,8,3" ValueChanged="OnWeatherSliderChanged" />
+                                <TextBlock x:Name="FallSpeedText" Grid.Row="2" Grid.Column="2" VerticalAlignment="Center" MinWidth="110" />
+                                <TextBlock x:Name="DensityLabel" Grid.Row="3" Text="Amount:" VerticalAlignment="Center" Margin="18,0,0,0" />
+                                <Slider x:Name="DensitySlider" Grid.Row="3" Grid.Column="1" Width="220" Minimum="200" Maximum="1200" SmallChange="50" LargeChange="200"
+                                        TickFrequency="50" IsSnapToTickEnabled="True" VerticalAlignment="Center" Margin="0,3,8,3" ValueChanged="OnWeatherSliderChanged" />
+                                <TextBlock x:Name="DensityText" Grid.Row="3" Grid.Column="2" VerticalAlignment="Center" MinWidth="110" />
+                                <TextBlock x:Name="EffectColorLabel" Grid.Row="4" Text="Colour:" VerticalAlignment="Center" Margin="18,0,0,0" />
+                                <ComboBox x:Name="EffectColorBox" Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Width="260" Margin="0,3,0,3"
+                                          SelectionChanged="OnEffectColorChanged" />
+
+                                <TextBlock Grid.Row="5" Text="Fog colour:" VerticalAlignment="Center" Margin="0,8,0,0" />
+                                <ComboBox x:Name="FogColorBox" Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" Width="260" Margin="0,11,0,3"
+                                          SelectionChanged="OnFogColorChanged" />
+                                <CheckBox x:Name="SkyTintBox" Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="3" Margin="0,3,0,3" Click="OnSkyTintChanged"
+                                          Content="Tint the sky with it too" />
+                                <TextBlock x:Name="FogColorNote" Grid.Row="7" Grid.Column="1" Grid.ColumnSpan="3" Style="{StaticResource Note}" />
+
+                                <TextBlock Grid.Row="8" Text="View distance:" VerticalAlignment="Center" Margin="0,8,0,0" />
+                                <Slider x:Name="ViewSlider" Grid.Row="8" Grid.Column="1" Width="220" Minimum="1000" Maximum="2100" SmallChange="50" LargeChange="100"
+                                        TickFrequency="50" IsSnapToTickEnabled="True" VerticalAlignment="Center" Margin="0,11,8,3" ValueChanged="OnWeatherSliderChanged" />
+                                <TextBlock x:Name="ViewText" Grid.Row="8" Grid.Column="2" VerticalAlignment="Center" Margin="0,8,0,0" MinWidth="110" />
+                                <CheckBox x:Name="FogAlignedBox" Grid.Row="9" Grid.Column="1" Grid.ColumnSpan="3" Margin="0,3,0,3" Click="OnFogAlignedChanged"
+                                          Content="Fog follows the view distance (as in the game)" />
+                                <TextBlock x:Name="FogStartLabel" Grid.Row="10" Text="Fog starts at:" VerticalAlignment="Center" Margin="18,0,0,0" />
+                                <Slider x:Name="FogStartSlider" Grid.Row="10" Grid.Column="1" Width="220" Minimum="0" Maximum="2000" SmallChange="10" LargeChange="100"
+                                        TickFrequency="10" IsSnapToTickEnabled="True" VerticalAlignment="Center" Margin="0,3,8,3" ValueChanged="OnWeatherSliderChanged" />
+                                <TextBlock x:Name="FogStartText" Grid.Row="10" Grid.Column="2" VerticalAlignment="Center" MinWidth="110" />
+                                <TextBlock x:Name="FogDensityLabel" Grid.Row="11" Text="Fog at the view distance:" VerticalAlignment="Center" Margin="18,0,0,0" />
+                                <Slider x:Name="FogDensitySlider" Grid.Row="11" Grid.Column="1" Width="220" Minimum="10" Maximum="100" SmallChange="5" LargeChange="10"
+                                        TickFrequency="5" IsSnapToTickEnabled="True" VerticalAlignment="Center" Margin="0,3,8,3" ValueChanged="OnWeatherSliderChanged" />
+                                <TextBlock x:Name="FogDensityText" Grid.Row="11" Grid.Column="2" VerticalAlignment="Center" MinWidth="110" />
+
+                                <TextBlock Grid.Row="12" Text="Wind direction:" VerticalAlignment="Center" Margin="0,8,0,0" />
+                                <Slider x:Name="WindDirectionSlider" Grid.Row="12" Grid.Column="1" Width="220" Minimum="0" Maximum="355" SmallChange="5" LargeChange="45"
+                                        TickFrequency="5" IsSnapToTickEnabled="True" VerticalAlignment="Center" Margin="0,11,8,3" ValueChanged="OnWeatherSliderChanged" />
+                                <TextBlock x:Name="WindDirectionText" Grid.Row="12" Grid.Column="2" VerticalAlignment="Center" Margin="0,8,0,0" MinWidth="110" />
+                                <TextBlock Grid.Row="13" Text="Wind strength:" VerticalAlignment="Center" />
+                                <Slider x:Name="WindStrengthSlider" Grid.Row="13" Grid.Column="1" Width="220" Minimum="0" Maximum="10" SmallChange="0.1" LargeChange="1"
+                                        TickFrequency="0.1" IsSnapToTickEnabled="True" VerticalAlignment="Center" Margin="0,3,8,3" ValueChanged="OnWeatherSliderChanged" />
+                                <TextBlock x:Name="WindStrengthText" Grid.Row="13" Grid.Column="2" VerticalAlignment="Center" MinWidth="110" />
+                                <TextBlock Grid.Row="14" Text="Direction varies:" VerticalAlignment="Center" Margin="18,0,0,0" />
+                                <WrapPanel Grid.Row="14" Grid.Column="1" Grid.ColumnSpan="3" Margin="0,3,0,3">
+                                    <TextBlock Text="by ±" VerticalAlignment="Center" Margin="0,0,4,0" />
+                                    <Slider x:Name="WindDirectionRangeSlider" Width="120" Minimum="0" Maximum="180" SmallChange="5" LargeChange="15"
+                                            TickFrequency="5" IsSnapToTickEnabled="True" VerticalAlignment="Center" ValueChanged="OnWeatherSliderChanged" />
+                                    <TextBlock x:Name="WindDirectionRangeText" VerticalAlignment="Center" MinWidth="45" Margin="4,0,12,0" />
+                                    <TextBlock Text="rate" VerticalAlignment="Center" Margin="0,0,4,0" />
+                                    <Slider x:Name="WindDirectionRateSlider" Width="120" Minimum="0" Maximum="90" SmallChange="1" LargeChange="10"
+                                            TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center" ValueChanged="OnWeatherSliderChanged" />
+                                    <TextBlock x:Name="WindDirectionRateText" VerticalAlignment="Center" MinWidth="55" Margin="4,0,0,0" />
+                                </WrapPanel>
+                                <TextBlock Grid.Row="15" Text="Strength varies:" VerticalAlignment="Center" Margin="18,0,0,0" />
+                                <WrapPanel Grid.Row="15" Grid.Column="1" Grid.ColumnSpan="3" Margin="0,3,0,3">
+                                    <TextBlock Text="by ±" VerticalAlignment="Center" Margin="0,0,4,0" />
+                                    <Slider x:Name="WindSpeedRangeSlider" Width="120" Minimum="0" Maximum="5" SmallChange="0.1" LargeChange="1"
+                                            TickFrequency="0.1" IsSnapToTickEnabled="True" VerticalAlignment="Center" ValueChanged="OnWeatherSliderChanged" />
+                                    <TextBlock x:Name="WindSpeedRangeText" VerticalAlignment="Center" MinWidth="45" Margin="4,0,12,0" />
+                                    <TextBlock Text="rate" VerticalAlignment="Center" Margin="0,0,4,0" />
+                                    <Slider x:Name="WindSpeedRateSlider" Width="120" Minimum="0" Maximum="10" SmallChange="0.1" LargeChange="1"
+                                            TickFrequency="0.1" IsSnapToTickEnabled="True" VerticalAlignment="Center" ValueChanged="OnWeatherSliderChanged" />
+                                    <TextBlock x:Name="WindSpeedRateText" VerticalAlignment="Center" MinWidth="55" Margin="4,0,0,0" />
+                                </WrapPanel>
+                            </Grid>
+                            <TextBlock x:Name="WeatherNote" Style="{StaticResource Note}" Margin="0,6,0,0" />
+                            <TextBlock Style="{StaticResource Note}" Margin="0,4,0,0"
+                                       Text="The wind blows towards the direction shown: 0° is north (up on the map of the mission), 90° east. Its strength is in meters per second; it pushes every vehicle. The variation lets strength and direction wander at random around the set value, at most by ± the amount; the rate says how fast (the game takes a random step of up to half of it per second). The weather effects, fog colour, fog and view distance are set by the editor's game code while the mission is flown." />
+                        </StackPanel>
+                        </Expander>
+
                         <Expander Style="{StaticResource Section}">
                             <Expander.Header><TextBlock Text="Footnote" Style="{StaticResource SectionHeader}" /></Expander.Header>
                             <StackPanel Margin="18,0,0,0">

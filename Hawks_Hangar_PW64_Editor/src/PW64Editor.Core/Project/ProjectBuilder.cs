@@ -59,6 +59,7 @@ public static class ProjectBuilder
         AddLevelTexts(project, fileSystem, files);
         CheckTextFile(project, fileSystem, files);
         ApplyMissionSettings(project, files);
+        bool addedEnvironments = AddEnvironments(files);
 
         RomBuildResult romBuild;
         try
@@ -78,6 +79,7 @@ public static class ProjectBuilder
                         ClassTable = Classes.ClassLimits.Table(project.Settings.Classes, project.HasPatch(GamePatches.BonusGames),
                             HasOwnClassTexts(project)),
                         UnlockTable = Classes.MenuUnlocks.Table(project.Settings.Unlocks, project.Settings.Features.AllFieldsOpen),
+                        EnvironmentTable = addedEnvironments ? Missions.WeatherEnvironments.Table() : null,
                     },
                     GameModuleInfo = ModuleInfo(project),
                 });
@@ -247,6 +249,31 @@ public static class ProjectBuilder
                 files[i] = files[i] with { Data = mission.WithRunwayWidths(widths) };
             }
         }
+    }
+
+    /// <summary>
+    /// When a mission uses a time of day / weather its island lacks in the game (dark overcast on Holiday and Ever-Frost
+    /// Island, sunset on Crescent and Ever-Frost Island): adds the environments and their levels to the game files
+    /// (<see cref="Missions.WeatherEnvironments"/>). Returns true if it did; the module then gets the island table.
+    /// </summary>
+    /// <exception cref="ProjectException">The project replaces the environment or level file in a way the editor cannot extend.</exception>
+    public static bool AddEnvironments(List<GameFile> files)
+    {
+        if (!Missions.WeatherEnvironments.Needed(files))
+        {
+            return false;
+        }
+
+        try
+        {
+            Missions.WeatherEnvironments.AddTo(files);
+        }
+        catch (InvalidDataException ex)
+        {
+            throw new ProjectException(CoreText.F("The times of day the islands lack cannot be added: {0}", ex.Message), ex);
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -431,8 +458,9 @@ public static class ProjectBuilder
                 TouchdownCurve = touchdown,
                 PadRadius = padRadius,
                 VehicleLimits = limits,
+                Weather = Missions.WeatherCatalog.ToModule(settings?.Weather, comm),
             };
-            if (entry.HasConditions || fuel || hardEnd != HardEndScoring.Retail || entry.HasLandingValues)
+            if (entry.HasConditions || fuel || hardEnd != HardEndScoring.Retail || entry.HasLandingValues || entry.Weather is not null)
             {
                 result.Add(entry);
             }

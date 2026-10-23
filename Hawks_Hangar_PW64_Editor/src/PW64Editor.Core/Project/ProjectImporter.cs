@@ -215,7 +215,23 @@ public static class ProjectImporter
             }
         }
 
-        List<GameFile> changed = CompareFiles(cleanFs, hackFs, notes, patchTexts);
+        // The environments the build adds for the times of day the islands lack are no changes of their own either.
+        List<(int Index, byte[] Data)> generated = patchTexts is { } texts ? [texts] : [];
+        if (module is not null && GameModule.ReadDataImage(hack, module) is { } envImage && DataArea.ReadEnvironmentTable(envImage) is not null)
+        {
+            var withEnvironments = cleanFs.Files.ToList();
+            try
+            {
+                WeatherEnvironments.AddTo(withEnvironments);
+                generated.AddRange(withEnvironments.Where(f => f.FileType is "UVEN" or "UVLV").Select(f => (f.TableIndex, f.Data)));
+            }
+            catch (InvalidDataException)
+            {
+                // not the retail layout (test data)
+            }
+        }
+
+        List<GameFile> changed = CompareFiles(cleanFs, hackFs, notes, generated);
         List<GameFile> hackFiles = cleanFs.Files.Select(f => changed.FirstOrDefault(c => c.TableIndex == f.TableIndex) ?? f).ToList();
 
         // Music, and where the audio data lies.
@@ -474,7 +490,7 @@ public static class ProjectImporter
     /// <param name="notes">The report.</param>
     /// <param name="builtTextFile">The text file a build makes from the original one by itself (game patch "Bonus games and
     /// Birdman"), or null: the hack's text file is no change if it is this one.</param>
-    private static List<GameFile> CompareFiles(GameFileSystem clean, GameFileSystem hack, List<ImportNote> notes, (int Index, byte[] Data)? builtTextFile = null)
+    private static List<GameFile> CompareFiles(GameFileSystem clean, GameFileSystem hack, List<ImportNote> notes, IReadOnlyList<(int Index, byte[] Data)> generated)
     {
         var changed = new List<GameFile>();
         int otherType = 0;
@@ -491,7 +507,7 @@ public static class ProjectImporter
                 otherType++;
             }
             else if (!original.Data.AsSpan().SequenceEqual(file.Data)
-                && !(builtTextFile is { } text && text.Index == file.TableIndex && text.Data.AsSpan().SequenceEqual(file.Data)))
+                && !generated.Any(g => g.Index == file.TableIndex && g.Data.AsSpan().SequenceEqual(file.Data)))
             {
                 changed.Add(original with { Data = file.Data });
             }
@@ -640,10 +656,14 @@ public static class ProjectImporter
         var all = new GameModuleOptions(true, true, true, true)
         {
             Live = LiveValues.Distance,
-            Conditions = [new GameModuleCondition(0, 0, 0, true, 1, new byte[GameModule.ObjectTypes], UnlimitedFuel: true, HardEnd: HardEndScoring.Scored)],
+            Conditions = [new GameModuleCondition(0, 0, 0, true, 1, new byte[GameModule.ObjectTypes], UnlimitedFuel: true, HardEnd: HardEndScoring.Scored)
+            {
+                Weather = new GameModuleWeather(0, true, 1000, (128, 64000), new GameModuleEffect(true, 1, 1, 200)),
+            }],
             PenaltyDigits = new ushort[10],
             CountdownTexts = Enumerable.Repeat<IReadOnlyList<ushort>>([0xFFFF], 6).ToList(),
             DistanceRow = true,
+            EnvironmentTable = WeatherEnvironments.Table(),
             UnlockTable = new byte[Classes.MenuUnlocks.TableSize],
             ClassTable = Enumerable.Repeat((byte)0, Classes.ClassLimits.FlagsOffset)
                 .Concat(Enumerable.Repeat((byte)(Classes.ClassLimits.FlagOwnLimits | Classes.ClassLimits.FlagOwnTexts), Classes.ClassLimits.TableSize - Classes.ClassLimits.FlagsOffset))
@@ -742,6 +762,46 @@ public static class ProjectImporter
         return word >> 26 == 3 && target >= CodeArea.Start && target < CodeArea.End;
     }
 
+    /// <summary>The weather settings of a data area entry (the reverse of <see cref="WeatherCatalog.ToModule"/>), or null.</summary>
+    /// <param name="entry">The entry's weather.</param>
+    /// <param name="comm">The mission's COMM block: a sky tinted with the environment's own fog colour stores no colour.</param>
+    public static MissionWeather? ToWeather(GameModuleWeather? entry, MissionComm? comm = null)
+    {
+        if (entry is null || entry.IsEmpty)
+        {
+            return null;
+        }
+
+        bool environment = comm is not null && entry.SkyTint && entry.FogColor == WeatherCatalog.OriginalFogColor(comm.Island, comm.Weather);
+        var weather = new MissionWeather
+        {
+            FogColor = entry.FogColor is { } fog && !environment ? WeatherCatalog.Hex(fog) : null,
+            SkyTint = entry.FogColor is not null && entry.SkyTint,
+            ViewDistance = entry.ViewDistance,
+        };
+        float view = entry.ViewDistance ?? WeatherCatalog.DefaultViewDistance;
+        if (entry.FogRange is { Multiplier: > 0 } command)
+        {
+            (double min, double max) = WeatherCatalog.FogRangeOf(command.Multiplier, command.Offset);
+            weather.FogStart = (float)Math.Round(WeatherCatalog.DistanceOf(min, view));
+            weather.FogDensity = (float)Math.Round(Math.Clamp((1000.0 - min) * 100 / (max - min), 1, 100));
+        }
+
+        if (entry.Effect is { } effect)
+        {
+            WeatherEffect kind = effect.Rain ? WeatherEffect.Rain : WeatherEffect.Snow;
+            weather.Rain = effect.Rain;
+            weather.FallSpeed = effect.FallSpeed == WeatherCatalog.DefaultFallSpeed(kind) ? null : effect.FallSpeed;
+            weather.Density = effect.Count == WeatherCatalog.DefaultDensity ? null : effect.Count;
+            // The list colour with the same frame buffer value, otherwise the colour itself.
+            uint? listed = WeatherCatalog.Colors.Select(c => (uint?)c.Rgb).FirstOrDefault(c => WeatherCatalog.ToRgba5551(c!.Value) == (effect.Color | 1));
+            uint rgb = listed ?? ((uint)((effect.Color >> 11) & 0x1F) << 19) | ((uint)((effect.Color >> 6) & 0x1F) << 11) | ((uint)((effect.Color >> 1) & 0x1F) << 3);
+            weather.EffectColor = rgb == WeatherCatalog.DefaultEffectColor(kind) ? null : WeatherCatalog.Hex(rgb);
+        }
+
+        return weather.IsEmpty ? null : weather;
+    }
+
     /// <summary>The mission settings: the entries of the data area, changed result rows and hidden demo buttons.</summary>
     private static void ReadMissions(byte[] hack, byte[] clean, RomLayout layout, GameModuleHeader? module, IReadOnlyList<GameFile> hackFiles,
         ProjectSettings settings, List<ImportNote> notes)
@@ -810,6 +870,7 @@ public static class ProjectImporter
                         mission.Landing[speeds[i]] = entry.VehicleLimits[i];
                     }
                 }
+                mission.Weather = ToWeather(entry.Weather, comm);
             }
 
             if (cleanTables is not null && hackTables is not null)
