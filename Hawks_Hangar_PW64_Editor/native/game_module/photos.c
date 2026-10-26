@@ -10,7 +10,9 @@
  *   - "Please wait..." while photos are drawn: the game draws every photo by setting up its test (for photos of other
  *     tests the mission is loaded again) and drawing the island, which takes seconds. The grid shows the text in its
  *     title bar (where "Check which photo ?" is shown afterwards) until all six are drawn; the single photo views
- *     (func_8033DDD8, func_8033DFD0) show it in the middle of the photo area, where the picture then replaces it.
+ *     (func_8033DDD8, func_8033DFD0) show it in the middle of the photo area, where the picture then replaces it; when the
+ *     photo's test has to be loaded first (gameUpdateStateTestSetup clears the photo area before it loads), the text is
+ *     drawn again on the cleared area and stays there while the island loads.
  *
  * Built with the FPU (-mhard-float) like weather.c; only integers and pointers cross into module.c. Function and
  * variable names from the decompilation (https://github.com/gcsmith/Pilotwings64Decomp, MIT license).
@@ -355,12 +357,37 @@ s32 module_photo_grid(s32 mode, s32 count, u8 *photos, s32 *page, s32 *cursor) {
 
 /* ------------------------------------------------------------------ single photos */
 
+static s32 sBusyX, sBusyY; /* where module_photo_busy put the text */
+static s32 sSettingUp;     /* module_photo_setup is running */
+
 /*
  * Takes the place of func_8033A610 (the photo's viewport) in func_8033DDD8 (the example photos) and func_8033DFD0 (one
- * photo of the album or the flight): "Please wait..." in the middle of the photo area first; the picture drawn
- * there afterwards covers it.
+ * photo of the album or the flight): "Please wait..." in the middle of the (still white) photo area first; the picture
+ * drawn there afterwards covers it.
  */
 void module_photo_busy(s32 x0, s32 x1, s32 y0, s32 y1) {
-    draw_busy((x0 + x1) / 2, (y0 + y1) / 2 - 6, 0x20, 0x20, 0x20);
+    sBusyX = (x0 + x1) / 2;
+    sBusyY = (y0 + y1) / 2 - 6;
+    draw_busy(sBusyX, sBusyY, 0x20, 0x20, 0x20);
     GAME_PHOTO_VIEWPORT(x0, x1, y0, y1);
+}
+
+/*
+ * Takes the place of func_8033A128 (the photo's test is set up) in the same two functions. For a photo of another test
+ * this is gameUpdateStateTestSetup, which first clears the photo area twice (black) and then loads the island and the
+ * mission for seconds; module_setup_frame draws the text again after those two frames.
+ */
+void module_photo_setup(s32 mode, u8 *photo) {
+    sSettingUp = 1;
+    GAME_PHOTO_SETUP(mode, photo);
+    sSettingUp = 0;
+}
+
+/* The second uvGfxEnd of gameUpdateStateTestSetup (after its two clears): "Please wait..." in white on the black photo
+   area while module_photo_setup runs, otherwise nothing more than the game's uvGfxEnd. */
+void module_setup_frame(void) {
+    GAME_GFX_END();
+    if (sSettingUp) {
+        draw_busy(sBusyX, sBusyY, 0xFF, 0xFF, 0xFF);
+    }
 }

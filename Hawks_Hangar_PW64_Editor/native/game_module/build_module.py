@@ -288,6 +288,8 @@ def main():
         f'    public const uint RadarGoalsAddress = 0x{symbols["module_radar_goals"]:08X};',
         f'    public const uint PhotoGridAddress = 0x{symbols["module_photo_grid"]:08X};',
         f'    public const uint PhotoBusyAddress = 0x{symbols["module_photo_busy"]:08X};',
+        f'    public const uint PhotoSetupAddress = 0x{symbols["module_photo_setup"]:08X};',
+        f'    public const uint SetupFrameAddress = 0x{symbols["module_setup_frame"]:08X};',
         '',
         '    /// <summary>Number of missions the settings table in the data area has room for.</summary>',
         f'    public const int ConditionsCapacity = {CONDITIONS_CAPACITY};',

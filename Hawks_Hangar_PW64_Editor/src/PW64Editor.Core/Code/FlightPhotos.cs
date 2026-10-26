@@ -15,7 +15,11 @@ namespace PW64Editor.Core.Code;
 /// <para>The photo grid (func_8033D3EC) is replaced by the module's (photos.c, <see cref="GameModuleImage.PhotoGridAddress"/>):
 /// pages of six photos, and "Please wait..." while the photos are drawn. The two single photo views (func_8033DDD8, the
 /// example photos, and func_8033DFD0, one photo of the album or the flight) call the module's
-/// <see cref="GameModuleImage.PhotoBusyAddress"/> instead of func_8033A610, which shows the text in the photo area first.</para>
+/// <see cref="GameModuleImage.PhotoBusyAddress"/> instead of func_8033A610, which shows the text in the photo area first.
+/// When the photo's test has to be loaded (func_8033A128 → gameUpdateStateTestSetup), that function clears the photo area
+/// twice before it loads the island for seconds; the two calls of func_8033A128 go through
+/// <see cref="GameModuleImage.PhotoSetupAddress"/>, and the second uvGfxEnd of gameUpdateStateTestSetup through
+/// <see cref="GameModuleImage.SetupFrameAddress"/>, which then draws the text again (only while the photo is set up).</para>
 /// <para>Names from the decompilation (https://github.com/gcsmith/Pilotwings64Decomp, MIT license).</para>
 /// </remarks>
 public static class FlightPhotos
@@ -49,6 +53,7 @@ public static class FlightPhotos
     {
         uint end10 = Table + (Count * PhotoSize);
         uint grid = CodeArea.Jal(GameModuleImage.PhotoGridAddress), busy = CodeArea.Jal(GameModuleImage.PhotoBusyAddress);
+        uint setup = CodeArea.Jal(GameModuleImage.PhotoSetupAddress), frame = CodeArea.Jal(GameModuleImage.SetupFrameAddress);
         return
         [
             // snapInit: all ten photos cleared.
@@ -87,6 +92,10 @@ public static class FlightPhotos
             // "Please wait..." in the single photo views.
             new("photos, please wait (func_8033DDD8)", 0xC53CC, [0x0C0CE984], [busy]),
             new("photos, please wait (func_8033DFD0)", 0xC55CC, [0x0C0CE984], [busy]),
+            // ... and again after the two clears of gameUpdateStateTestSetup when the photo's test is loaded first.
+            new("photos, please wait while loading (func_8033DDD8)", 0xC53D8, [0x0C0CE84A], [setup]),
+            new("photos, please wait while loading (func_8033DFD0)", 0xC55D8, [0x0C0CE84A], [setup]),
+            new("photos, please wait while loading (gameUpdateStateTestSetup)", 0x73ABC, [0x0C08885F], [frame]),
         ];
     }
 }
