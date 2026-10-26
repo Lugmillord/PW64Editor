@@ -137,13 +137,15 @@ def main():
         binary = os.path.join(tmp, 'module.bin')
         weather_obj = os.path.join(tmp, 'weather.o')
         missions_obj = os.path.join(tmp, 'missions.o')
+        objects_obj = os.path.join(tmp, 'objects.o')
         run('mips-linux-gnu-gcc', *CFLAGS, '-c', os.path.join(HERE, 'module.c'), '-o', obj)
         run('mips-linux-gnu-gcc', *CFLAGS, '-c', os.path.join(HERE, 'missions.c'), '-o', missions_obj)
+        run('mips-linux-gnu-gcc', *CFLAGS, '-c', os.path.join(HERE, 'objects.c'), '-o', objects_obj)
         # weather.c uses the FPU (snow and rain); only integers and pointers cross between the two files.
         run('mips-linux-gnu-gcc', *[f if f != '-msoft-float' else '-mhard-float' for f in CFLAGS], '-c',
             os.path.join(HERE, 'weather.c'), '-o', weather_obj)
         run('mips-linux-gnu-ld', '-T', os.path.join(HERE, 'module.ld'), '--no-warn-rwx-segments', '--no-warn-mismatch',
-            obj, weather_obj, missions_obj, '-o', elf)
+            obj, weather_obj, missions_obj, objects_obj, '-o', elf)
         undefined = run('mips-linux-gnu-nm', '-u', elf).strip()
         if undefined:
             sys.exit('Undefined symbols (the module must not need libgcc):\n' + undefined)
@@ -278,6 +280,8 @@ def main():
         f'    public const uint TotalPointsAddress = 0x{symbols["module_tot_points"]:08X};',
         f'    public const uint TotalUnitsAddress = 0x{symbols["module_tot_units"]:08X};',
         f'    public const uint TotalHeaderAddress = 0x{symbols["module_tot_header"]:08X};',
+        f'    public const uint HudRadarAddress = 0x{symbols["module_hud_radar"]:08X};',
+        f'    public const uint RadarGoalsAddress = 0x{symbols["module_radar_goals"]:08X};',
         '',
         '    /// <summary>Number of missions the settings table in the data area has room for.</summary>',
         f'    public const int ConditionsCapacity = {CONDITIONS_CAPACITY};',

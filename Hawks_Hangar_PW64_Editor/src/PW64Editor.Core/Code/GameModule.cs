@@ -591,6 +591,10 @@ public static class GameModule
         // screen (in every hack).
         patches.AddRange(MissionCapacity.Patches((options.MissionFiles ?? DataExtension.GameMissionFiles).Count));
 
+        // The high data area (stage 8): a larger display list, 32 KiB object memory per mission, the radar's goals (in
+        // every hack).
+        patches.AddRange(HighDataArea.Patches());
+
         // The developers' messages: _uvDebugPrintf jumps to the gate (which returns while the module is not loaded).
         if (options.DebugOutput && options.GameMessages)
         {

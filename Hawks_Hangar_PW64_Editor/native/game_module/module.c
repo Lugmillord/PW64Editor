@@ -2607,7 +2607,7 @@ s32 module_tot_choice(s32 item) {
    state: elapsed time +0x10, attitude +0x68 (x, y, heading, pitch, computed by hudMainRender), radar (HUDRadar) +0x90, as
    the game's own calls pass it (hudDrawHangGlider: addiu t9, s0, 0x90). */
 #define GAME_HUD_BIRDMAN ((void (*)(u8 *))0x80319EFC)                                  /* hudDrawBirdman */
-#define GAME_HUD_RADAR   ((void (*)(s32, s32, u32, u32, u32, u32, u8 *))0x8031AD68)     /* hudDrawRadar */
+void module_hud_radar(s32 x, s32 y, u32 xOff, u32 yOff, u32 heading, u32 pitch, u8 *radar); /* objects.c: hudDrawRadar */
 #define GAME_HUD_TIMER   ((void (*)(s32, s32, u32))0x8031D264)                         /* hudDrawTimer */
 void module_hud_birdman(u8 *hud) {
     u8 *comm = GAME_TASK_SCORING() - 0x48;
@@ -2617,7 +2617,7 @@ void module_hud_birdman(u8 *hud) {
         || !birdman_points(comm[0], comm[2])) {
         return; /* free flight or the demo */
     }
-    GAME_HUD_RADAR(215, 222, *(u32 *)(hud + 0x68), *(u32 *)(hud + 0x6C), *(u32 *)(hud + 0x70), *(u32 *)(hud + 0x74), hud + 0x90);
+    module_hud_radar(215, 222, *(u32 *)(hud + 0x68), *(u32 *)(hud + 0x6C), *(u32 *)(hud + 0x70), *(u32 *)(hud + 0x74), hud + 0x90);
     GAME_HUD_TIMER(27, 222, *(u32 *)(hud + 0x10));
 }
 

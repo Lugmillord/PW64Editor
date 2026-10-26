@@ -77,6 +77,11 @@ public static class ProjectBuilder
         }
 
         IReadOnlyList<SaveGame.TestId> missionIds = [.. missionList.Select(m => m.Id)];
+        if (missionList.Select(m => Missions.MissionObjects.Problem(m.Comm)).FirstOrDefault(p => p is not null) is { } objectProblem)
+        {
+            throw new ProjectException(objectProblem);
+        }
+
         AddLevelTexts(project, fileSystem, files, missionIds);
         CheckTextFile(project, fileSystem, files);
         ApplyMissionSettings(project, files);

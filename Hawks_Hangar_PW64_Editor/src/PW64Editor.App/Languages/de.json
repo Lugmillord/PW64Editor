@@ -1350,5 +1350,6 @@
   "Converts the current limits from {0} to {1} missions: {2}.": "Rechnet die aktuellen Grenzen von {0} auf {1} Missionen um: {2}.",
   "{0}: the limits are made for {1} missions, the class has {2}.": "{0}: Die Grenzen sind für {1} Missionen gemacht, die Klasse hat {2}.",
   "\"Scale limits\" converts the current limits to the number of missions of the class (e.g. 140/160/180 for 2 missions become 210/240/270 for 3).": "„Grenzen skalieren“ rechnet die aktuellen Grenzen auf die Zahl der Missionen der Klasse um (z. B. werden 140/160/180 für 2 Missionen zu 210/240/270 für 3).",
-  "The missions of the project have changed: the save file was converted to them (the results and photos go along with their missions). Save it so the game reads it with the new missions.": "Die Missionen des Projekts haben sich geändert: Die Speicherdatei wurde auf sie umgestellt (Ergebnisse und Fotos wandern mit ihren Missionen mit). Speichere sie, damit das Spiel sie mit den neuen Missionen richtig liest."
+  "The missions of the project have changed: the save file was converted to them (the results and photos go along with their missions). Save it so the game reads it with the new missions.": "Die Missionen des Projekts haben sich geändert: Die Speicherdatei wurde auf sie umgestellt (Ergebnisse und Fotos wandern mit ihren Missionen mit). Speichere sie, damit das Spiel sie mit den neuen Missionen richtig liest.",
+  "The objects of {0} need {1} bytes of object memory, the game has {2}.": "Die Objekte von {0} brauchen {1} Bytes Objektspeicher, das Spiel hat {2}."
 }
