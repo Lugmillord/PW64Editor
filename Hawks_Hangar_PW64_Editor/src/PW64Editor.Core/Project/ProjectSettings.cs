@@ -66,6 +66,12 @@ public sealed class ProjectSettings
     /// </summary>
     public List<int> RemovedMissions { get; set; } = [];
 
+    /// <summary>
+    /// Raised limits of the object lists (type name → objects per mission, e.g. "Ring": 40; <see cref="Missions.ObjectLimits"/>),
+    /// or null for the game's limits.
+    /// </summary>
+    public Dictionary<string, int>? ObjectLimits { get; set; }
+
     /// <summary>Changed classes: own medal limits and islands (Classes tab; only classes with changes).</summary>
     public List<Classes.ClassSettings> Classes { get; set; } = [];
 

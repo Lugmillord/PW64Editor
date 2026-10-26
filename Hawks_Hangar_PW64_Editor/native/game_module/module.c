@@ -794,11 +794,19 @@ static const TotalFunction sTotal[OBJECT_TYPES] = {
 
 #define GAME_BALL_COUNT  (*(volatile u8 *)0x80357210)
 #define GAME_BALL_SPLITS (*(volatile u8 *)0x80357211)
-#define GAME_BALLS       ((volatile u8 *)0x80357218) /* gBalls, 0x1AC bytes each, hasPopped at +0x94 */
+/* gBalls, 0x1AC bytes each, hasPopped at +0x94; a project with a raised limit has its list in the high data area (data
+   area header +0x30, stage 8) */
+#define DATA_BALL_LIST   (*(volatile u32 *)(DATA_AREA + 0x30))
+#define GAME_BALLS       ((volatile u8 *)(DATA_HEADER->magic == DATA_MAGIC && DATA_BALL_LIST ? DATA_BALL_LIST : 0x80357218u))
 #define GAME_FALCO_COUNT REG32(0x8035A5F0)
 
 #define GAME_RING_COUNT  (*(volatile u8 *)0x8036DA74) /* sRingsCount */
-#define GAME_RINGS       ((volatile u8 *)0x8036DA78) /* gRings, 0x1CC bytes each */
+/* gRings, 0x1CC bytes each, room for 30; with a raised limit at data area header +0x28 (address) and +0x2C (limit) */
+#define DATA_RING_LIST   (*(volatile u32 *)(DATA_AREA + 0x28))
+#define DATA_RING_LIMIT  (*(volatile u32 *)(DATA_AREA + 0x2C))
+#define RINGS_RAISED     (DATA_HEADER->magic == DATA_MAGIC && DATA_RING_LIST != 0)
+#define GAME_RINGS       ((volatile u8 *)(RINGS_RAISED ? DATA_RING_LIST : 0x8036DA78u))
+#define RING_LIMIT       ((int)(RINGS_RAISED ? DATA_RING_LIMIT : 30u))
 #define RING_SIZE        0x1CC
 #define RING_SCORE_TYPE  0x146 /* 2: invisible check ring */
 #define RING_CONSUMED    0x1B4
@@ -811,7 +819,7 @@ static void count_objects(int type, s32 *cleared, s32 *total) {
         int i, n = GAME_RING_COUNT;
         *cleared = 0;
         *total = 0;
-        for (i = 0; i < n && i < 30; i++) {
+        for (i = 0; i < n && i < RING_LIMIT; i++) {
             volatile u8 *ring = GAME_RINGS + i * RING_SIZE;
             if (ring[RING_SCORE_TYPE] == 2) {
                 continue;

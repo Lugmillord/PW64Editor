@@ -142,6 +142,49 @@ public sealed class MissionFile
         return Iff.IffWriter.BuildForm(form.FormType, chunks);
     }
 
+    /// <summary>
+    /// The file with other objects of a type (the whole chunk, a multiple of <see cref="MissionObjects.Size"/>): the chunk is
+    /// replaced, added at the end or left out when empty; the count in COMM follows.
+    /// </summary>
+    /// <exception cref="ArgumentException">The data is no whole number of objects, or more than 255.</exception>
+    public byte[] WithObjectData(MissionObjectKind kind, ReadOnlySpan<byte> objects)
+    {
+        int size = MissionObjects.Size(kind);
+        if (objects.Length % size != 0 || objects.Length / size > 255)
+        {
+            throw new ArgumentException($"The objects must be a multiple of 0x{size:X} bytes, at most 255.", nameof(objects));
+        }
+
+        string tag = ObjectTags[(int)kind];
+        MissionComm comm = Comm.Clone();
+        comm.SetObjectCount(kind, objects.Length / size);
+        Iff.IffForm form = Iff.IffForm.Parse(_file);
+        var chunks = new List<byte[]>();
+        bool replaced = false;
+        foreach (IffChunk chunk in form.Chunks)
+        {
+            if (chunk.Tag == tag)
+            {
+                replaced = true;
+                if (objects.Length > 0)
+                {
+                    chunks.Add(Iff.IffWriter.BuildChunk(tag, objects.ToArray()));
+                }
+
+                continue;
+            }
+
+            chunks.Add(Iff.IffWriter.BuildChunk(chunk.Tag, chunk.Tag == "COMM" ? comm.ToArray() : _file.AsSpan(chunk.DataOffset, chunk.DataSize).ToArray()));
+        }
+
+        if (!replaced && objects.Length > 0)
+        {
+            chunks.Add(Iff.IffWriter.BuildChunk(tag, objects.ToArray()));
+        }
+
+        return Iff.IffWriter.BuildForm(form.FormType, chunks);
+    }
+
     /// <summary>Offset of the start fuel in the takeoff pad (TaskTPAD.unk2C, 0 to 1, Rocket Belt and Gyrocopter).</summary>
     public const int StartFuelOffset = 0x2C;
 

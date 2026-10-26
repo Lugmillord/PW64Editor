@@ -1351,5 +1351,19 @@
   "{0}: the limits are made for {1} missions, the class has {2}.": "{0}：基準は{1}ミッション用ですが、クラスには{2}個あります。",
   "\"Scale limits\" converts the current limits to the number of missions of the class (e.g. 140/160/180 for 2 missions become 210/240/270 for 3).": "「基準をスケール」は、現在の基準をクラスのミッション数に換算します（例：2ミッションの140/160/180は、3ミッションでは210/240/270になります）。",
   "The missions of the project have changed: the save file was converted to them (the results and photos go along with their missions). Save it so the game reads it with the new missions.": "プロジェクトのミッションが変わったため、セーブファイルを変換しました（結果と写真はそれぞれのミッションと一緒に移動します）。ゲームが新しいミッションで正しく読めるよう、保存してください。",
-  "The objects of {0} need {1} bytes of object memory, the game has {2}.": "{0}のオブジェクトには{1}バイトのオブジェクトメモリが必要ですが、ゲームには{2}バイトしかありません。"
+  "The objects of {0} need {1} bytes of object memory, the game has {2}.": "{0}のオブジェクトには{1}バイトのオブジェクトメモリが必要ですが、ゲームには{2}バイトしかありません。",
+  "The mission's objects need about {0} display objects, the island about {1}; the game has {2}. The objects that do not fit are not drawn.": "ミッションのオブジェクトには約{0}個、島には約{1}個の表示オブジェクトが必要ですが、ゲームには{2}個しかありません。入りきらないオブジェクトは描画されません。",
+  "The radar has room for {0} of the mission's objects, the mission has {1}; the others are never shown on it.": "レーダーに表示できるミッションのオブジェクトは{0}個ですが、ミッションには{1}個あります。残りは表示されません。",
+  "hover pads": "フローティングパッド",
+  "missile targets": "ミサイルの標的",
+  "thermals": "上昇気流",
+  "local winds": "局地風",
+  "takeoff pads": "スタート地点",
+  "landing pads": "着陸パッド",
+  "runways": "滑走路",
+  "Meca Hawk areas": "メカホークのエリア",
+  "cannon targets": "Cannonballの的",
+  "The limit of this object type cannot be raised.": "このオブジェクトの種類の上限は上げられません。",
+  "The limit can be set from {0} to {1}.": "上限は{0}から{1}まで設定できます。",
+  "{0} has {1} {2}, the game has room for {3}; it would load none of them.": "{0}には{2}が{1}個ありますが、ゲームに入るのは{3}個までです。1つも読み込まれません。"
 }

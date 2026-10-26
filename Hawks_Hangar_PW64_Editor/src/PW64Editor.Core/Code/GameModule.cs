@@ -152,6 +152,9 @@ public sealed record GameModuleOptions(bool DebugOutput, bool StartupInfo = fals
     /// <summary>The photo missions ("Shutter Bug"), or null for the game's (<see cref="DataExtension.GamePhotoMissions"/>).</summary>
     public IReadOnlyList<SaveGame.TestId>? PhotoMissions { get; init; }
 
+    /// <summary>The raised object limits (<see cref="Missions.ObjectLimits.Raised"/>), or null for the game's lists.</summary>
+    public IReadOnlyDictionary<Missions.MissionObjectKind, int>? ObjectLimits { get; init; }
+
     /// <summary>The class table (medal limits per vehicle and class, <see cref="Classes.ClassLimits"/>), or null for the game's limits.</summary>
     public byte[]? ClassTable { get; init; }
 
@@ -594,6 +597,7 @@ public static class GameModule
         // The high data area (stage 8): a larger display list, 32 KiB object memory per mission, the radar's goals (in
         // every hack).
         patches.AddRange(HighDataArea.Patches());
+        patches.AddRange(HighDataArea.ObjectListPatches(options.ObjectLimits ?? new Dictionary<Missions.MissionObjectKind, int>()));
 
         // The developers' messages: _uvDebugPrintf jumps to the gate (which returns while the module is not loaded).
         if (options.DebugOutput && options.GameMessages)

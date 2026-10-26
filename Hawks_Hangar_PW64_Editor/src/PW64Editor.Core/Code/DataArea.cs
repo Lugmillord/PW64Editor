@@ -37,7 +37,8 @@ namespace PW64Editor.Core.Code;
 /// (0 = none), +0x14 u16 the Birdman missions with points (bit class × 4 + test), +0x18 RAM address of the class table
 /// (medal limits per vehicle and class, <see cref="Classes.ClassLimits"/>; 0 = none), +0x1C RAM address of the unlock
 /// table (conditions of the menu fields, <see cref="Classes.MenuUnlocks"/>; 0 = the game's rules). At +0x50 the Birdman's two landing
-/// limits, which its patched code reads. At +0x60 the view distance for cameraInit (weather). At +0x20 the RAM address of the island table of the environments (header +0x80, <see cref="Missions.WeatherEnvironments"/>; 0 = none). At +0x40 the values the game code reads while flying (written by the module in every flight frame,
+/// limits, which its patched code reads. At +0x60 the view distance for cameraInit (weather). At +0x28 the RAM address of a raised ring list and its limit, at +0x30 that of a raised balloon list (0 = the game's
+/// lists; <see cref="HighDataArea.ObjectLists"/>), which the module's conditions count. At +0x20 the RAM address of the island table of the environments (header +0x80, <see cref="Missions.WeatherEnvironments"/>; 0 = none). At +0x40 the values the game code reads while flying (written by the module in every flight frame,
 /// see <see cref="LiveLandingAddress"/>).</para>
 /// <para>Behind the room for <see cref="MissionCapacity"/> entries (at <see cref="Missions.ResultTables.Address"/>)
 /// the result tables of the game patch <see cref="GamePatches.BonusGames"/>, when it is applied; the image then
@@ -120,6 +121,12 @@ public static class DataArea
     /// <summary>Header: size of the image of the lower data area (<see cref="DataExtension"/>, 0 = none; version 2).</summary>
     public const int ExtensionSizeOffset = 0x24;
 
+    /// <summary>Header: RAM address of the raised ring list and its limit (0 = the game's gRings, 30).</summary>
+    public const int RingListOffset = 0x28;
+
+    /// <summary>Header: RAM address of the raised balloon list (0 = the game's gBalls).</summary>
+    public const int BalloonListOffset = 0x30;
+
     /// <summary>Layout version 1 (until Step 40): the result tables [7][4][5] at this address of the data area.</summary>
     public const uint Version1ResultTablesAddress = MissionTableAddress + (MissionCapacity * MissionEntrySize);
 
@@ -139,6 +146,21 @@ public static class DataArea
             options.ResultTables, options.ClassTable);
         byte[] main = CreateImage(options.Conditions, options.UnlockTable, options.EnvironmentTable,
             options.ResultTables?.Length ?? 0, options.ClassTable is not null, extension.Length);
+
+        // The raised lists the module counts itself (rings and balloons for the conditions, module_conditions).
+        IReadOnlyDictionary<Missions.MissionObjectKind, int> raised = options.ObjectLimits ?? new Dictionary<Missions.MissionObjectKind, int>();
+        IReadOnlyDictionary<Missions.MissionObjectKind, uint> lists = HighDataArea.ObjectLists(raised);
+        if (lists.TryGetValue(Missions.MissionObjectKind.Ring, out uint rings))
+        {
+            BinaryPrimitives.WriteUInt32BigEndian(main.AsSpan(RingListOffset), rings);
+            BinaryPrimitives.WriteUInt32BigEndian(main.AsSpan(RingListOffset + 4), (uint)raised[Missions.MissionObjectKind.Ring]);
+        }
+
+        if (lists.TryGetValue(Missions.MissionObjectKind.Balloon, out uint balloons))
+        {
+            BinaryPrimitives.WriteUInt32BigEndian(main.AsSpan(BalloonListOffset), balloons);
+        }
+
         return new DataImages(main, extension);
     }
 

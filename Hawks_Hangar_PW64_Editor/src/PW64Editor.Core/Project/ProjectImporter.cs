@@ -304,6 +304,12 @@ public static class ProjectImporter
             }
         }
 
+        // Raised object limits (stage 8): the loaders' checks of a ROM built by the editor.
+        if (module is not null)
+        {
+            settings.ObjectLimits = HighDataArea.ReadObjectLimits(hack);
+        }
+
         List<string> taken = [.. CodeFixes.All.Where(f => settings.AppliedCodeFixes.Contains(f.Id)).Select(f => CoreText.T(f.Name)),
             .. GamePatches.All.Where(p => settings.AppliedPatches.Contains(p.Id)).Select(p => CoreText.T(p.Name))];
         if (taken.Count > 0)

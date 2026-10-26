@@ -609,6 +609,11 @@ public partial class MissionsTab : UserControl
     private void ShowWarnings(MissionInfo? mission)
     {
         var warnings = new List<string>(_problems);
+        if (mission is not null)
+        {
+            warnings.AddRange(MissionBudget.Warnings(mission.File.Comm));
+        }
+
         if (mission?.ClassIsland is { } classIsland && classIsland != mission.Island)
         {
             warnings.Add(L.F("The mission is played on {0}, but the class menu shows {1} for this class. The game uses both; they should be the same.",

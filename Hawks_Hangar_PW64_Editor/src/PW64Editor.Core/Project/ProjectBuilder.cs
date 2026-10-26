@@ -77,7 +77,8 @@ public static class ProjectBuilder
         }
 
         IReadOnlyList<SaveGame.TestId> missionIds = [.. missionList.Select(m => m.Id)];
-        if (missionList.Select(m => Missions.MissionObjects.Problem(m.Comm)).FirstOrDefault(p => p is not null) is { } objectProblem)
+        if (missionList.Select(m => Missions.MissionObjects.Problem(m.Comm) ?? Missions.ObjectLimits.Problem(m.Comm, project.Settings.ObjectLimits))
+                .FirstOrDefault(p => p is not null) is { } objectProblem)
         {
             throw new ProjectException(objectProblem);
         }
@@ -106,6 +107,7 @@ public static class ProjectBuilder
                             HasOwnClassTexts(project), missionIds),
                         MissionFiles = [.. missionList.Select(m => m.File.GroupIndex)],
                         PhotoMissions = ProjectMissions.PhotoMissions(missionList, fileSystem, project.Settings.Missions),
+                        ObjectLimits = Missions.ObjectLimits.Raised(project.Settings.ObjectLimits),
                         UnlockTable = Classes.MenuUnlocks.Table(project.Settings.Unlocks, project.Settings.Features.AllFieldsOpen),
                         EnvironmentTable = addedEnvironments ? Missions.WeatherEnvironments.Table() : null,
                     },

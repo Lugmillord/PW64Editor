@@ -1,3 +1,5 @@
+using PW64Editor.Core.Missions;
+
 namespace PW64Editor.Core.Code;
 
 /// <summary>
@@ -83,8 +85,23 @@ public static class HighDataArea
     /// <summary>The matrix stack of the two frames (Mtx, 0x40 bytes each).</summary>
     public const uint MatrixStack = (Drawn + (DisplayObjects * 4) + 0xFFF) & ~0xFFFu;
 
+    /// <summary>The objects of the map view (sMapObjects, u16 ids; the game: 60, without a check).</summary>
+    public const uint MapObjects = MatrixStack + (2 * FrameMatrices * 0x40);
+
+    /// <summary>Entries of the map view's list (its count is a u8).</summary>
+    public const int MapObjectCount = 256;
+
+    /// <summary>
+    /// The display objects sorted for drawing in a frame (D_802629C8 in chan.c, 0x1C bytes each; the game: 60, more are
+    /// not drawn: "_uvSortAdd: dobj list full").
+    /// </summary>
+    public const uint ObjectSortList = MapObjects + (MapObjectCount * 2);
+
+    /// <summary>Where the raised object lists start (<see cref="ObjectLists"/>).</summary>
+    public const uint ObjectListsStart = ObjectSortList + (DisplayObjects * 0x1C);
+
     /// <summary>First free address behind the fixed tables.</summary>
-    public const uint FreeStart = MatrixStack + (2 * FrameMatrices * 0x40);
+    public const uint FreeStart = ObjectListsStart;
 
     private const uint Nop = 0;
 
@@ -204,6 +221,29 @@ public static class HighDataArea
         patches.Add(new WordPatch("part matrices, developers' warning", 0x4A1EC, [200], [PartMatrices - 68]));
         patches.Add(new WordPatch("display objects, developers' warning", 0x4A1F0, [100], [DisplayObjects - 16]));
 
+        // 6. The map view's objects (map3d.c): 60 entries without a check (more overwrite sMapMessages); now 256. The 11
+        //    checks "count >= 60" (only a message) follow.
+        foreach ((int lui, int lo, uint originalLui, uint originalLo) in (ReadOnlySpan<(int, int, uint, uint)>)
+                 [(0x97734, 0x97738, 0x3C1E8037, 0x27DEA8E8), (0x977E4, 0x977F0, 0x3C1E8037, 0x27DEA8E8), (0x99854, 0x99858, 0x3C108037, 0x2610A8E8)])
+        {
+            patches.Add(new WordPatch("map view objects (map3d.c)", lui, [originalLui], [(originalLui & 0xFFFF0000) | Hi(MapObjects)]));
+            patches.Add(new WordPatch("map view objects (map3d.c)", lo, [originalLo], [(originalLo & 0xFFFF0000) | Lo(MapObjects)]));
+        }
+
+        foreach (int offset in (int[])[0x97A74, 0x97BB8, 0x97CC0, 0x97E30, 0x97F40, 0x980F0, 0x981E4, 0x98470, 0x98754, 0x98818, 0x9892C])
+        {
+            patches.Add(new WordPatch("map view objects, count (map3d.c)", offset, [0x28A1003C], [0x28A10000 | MapObjectCount]));
+        }
+
+        // 7. The display objects drawn in a frame (chan.c): _uvSortAdd and uvChan_80205CE4 use the new list; the check 60
+        //    (and its message) becomes 256.
+        patches.Add(new WordPatch("drawn display objects (_uvSortAdd)", 0x6864, [0x3C098026, 0x252929C8],
+            [0x3C090000 | Hi(ObjectSortList), 0x25290000 | Lo(ObjectSortList)]));
+        patches.Add(new WordPatch("drawn display objects (uvChan_80205CE4)", 0x6D44, [0x3C0A8026, 0x254A29C8],
+            [0x3C0A0000 | Hi(ObjectSortList), 0x254A0000 | Lo(ObjectSortList)]));
+        patches.Add(new WordPatch("drawn display objects, check (_uvSortAdd)", 0x6834, [0x2841003C], [0x28410000 | DisplayObjects]));
+        patches.Add(new WordPatch("drawn display objects, message (_uvSortAdd)", 0x684C, [0x2405003C], [0x24050000 | DisplayObjects]));
+
         // The six calls of hudDrawRadar (hudDrawHangGlider, hudDrawRocketPack, hudDrawGyrocopter, …).
         foreach (int site in (int[])[0x9FCC0, 0x9FD60, 0xA10F8, 0xA1358, 0xA1400, 0xA16D4])
         {
@@ -212,6 +252,210 @@ public static class HighDataArea
 
         return patches;
     }
+
+    /// <summary>
+    /// Where the raised object lists of a project lie: one after the other from <see cref="ObjectListsStart"/>, each with
+    /// room for exactly the project's limit (types without a raised limit keep the game's list).
+    /// </summary>
+    /// <exception cref="InvalidDataException">The lists do not fit into the area.</exception>
+    public static IReadOnlyDictionary<MissionObjectKind, uint> ObjectLists(IReadOnlyDictionary<MissionObjectKind, int> raised)
+    {
+        var result = new Dictionary<MissionObjectKind, uint>();
+        uint next = ObjectListsStart;
+        foreach (ObjectList list in ObjectLimits.Lists.Where(l => raised.ContainsKey(l.Kind)))
+        {
+            result[list.Kind] = next;
+            next = (next + (uint)(raised[list.Kind] * list.ElementSize) + 7) & ~7u;
+        }
+
+        if (next > End)
+        {
+            throw new InvalidDataException("The object lists do not fit into the high data area.");
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// The changes for a project's raised object limits: every reference to a raised list gets its new address (loops that
+    /// run to the list's end get the new end), and the check of the mission's count ("too many … defined in level") the
+    /// new limit. Empty without raised limits.
+    /// </summary>
+    public static IReadOnlyList<WordPatch> ObjectListPatches(IReadOnlyDictionary<MissionObjectKind, int> raised)
+    {
+        var patches = new List<WordPatch>();
+        foreach ((MissionObjectKind kind, uint address) in ObjectLists(raised))
+        {
+            ObjectList list = ObjectLimits.Of(kind)!;
+            uint end = address + (uint)(raised[kind] * list.ElementSize);
+            string name = $"object list, {kind}";
+            foreach (ListReference reference in ListReferences[kind])
+            {
+                uint target = reference.IsEnd ? end : address + reference.Offset;
+                patches.Add(new WordPatch(name, reference.Lui, [reference.OriginalLui], [(reference.OriginalLui & 0xFFFF0000) | Hi(target)]));
+                patches.Add(new WordPatch(name, reference.Lo, [reference.OriginalLo], [(reference.OriginalLo & 0xFFFF0000) | Lo(target)]));
+            }
+
+            foreach ((int offset, uint original, int add) in ListCounts[kind])
+            {
+                patches.Add(new WordPatch(name + ", count", offset, [original], [(original & 0xFFFF0000) | (uint)(raised[kind] + add)]));
+            }
+        }
+
+        return patches;
+    }
+
+    /// <summary>
+    /// The raised object limits of a ROM built by the editor (from the loaders' checks), as stored in a project
+    /// (<see cref="Project.ProjectSettings.ObjectLimits"/>), or null if it has the game's lists.
+    /// </summary>
+    public static Dictionary<string, int>? ReadObjectLimits(ReadOnlySpan<byte> rom)
+    {
+        var result = new Dictionary<string, int>();
+        foreach ((MissionObjectKind kind, (int Offset, uint Original, int Add)[] counts) in ListCounts)
+        {
+            (int offset, uint original, int add) = counts[0];
+            if (offset + 4 > rom.Length)
+            {
+                return null;
+            }
+
+            uint word = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(rom[offset..]);
+            int limit = (int)(word & 0xFFFF) - add;
+            if (word != original && (word & 0xFFFF0000) == (original & 0xFFFF0000) && ObjectLimits.Of(kind) is { } list
+                && limit > list.GameLimit && limit <= list.Cap)
+            {
+                result[kind.ToString()] = limit;
+            }
+        }
+
+        return result.Count > 0 ? result : null;
+    }
+
+    /// <summary>A lui/addiu pair (or lui with an indexed load or store) of an object list: its start (+ a field) or its end.</summary>
+    private sealed record ListReference(int Lui, int Lo, uint OriginalLui, uint OriginalLo, bool IsEnd, uint Offset);
+
+    /// <summary>
+    /// All references to the six object lists in the clean ROM (app code; the RAM address in the comment). The words behind a
+    /// list belong to other variables (gRingChildIndexes behind gRings, gThermReady behind gThermals, a float behind gBalls);
+    /// only the loops of ringsInit, hoverPadInit, targetsInit and thermInit use a list's end.
+    /// </summary>
+    private static readonly Dictionary<MissionObjectKind, ListReference[]> ListReferences = new()
+    {
+        [MissionObjectKind.Ring] =
+        [
+            new(0x97838, 0x97840, 0x3C0D8037, 0x91ADDC2C, false, 0x1B4), // 0x80310310
+            new(0x978C0, 0x978C4, 0x3C0D8037, 0x25ADDA78, false, 0x0), // 0x80310394
+            new(0x979E0, 0x979E4, 0x3C088037, 0x2508DA78, false, 0x0), // 0x803104B4
+            new(0xAA820, 0xAA830, 0x3C038037, 0x2463DA78, false, 0x0), // 0x80323300
+            new(0xAA824, 0xAA82C, 0x3C058037, 0x24A51060, true, 0x0), // 0x803232FC
+            new(0xAA8D4, 0xAA8E8, 0x3C108037, 0x2610DA78, false, 0x0), // 0x803233B8
+            new(0xAAF74, 0xAAF78, 0x3C108037, 0x2610DA78, false, 0x0), // 0x80323A48
+            new(0xAAFC8, 0xAAFCC, 0x3C098037, 0x2529DA78, false, 0x0), // 0x80323A9C
+            new(0xAB288, 0xAB28C, 0x3C098037, 0x2529DA78, false, 0x0), // 0x80323D5C
+            new(0xAB33C, 0xAB340, 0x3C168037, 0x26D6DA78, false, 0x0), // 0x80323E10
+            new(0xAB47C, 0xAB480, 0x3C168037, 0x26D6DA78, false, 0x0), // 0x80323F50
+            new(0xAB57C, 0xAB580, 0x3C0F8037, 0x25EFDA78, false, 0x0), // 0x80324050
+            new(0xAB72C, 0xAB730, 0x3C198037, 0x2739DA78, false, 0x0), // 0x80324200
+            new(0xAB960, 0xAB964, 0x3C108037, 0x2610DA78, false, 0x0), // 0x80324434
+            new(0xAB9C0, 0xAB9C4, 0x3C098037, 0x2529DA78, false, 0x0), // 0x80324494
+            new(0xAB9F4, 0xAB9F8, 0x3C0C8037, 0x258CDA78, false, 0x0), // 0x803244C8
+            new(0xABCA4, 0xABCA8, 0x3C088037, 0x2508DA78, false, 0x0), // 0x80324778
+            new(0xABCE8, 0xABD00, 0x3C108037, 0x2610DA78, false, 0x0), // 0x803247D0
+            new(0xABF9C, 0xABFA0, 0x3C108037, 0x2610DA78, false, 0x0), // 0x80324A70
+            new(0xAC02C, 0xAC038, 0x3C0E8037, 0x25C2DA78, false, 0x0), // 0x80324B08
+            new(0xAC0B0, 0xAC0BC, 0x3C048037, 0x2484DA78, false, 0x0), // 0x80324B8C
+            new(0xAC0E8, 0xAC0EC, 0x3C0F8037, 0x25EFDA78, false, 0x0), // 0x80324BBC
+            new(0xAC12C, 0xAC130, 0x3C188037, 0x2718DA78, false, 0x0), // 0x80324C00
+        ],
+        [MissionObjectKind.Balloon] =
+        [
+            new(0x52230, 0x52240, 0x3C028035, 0x24427218, false, 0x0), // 0x802CAD10
+            new(0x524D0, 0x524DC, 0x3C108035, 0x26107218, false, 0x0), // 0x802CAFAC
+            new(0x5266C, 0x52670, 0x3C108035, 0x26107218, false, 0x0), // 0x802CB140
+            new(0x526B4, 0x526B8, 0x3C0B8035, 0x256B7218, false, 0x0), // 0x802CB188
+            new(0x527C0, 0x527C4, 0x3C0B8035, 0x256B7218, false, 0x0), // 0x802CB294
+            new(0x528C0, 0x528C4, 0x3C108035, 0x26107218, false, 0x0), // 0x802CB394
+            new(0x52964, 0x52968, 0x3C108035, 0x26107218, false, 0x0), // 0x802CB438
+            new(0x529A4, 0x529A8, 0x3C0A8035, 0x254A7218, false, 0x0), // 0x802CB478
+            new(0x529D8, 0x529DC, 0x3C0D8035, 0x25AD7218, false, 0x0), // 0x802CB4AC
+            new(0x52A44, 0x52A48, 0x3C088035, 0x25087218, false, 0x0), // 0x802CB518
+            new(0x52F80, 0x52FCC, 0x3C088035, 0x25087218, false, 0x0), // 0x802CBA9C
+            new(0x53458, 0x5345C, 0x3C048035, 0x24847218, false, 0x0), // 0x802CBF2C
+            new(0x53504, 0x53508, 0x3C0A8035, 0x254A7218, false, 0x0), // 0x802CBFD8
+            new(0x535A4, 0x535B4, 0x3C188035, 0x27027218, false, 0x0), // 0x802CC084
+            new(0x53628, 0x5362C, 0x3C068035, 0x24C67218, false, 0x0), // 0x802CC0FC
+            new(0x536AC, 0x536B0, 0x3C058035, 0x24A57218, false, 0x0), // 0x802CC180
+            new(0x5A1A0, 0x5A1B0, 0x3C108035, 0x26107218, false, 0x0), // 0x802D2C80
+            new(0x5A1DC, 0x5A1E0, 0x3C098035, 0x25297218, false, 0x0), // 0x802D2CB0
+            new(0x5A30C, 0x5A310, 0x3C0D8035, 0x25AD7218, false, 0x0), // 0x802D2DE0
+            new(0x5A434, 0x5A438, 0x3C108035, 0x26107218, false, 0x0), // 0x802D2F08
+            new(0x98784, 0x98788, 0x3C118035, 0x26317218, false, 0x0), // 0x80311258
+        ],
+        [MissionObjectKind.HoverPad] =
+        [
+            new(0x90D10, 0x90D20, 0x3C038037, 0x24639588, false, 0x0), // 0x803097F0
+            new(0x90D14, 0x90D1C, 0x3C048037, 0x24849E48, true, 0x0), // 0x803097EC
+            new(0x90DD8, 0x90DEC, 0x3C108037, 0x26109588, false, 0x0), // 0x803098BC
+            new(0x91018, 0x9101C, 0x3C108037, 0x26109588, false, 0x0), // 0x80309AEC
+            new(0x9118C, 0x91190, 0x3C158037, 0x26B59588, false, 0x0), // 0x80309C60
+            new(0x912A8, 0x912B0, 0x3C0F8037, 0x25EF9588, false, 0x0), // 0x80309D80
+            new(0x913A0, 0x913A4, 0x3C0F8037, 0x25EF9588, false, 0x0), // 0x80309E74
+            new(0x913E0, 0x913E4, 0x3C0F8037, 0x25EF9588, false, 0x0), // 0x80309EB4
+            new(0x91480, 0x91488, 0x3C048037, 0x24849588, false, 0x0), // 0x80309F58
+            new(0x91554, 0x91558, 0x3C108037, 0x26109588, false, 0x0), // 0x8030A028
+            new(0x915B8, 0x915C4, 0x3C0E8037, 0x25C29588, false, 0x0), // 0x8030A094
+            new(0x91614, 0x91620, 0x3C0E8037, 0x25C29588, false, 0x0), // 0x8030A0F0
+            new(0x97F88, 0x97F90, 0x3C0C8037, 0x918C95F0, false, 0x68), // 0x80310A60
+            new(0x97FE8, 0x97FEC, 0x3C0C8037, 0x258C9588, false, 0x0), // 0x80310ABC
+        ],
+        [MissionObjectKind.Target] =
+        [
+            new(0x98134, 0x98138, 0x3C118038, 0x26318CF8, false, 0x0), // 0x80310C08
+            new(0xCB7C0, 0xCB7CC, 0x3C038038, 0x24638CF8, false, 0x0), // 0x8034429C
+            new(0xCB7C4, 0xCB7C8, 0x3C058038, 0x24A598D8, true, 0x0), // 0x80344298
+            new(0xCB8BC, 0xCB8C0, 0x3C118038, 0x26318CF8, false, 0x0), // 0x80344390
+            new(0xCBAB4, 0xCBAB8, 0x3C108038, 0x26108CF8, false, 0x0), // 0x80344588
+            new(0xCBBE4, 0xCBBE8, 0x3C108038, 0x26108CF8, false, 0x0), // 0x803446B8
+            new(0xCBC84, 0xCBC88, 0x3C108038, 0x26108CF8, false, 0x0), // 0x80344758
+            new(0xCBCA4, 0xCBCA8, 0x3C188038, 0x27188CF8, false, 0x0), // 0x80344778
+            new(0xCBE2C, 0xCBE38, 0x3C0E8038, 0x25C28CF8, false, 0x0), // 0x80344908
+            new(0xCBE80, 0xCBE8C, 0x3C0E8038, 0x25C28CF8, false, 0x0), // 0x8034495C
+        ],
+        [MissionObjectKind.Thermal] =
+        [
+            new(0xA1B14, 0xA1B18, 0x3C028038, 0x2442AB58, false, 0x0), // 0x8031A5E8
+            new(0xCDB20, 0xCDB2C, 0x3C038038, 0x2463AB58, false, 0x0), // 0x803465FC
+            new(0xCDB24, 0xCDB28, 0x3C048038, 0x2484ACD8, true, 0x0), // 0x803465F8
+            new(0xCDC28, 0xCDC5C, 0x3C118038, 0x2631AB58, false, 0x0), // 0x8034672C
+            new(0xCDC48, 0xCDC58, 0x3C148038, 0x2694AB5C, false, 0x4), // 0x80346728
+            new(0xCDF44, 0xCDF48, 0x3C108038, 0x2610AB58, false, 0x0), // 0x80346A18
+            new(0xCE0DC, 0xCE0E0, 0x3C108038, 0x2610AB58, false, 0x0), // 0x80346BB0
+            new(0xCE1A0, 0xCE1AC, 0x3C128038, 0x2652AB58, false, 0x0), // 0x80346C7C
+        ],
+        [MissionObjectKind.LocalWind] =
+        [
+            new(0xD4348, 0xD4364, 0x3C118038, 0x2631F518, false, 0x0), // 0x8034CE34
+            new(0xD434C, 0xD4360, 0x3C138038, 0x2673F51C, false, 0x4), // 0x8034CE30
+            new(0xD4A10, 0xD4A14, 0x3C108038, 0x2610F518, false, 0x0), // 0x8034D4E4
+            new(0xD4AE8, 0xD4AEC, 0x3C138038, 0x2673F518, false, 0x0), // 0x8034D5BC
+        ],
+    };
+
+    /// <summary>
+    /// The counts of the lists in the code: (ROM offset, instruction, what is added to the limit). ringsLoad and the other
+    /// loaders refuse "count > limit" (slti count, limit + 1); ballsInit clears the list, balls_802CB9B4 lets a balloon split
+    /// only while the list has room.
+    /// </summary>
+    private static readonly Dictionary<MissionObjectKind, (int Offset, uint Original, int Add)[]> ListCounts = new()
+    {
+        [MissionObjectKind.Ring] = [(0xAAF40, 0x28A1001F, 1)],
+        [MissionObjectKind.Balloon] = [(0x52248, 0x24060014, 0), (0x52618, 0x28A10015, 1), (0x52F8C, 0x29C10014, 0)],
+        [MissionObjectKind.HoverPad] = [(0x90FE4, 0x28A10015, 1)],
+        [MissionObjectKind.Target] = [(0xCB888, 0x28A10029, 1)],
+        [MissionObjectKind.Thermal] = [(0xCDBE8, 0x28A10011, 1)],
+        [MissionObjectKind.LocalWind] = [(0xD4308, 0x28A10007, 1)],
+    };
 
     /// <summary>The tables a reference points to (dobj.c, graphics.c).</summary>
     private enum Table
