@@ -16,7 +16,10 @@ public class HighDataAreaTests
     {
         Assert.Equal(0x80780000u, HighDataArea.DisplayList);
         Assert.Equal(0x807A0000u, HighDataArea.ObjectMemory);
+        Assert.Equal(0x807A8000u, HighDataArea.Objects);
+        Assert.Equal(0x807B9000u, HighDataArea.MatrixStack);
         Assert.True(HighDataArea.FreeStart <= HighDataArea.End);
+        Assert.Equal(0u, HighDataArea.Drawn % 4);
         Assert.True(HighDataArea.ObjectMemoryLimit < HighDataArea.ObjectMemorySize);
         Assert.True(HighDataArea.ObjectMemoryLimit < 0x8000); // sltiu takes a signed 16-bit value
     }
