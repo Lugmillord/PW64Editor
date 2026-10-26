@@ -210,12 +210,18 @@ struct Header {
     u32 dataRom;        /* +0xE8 ROM offset of the data area image, written by the editor */
     u32 dataSize;       /* +0xEC its size (a multiple of 8, 0 = none), written by the editor */
     u16 countdown[6][12]; /* +0xF0 "5" ... "1", "Time up!" in the game's text codes (end 0xFFFF), or 0 */
+    u16 busyText[24];   /* +0x180 "Please wait..." while photos are drawn, in the game's text codes (end 0xFFFF), or 0 */
 };
 
 __attribute__((section(".header"), used)) struct Header gHeader = {
     0x4848474D, (void *)module_game_printf, (void *)module_init, 0, 0, 0,
-    sLog, LOG_SIZE, 0, 6, (void *)(DATA_AREA + 0x100), 0, "", 0, { 0 }, { 0 }, 0, 0, { { 0 } },
+    sLog, LOG_SIZE, 0, 6, (void *)(DATA_AREA + 0x100), 0, "", 0, { 0 }, { 0 }, 0, 0, { { 0 } }, { 0 },
 };
+
+/* The text photos.c shows while photos are drawn, or 0. */
+const u16 *module_busy_text(void) {
+    return gHeader.busyText[0] != 0 ? (const u16 *)gHeader.busyText : 0;
+}
 
 /* ------------------------------------------------------------------ low level */
 

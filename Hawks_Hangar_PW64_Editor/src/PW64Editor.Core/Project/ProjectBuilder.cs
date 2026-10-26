@@ -384,6 +384,16 @@ public static class ProjectBuilder
             }
         }
 
+        IReadOnlyList<ushort> busy = [];
+        {
+            var codec = new Text.TextCodec(Text.TextFont.Load(cleanFileSystem));
+            Text.TextEncodeResult encoded = codec.Encode(BusyText);
+            if (encoded.Success)
+            {
+                busy = ToRamCodes(encoded.Codes).Where(c => c != 0x0FFE).ToList();
+            }
+        }
+
         return project.Settings.Features.ModuleOptions with
         {
             RequireExpansionPak = true,
@@ -392,6 +402,7 @@ public static class ProjectBuilder
             RequirementMetText = metText,
             PenaltyDigits = digits.Count == 10 ? digits : [],
             CountdownTexts = countdown,
+            BusyText = busy,
             DistanceRow = project.Settings.Missions.Any(m => m.ResultRows?.Contains((int)Missions.PointSource.Distance) == true),
         };
     }
@@ -428,6 +439,9 @@ public static class ProjectBuilder
         Text.TextCodec.CodeEnd => (ushort)0xFFFF,
         _ => c,
     }).ToList();
+
+    /// <summary>The text while photos are drawn (in the game's language, English).</summary>
+    public const string BusyText = "Please wait...";
 
     /// <summary>The HUD message when the conditions of the time points are met (in the game's language, English).</summary>
     public const string RequirementMetText = "Time requirement met";

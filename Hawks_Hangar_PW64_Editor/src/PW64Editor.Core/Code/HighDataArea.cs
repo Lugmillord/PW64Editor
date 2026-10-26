@@ -103,6 +103,12 @@ public static class HighDataArea
     /// <summary>First free address behind the fixed tables.</summary>
     public const uint FreeStart = ObjectListsStart;
 
+    /// <summary>
+    /// The photos of a flight (<see cref="Code.FlightPhotos"/>, D_80373390), behind the room the raised object lists can
+    /// need at most; 4 KiB are kept for the photo tables of later steps.
+    /// </summary>
+    public const uint FlightPhotoTable = 0x807F0000;
+
     private const uint Nop = 0;
 
     private static uint Hi(uint address) => (address + 0x8000) >> 16;

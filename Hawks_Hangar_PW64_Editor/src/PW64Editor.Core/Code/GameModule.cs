@@ -139,6 +139,12 @@ public sealed record GameModuleOptions(bool DebugOutput, bool StartupInfo = fals
     /// </summary>
     public IReadOnlyList<IReadOnlyList<ushort>> CountdownTexts { get; init; } = [];
 
+    /// <summary>
+    /// "Please wait..." while photos are drawn (album, the flight's photos, the example photos), in the game's text codes
+    /// as held in RAM (end 0xFFFF), or empty for no text.
+    /// </summary>
+    public IReadOnlyList<ushort> BusyText { get; init; } = [];
+
     /// <summary>The result tables of the game patch <see cref="GamePatches.BonusGames"/> for the data area, or null.</summary>
     public byte[]? ResultTables { get; init; }
 
@@ -240,6 +246,8 @@ public static class GameModule
     private const int CountdownOffset = 0xF0;
     private const int CountdownTexts = 6;
     private const int CountdownLength = 12;
+    private const int BusyTextOffset = 0x180;
+    private const int BusyTextLength = 24;
 
     /// <summary>Header flag: stop with a message without the Expansion Pak.</summary>
     private const uint FlagRequirePak = 32;
@@ -461,6 +469,16 @@ public static class GameModule
             }
         }
 
+        if (options.BusyText.Count > BusyTextLength || (options.BusyText.Count > 0 && options.BusyText[^1] != 0xFFFF))
+        {
+            throw new InvalidDataException($"The photo text of the game module has room for {BusyTextLength - 1} characters.");
+        }
+
+        for (int i = 0; i < options.BusyText.Count; i++)
+        {
+            BinaryPrimitives.WriteUInt16BigEndian(image.AsSpan(BusyTextOffset + (i * 2)), options.BusyText[i]);
+        }
+
         // The mission settings themselves are in the data area (DataArea.CreateImage).
         BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(ConditionCountOffset), (uint)options.Conditions.Count);
         BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(DataRomOffset), (uint)dataRomOffset);
@@ -597,6 +615,7 @@ public static class GameModule
         // The high data area (stage 8): a larger display list, 32 KiB object memory per mission, the radar's goals (in
         // every hack).
         patches.AddRange(HighDataArea.Patches());
+        patches.AddRange(FlightPhotos.Patches());
         patches.AddRange(HighDataArea.ObjectListPatches(options.ObjectLimits ?? new Dictionary<Missions.MissionObjectKind, int>()));
 
         // The developers' messages: _uvDebugPrintf jumps to the gate (which returns while the module is not loaded).
