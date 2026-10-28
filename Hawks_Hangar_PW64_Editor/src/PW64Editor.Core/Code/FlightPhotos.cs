@@ -20,6 +20,17 @@ namespace PW64Editor.Core.Code;
 /// twice before it loads the island for seconds; the two calls of func_8033A128 go through
 /// <see cref="GameModuleImage.PhotoSetupAddress"/>, and the second uvGfxEnd of gameUpdateStateTestSetup through
 /// <see cref="GameModuleImage.SetupFrameAddress"/>, which then draws the text again (only while the photo is set up).</para>
+/// <para>Photo subjects (<see cref="Missions.PhotoSubjects"/>): the two calls of snapPhoto (the shutters of the Hang Glider
+/// and the Birdman) go to the module, which scores a mission with own subjects itself and calls the game's function for
+/// the others; the six loaders of the main subjects ask the module (instead of taskGetClsVehTest) whether the subject gets a
+/// radar mark (the game: only in the Hang Glider's photo missions Class A test 1, Class B test 2, Pilot test 3).</para>
+/// <para>Sample photos (Step 49): the two calls of the sample photo view (func_8033E3A8 mode 3 on the test screen, mode 1
+/// in the pause menu) go to the module, which first makes the sample photos of a mission with own subjects (one per
+/// subject with points, the camera placed as set for the subject, from the object where it is at that moment). The sample photo view of
+/// func_8033E3A8 (its switch over the island) calls the module, which shows the mission's sample photos or the island's as
+/// the game; the captions of the types the game has no text for come from the module; the pause menu offers the photo
+/// item for every Hang Glider photo mission and the Birdman photo missions with own subjects (the game: Hang Glider
+/// Class A test 1, Class B test 2, Pilot test 3), as the test screen's button.</para>
 /// <para>Names from the decompilation (https://github.com/gcsmith/Pilotwings64Decomp, MIT license).</para>
 /// </remarks>
 public static class FlightPhotos
@@ -54,6 +65,9 @@ public static class FlightPhotos
         uint end10 = Table + (Count * PhotoSize);
         uint grid = CodeArea.Jal(GameModuleImage.PhotoGridAddress), busy = CodeArea.Jal(GameModuleImage.PhotoBusyAddress);
         uint setup = CodeArea.Jal(GameModuleImage.PhotoSetupAddress), frame = CodeArea.Jal(GameModuleImage.SetupFrameAddress);
+        uint snap = CodeArea.Jal(GameModuleImage.SnapPhotoAddress);
+        const uint ClsVehTest = 0x0C0D18CF; // jal taskGetClsVehTest
+        const uint TextGet = 0x0C0D0866;    // jal textGetDataByIdx
         return
         [
             // snapInit: all ten photos cleared.
@@ -96,6 +110,58 @@ public static class FlightPhotos
             new("photos, please wait while loading (func_8033DDD8)", 0xC53D8, [0x0C0CE84A], [setup]),
             new("photos, please wait while loading (func_8033DFD0)", 0xC55D8, [0x0C0CE84A], [setup]),
             new("photos, please wait while loading (gameUpdateStateTestSetup)", 0x73ABC, [0x0C08885F], [frame]),
+
+            // Photo subjects (subjects.c): snapPhoto through the module (the game's function for missions without own
+            // subjects), the radar marks of the main subjects in every photo mission and every mission with own subjects.
+            new("photo subjects, Hang Glider shutter", 0xC1334, [0x0C0CE285], [snap]),
+            new("photo subjects, Birdman shutter", 0xC14B4, [0x0C0CE285], [snap]),
+            new("photo subjects, radar mark (whaleLoad)", 0xD3540, [ClsVehTest], [CodeArea.Jal(GameModuleImage.RadarWhaleAddress)]),
+            new("photo subjects, radar mark (fountainLoad)", 0x726C8, [ClsVehTest], [CodeArea.Jal(GameModuleImage.RadarFountainAddress)]),
+            new("photo subjects, radar mark (missiLoadLStates)", 0x9C7A0, [ClsVehTest], [CodeArea.Jal(GameModuleImage.RadarMissileAddress)]),
+            new("photo subjects, radar mark (ferryLoad)", 0x6F0AC, [ClsVehTest], [CodeArea.Jal(GameModuleImage.RadarFerryAddress)]),
+            new("photo subjects, radar mark (shuttleLoad)", 0xBD2C8, [ClsVehTest], [CodeArea.Jal(GameModuleImage.RadarShuttleAddress)]),
+            new("photo subjects, radar mark (oilPlantLoad)", 0x9CDF0, [ClsVehTest], [CodeArea.Jal(GameModuleImage.RadarFlameAddress)]),
+            // ... the marks of the other objects (whale pod, airplanes, model gliders, boats) at the start of the mission
+            // (snapInit's hudSetCameraState) and the subjects' labels on the map (map3dLoad's taskGetPHTS, only in
+            // map3dMain's view: the pause menu's and the test screen's "View map").
+            new("photo subjects, radar marks (snapInit)", 0xBF908, [0x0C0C77DA], [CodeArea.Jal(GameModuleImage.SnapInitAddress)]),
+            new("photo subjects, map labels (map3dLoad)", 0x976A0, [0x0C0D170F], [CodeArea.Jal(GameModuleImage.MapPhotosAddress)]),
+            new("photo subjects, map view (pause menu)", 0xB439C, [0x0C0C3FA0], [CodeArea.Jal(GameModuleImage.MapPauseAddress)]),
+            new("photo subjects, map view (test screen)", 0xD101C, [0x0C0C3FA0], [CodeArea.Jal(GameModuleImage.MapTestAddress)]),
+
+            // Sample photos per mission: made when the view is called; the sample photo view (func_8033E3A8 mode 1)
+            // shows them instead of the island's; their captions; the pause menu's photo item for every photo mission.
+            new("sample photos, test screen (testMenu)", 0xD1078, [0x0C0CF8EA], [CodeArea.Jal(GameModuleImage.ExamplesPrepareAddress)]),
+            new("sample photos, pause menu (gameUpdateStateTestUpdate)", 0x74EC8, [0x0C0CF8EA], [CodeArea.Jal(GameModuleImage.ExamplesPrepareAddress)]),
+            new("sample photos, func_8033E3A8", 0xC5A84,
+                [0x24010003, 0x3C058037, 0x95A30004, 0x24A53630, 0x3C048035, 0x10610009, 0x02203025, 0x24010005, 0x1061000A,
+                    0x3C048035, 0x2401000A, 0x1061000E, 0x3C048035, 0x10000012, 0x24100001, 0x0C0CF776, 0x8C840538, 0x1000000E,
+                    0x00408025, 0x3C058037, 0x24A538D0, 0x8C84053C, 0x0C0CF776, 0x02203025, 0x10000007, 0x00408025, 0x3C058037,
+                    0x24A53B70, 0x8C840540, 0x0C0CF776, 0x02203025],
+                [
+                    0x95A40004,                                  // lhu a0, 4(t5): the map
+                    CodeArea.Jal(GameModuleImage.ExamplesViewAddress),
+                    0x02202825,                                  // move a1, s1: the chosen photo
+                    0x1000001C,                                  // b 0x8033E5D4
+                    0x00408025,                                  // move s0, v0
+                    .. Enumerable.Repeat(0u, 26),
+                ]),
+            new("sample photos, caption width (func_8033ADD4)", 0xC3198, [TextGet], [CodeArea.Jal(GameModuleImage.ExampleTextAddress)]),
+            new("sample photos, caption (func_8033ADD4)", 0xC31B0, [TextGet], [CodeArea.Jal(GameModuleImage.ExampleTextAddress)]),
+            new("sample photos, pause menu (func_8032CF28)", 0xB44C8,
+                [0x95030002, 0x2C6A0001, 0x11400019, 0xAFAA0040, 0x95020006, 0x2C4C0001, 0x11800006, 0xAFAC0040, 0x95040004,
+                    0x388E0001, 0x2DCE0001, 0x15C00010, 0xAFAE0040, 0x38440001, 0x14800006, 0x38490002, 0x950F0004, 0x39F80002,
+                    0x2F180001, 0x17000008, 0xAFB80040, 0x2D290001, 0x11200005, 0xAFA90040, 0x950B0004, 0x396C0003, 0x2D8C0001,
+                    0xAFAC0040],
+                [
+                    0x01002025,                                  // move a0, t0: the flight
+                    CodeArea.Jal(GameModuleImage.PausePhotoAddress),
+                    0x00000000,
+                    0xAFA20040,                                  // sw v0, 0x40(sp): the menu with the photo item
+                    0x8FA8006C,                                  // lw t0, 0x6c(sp)
+                    0x95030002,                                  // lhu v1, 2(t0): the vehicle, as the code behind expects
+                    .. Enumerable.Repeat(0u, 22),
+                ]),
         ];
     }
 }

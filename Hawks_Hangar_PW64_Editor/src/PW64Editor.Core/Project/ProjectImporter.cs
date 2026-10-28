@@ -911,6 +911,7 @@ public static class ProjectImporter
         MissionTables? hackTables = layout.Missions is null ? null : new MissionTables(hack, layout.Missions);
         HashSet<Vehicle> hiddenDemos = HiddenDemos(hack);
         IReadOnlyList<TestId>? photoMissions = images?.Extension is { } extension ? DataExtension.ReadPhotoMissions(extension) : null;
+        List<(TestId Id, List<PhotoSubject> Subjects)> photoSubjects = images?.Photos is { } photoTable ? PhotoSubjects.ReadTable(photoTable) : [];
 
         int withSettings = 0, rowsChanged = 0;
         foreach ((GameFile file, MissionComm comm) in missions)
@@ -998,6 +999,12 @@ public static class ProjectImporter
                 {
                     mission.PhotoMission = photo;
                 }
+            }
+
+            // Photo subjects of the mission's own (the photo table of the data area).
+            if (photoSubjects.FirstOrDefault(p => p.Id == id) is { Subjects: { } own })
+            {
+                mission.PhotoSubjects = own;
             }
 
             if (DemoButton.HasButton(id) && hiddenDemos.Contains(id.Vehicle))

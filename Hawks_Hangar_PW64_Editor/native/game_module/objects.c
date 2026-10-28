@@ -17,6 +17,8 @@ typedef signed int s32;
 
 #define GAME_HUD_RADAR ((void (*)(s32, s32, u32, u32, u32, u32, u8 *))0x8031AD68) /* hudDrawRadar */
 
+void module_subject_marks(void); /* subjects.c */
+
 /* ------------------------------------------------------------------ radar goals */
 
 #define RADAR_GOALS_MAX  32 /* hopper goals 5 + ball targets 5 + landing pads 14 + landing strips 2 = 26 */
@@ -91,5 +93,6 @@ void module_hud_radar(s32 x, s32 y, u32 xOff, u32 yOff, u32 heading, u32 pitch, 
         shown++;
     }
     *(s32 *)radar = shown;
+    module_subject_marks(); /* the radar marks of the moving photo subjects follow them (subjects.c) */
     GAME_HUD_RADAR(x, y, xOff, yOff, heading, pitch, radar);
 }

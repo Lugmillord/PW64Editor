@@ -306,9 +306,11 @@ public sealed partial class EditorSession
     }
 
     /// <summary>True if the mission is a photo mission (<see cref="MissionSettings.PhotoMission"/> or one of the game's).</summary>
-    public bool IsPhotoMission(MissionInfo mission) =>
-        mission.Settings?.PhotoMission
-        ?? (mission.TableIndex < CleanFileSystem.Files.Count && ProjectMissions.IsGamePhotoFile(CleanFileSystem, mission.TableIndex));
+    public bool IsPhotoMission(MissionInfo mission) => mission.Settings?.PhotoMission ?? IsGamePhotoMission(mission);
+
+    /// <summary>True if the game's rule makes the mission a photo mission (its file is one of the game's photo missions).</summary>
+    public bool IsGamePhotoMission(MissionInfo mission) =>
+        mission.TableIndex < CleanFileSystem.Files.Count && ProjectMissions.IsGamePhotoFile(CleanFileSystem, mission.TableIndex);
 
     private MissionTables? Tables() => Layout.Missions is { } layout
         ? new MissionTables(CleanRom.Data, layout, Project.HasPatch(GamePatches.BonusGames), ResultTables.BirdmanPointMissions(Project.Settings.Missions))

@@ -558,6 +558,7 @@ public partial class MissionsTab : UserControl
             ShowTime(draft);
             ShowAltitude(draft);
             ShowDistance(draft);
+            ShowPhotos(draft);
             ShowLanding(draft);
             ShowImpact(draft);
             ShowGoodLanding(draft);
@@ -595,12 +596,22 @@ public partial class MissionsTab : UserControl
             .Concat(CurveBoxes(LandingCurvePanel))
             .Concat(GoodLandingGrid.Children.OfType<TextBox>())
             .Concat(CurveBoxes(DistanceCurvePanel))
-            .Concat(ObjectConditionsGrid.Children.OfType<TextBox>());
+            .Concat(ObjectConditionsGrid.Children.OfType<TextBox>())
+            .Concat(AllBoxes(PhotoSubjectsPanel));
         if (boxes.FirstOrDefault(b => Equals(b.Tag, tag)) is { } target)
         {
             Dispatcher.BeginInvoke(new Action(() => target.Focus()));
         }
     }
+
+    /// <summary>All text boxes inside an element (panels and borders).</summary>
+    private static IEnumerable<TextBox> AllBoxes(UIElement element) => element switch
+    {
+        TextBox box => [box],
+        Panel panel => panel.Children.OfType<UIElement>().SelectMany(AllBoxes),
+        Border { Child: { } child } => AllBoxes(child),
+        _ => [],
+    };
 
     /// <summary>The boxes of a curve table (see <see cref="CurveEditor"/>).</summary>
     private static IEnumerable<TextBox> CurveBoxes(Panel host) =>
@@ -879,7 +890,27 @@ public partial class MissionsTab : UserControl
             Foreground = (System.Windows.Media.Brush)FindResource("MutedTextBrush"),
             Margin = new Thickness(0, 2, 0, 2),
         };
-        Place(origin, gridRow, 3);
+        if (row.Source == PointSource.Photo)
+        {
+            // The photo row: a button with the explanation of the photo points next to its text.
+            var help = new Button
+            {
+                Content = L.T("How photos are scored…"),
+                Style = (Style)FindResource("DialogButton"),
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(8, 0, 0, 0),
+            };
+            help.Click += OnPhotoHelp;
+            var withHelp = new DockPanel();
+            DockPanel.SetDock(help, Dock.Right);
+            withHelp.Children.Add(help);
+            withHelp.Children.Add(origin);
+            Place(withHelp, gridRow, 3);
+        }
+        else
+        {
+            Place(origin, gridRow, 3);
+        }
     }
 
     private void Place(UIElement element, int row, int column)
@@ -986,6 +1017,7 @@ public partial class MissionsTab : UserControl
         PointValueKind.AllObjects => L.F("Objects: all {0} together give {1}.", ObjectCount(draft.Mission, row.Source), row.Value ?? 0),
         PointValueKind.OtherMission => L.T("The best shot at this target (the target's own test)."),
         PointValueKind.ComputedByGame => L.T("Computed by the game while playing; the number is only shown in the texts."),
+        PointValueKind.PhotoSubjects => L.T("The best photo of each photo subject (section \"Photos\")."),
         _ => string.Empty,
     };
 

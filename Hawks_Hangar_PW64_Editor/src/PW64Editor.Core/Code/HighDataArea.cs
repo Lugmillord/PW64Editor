@@ -109,6 +109,12 @@ public static class HighDataArea
     /// </summary>
     public const uint FlightPhotoTable = 0x807F0000;
 
+    /// <summary>The sample photos of the current mission (<see cref="Missions.PhotoSubjects"/>, 10 × 0x70), behind the flight's photos.</summary>
+    public const uint SamplePhotoTable = FlightPhotoTable + (10 * 0x70);
+
+    /// <summary>The second part of the game module (photos.c, subjects.c), behind the photo table (<see cref="Missions.PhotoSubjects.Address"/>).</summary>
+    public const uint ModuleCode = 0x807F4000;
+
     private const uint Nop = 0;
 
     private static uint Hi(uint address) => (address + 0x8000) >> 16;

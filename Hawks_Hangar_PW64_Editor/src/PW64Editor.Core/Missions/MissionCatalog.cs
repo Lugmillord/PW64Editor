@@ -123,7 +123,8 @@ public static class MissionCatalog
             ScoreCurve? touchdown = mission.Settings?.TouchdownCurve is { Count: > 0 } points && mission.Id.Vehicle == Vehicle.Gyrocopter
                 ? ScoreCurve.Create(points)
                 : null;
-            mission.Rows = rows.Select(r => Evaluate(r, mission.Id, mission.File, mission.File.Comm, id => byId.GetValueOrDefault(id)?.File.Comm, touchdown)).ToList();
+            mission.Rows = rows.Select(r => Evaluate(r, mission.Id, mission.File, mission.File.Comm, id => byId.GetValueOrDefault(id)?.File.Comm, touchdown,
+                mission.Settings?.PhotoSubjects)).ToList();
         }
 
         foreach (MissionInfo mission in missions)
@@ -160,8 +161,9 @@ public static class MissionCatalog
     /// <param name="comm">The COMM block to evaluate (may be an edited copy of the file's).</param>
     /// <param name="otherComm">The COMM block of another mission (Cannonball: the other targets of the level), or null.</param>
     /// <param name="touchdown">The Gyrocopter's own touchdown curve, or null.</param>
+    /// <param name="photos">The mission's own photo subjects, or null for the game's (its PHTS entries).</param>
     public static MissionPointRow Evaluate(PointSource source, TestId id, MissionFile file, MissionComm comm, Func<TestId, MissionComm?> otherComm,
-        ScoreCurve? touchdown = null)
+        ScoreCurve? touchdown = null, IReadOnlyList<PhotoSubject>? photos = null)
     {
         if (PointSources.Curve(source) is { } kind)
         {
@@ -194,8 +196,10 @@ public static class MissionCatalog
                     : new MissionPointRow(source, null, PointValueKind.None);
             }
 
-            case PointSource.MecaHawks:
             case PointSource.Photo:
+                return new MissionPointRow(source, PhotoSubjects.MaxPoints(photos ?? PhotoSubjects.FromGame(file)), PointValueKind.PhotoSubjects);
+
+            case PointSource.MecaHawks:
             case PointSource.Formation:
                 return new MissionPointRow(source, null, PointValueKind.ComputedByGame);
 

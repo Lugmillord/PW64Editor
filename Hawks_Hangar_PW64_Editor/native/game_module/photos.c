@@ -29,6 +29,10 @@ typedef f32 Mtx4F[4][4];
 
 const u16 *module_busy_text(void);
 
+/* ------------------------------------------------------------------ subjects.c */
+
+void module_place_sample(u8 *photo);
+
 /* ------------------------------------------------------------------ game addresses (US) */
 
 #define GAME_CLEAR_SCREENS  ((void (*)(void))0x8033A6B8)                     /* func_8033A6B8 */
@@ -381,6 +385,7 @@ void module_photo_setup(s32 mode, u8 *photo) {
     sSettingUp = 1;
     GAME_PHOTO_SETUP(mode, photo);
     sSettingUp = 0;
+    module_place_sample(photo); /* a sample photo of the mission's own: its camera now (subjects.c) */
 }
 
 /* The second uvGfxEnd of gameUpdateStateTestSetup (after its two clears): "Please wait..." in white on the black photo

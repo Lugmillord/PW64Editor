@@ -284,6 +284,30 @@
                         </StackPanel>
                         </Expander>
 
+                        <!-- Only for Hang Glider and Birdman: photo mission and photo subjects (MissionsTab.Photos.cs). -->
+                        <Expander x:Name="PhotoPanel" Style="{StaticResource Section}">
+                            <Expander.Header><TextBlock Text="Photos" Style="{StaticResource SectionHeader}" /></Expander.Header>
+                            <StackPanel Margin="18,0,0,0">
+                            <WrapPanel>
+                                <CheckBox x:Name="PhotoMissionBox" Content="Photo mission (&quot;Shutter Bug&quot;)" VerticalAlignment="Center"
+                                          Margin="0,0,16,0" Click="OnPhotoMissionChanged" />
+                                <Button Content="How photos are scored…" Style="{StaticResource DialogButton}" Click="OnPhotoHelp" />
+                            </WrapPanel>
+                            <TextBlock x:Name="PhotoMissionNote" Style="{StaticResource Note}" Margin="22,2,0,0" />
+                            <StackPanel x:Name="PhotoEditPanel" Margin="0,8,0,0">
+                                <TextBlock x:Name="PhotoNote" Style="{StaticResource Note}" />
+                                <StackPanel x:Name="PhotoSubjectsPanel" Margin="0,4,0,0" />
+                                <WrapPanel Margin="0,8,0,0">
+                                    <ComboBox x:Name="AddPhotoKindBox" MinWidth="170" Margin="0,0,6,0" />
+                                    <Button x:Name="AddPhotoButton" Content="Add subject" Style="{StaticResource DialogButton}" Click="OnAddPhotoSubject" />
+                                    <Button x:Name="GamePhotosButton" Content="Back to the game's subjects" Style="{StaticResource DialogButton}"
+                                            Margin="12,0,0,0" Click="OnGamePhotoSubjects"
+                                            ToolTip="The subjects of the mission file again (the game's own code scores them)." />
+                                </WrapPanel>
+                            </StackPanel>
+                        </StackPanel>
+                        </Expander>
+
                         <!-- Only for Rocket Belt and Gyrocopter. -->
                         <Expander x:Name="FuelPanel" Style="{StaticResource Section}">
                             <Expander.Header><TextBlock Text="Fuel" Style="{StaticResource SectionHeader}" /></Expander.Header>

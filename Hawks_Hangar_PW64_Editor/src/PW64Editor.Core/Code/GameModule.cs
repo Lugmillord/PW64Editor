@@ -145,6 +145,12 @@ public sealed record GameModuleOptions(bool DebugOutput, bool StartupInfo = fals
     /// </summary>
     public IReadOnlyList<ushort> BusyText { get; init; } = [];
 
+    /// <summary>
+    /// The captions of the sample photos of whale pod, plane, model glider and boat (the game has texts only for its six
+    /// photo subjects), in the game's text codes as held in RAM (end 0xFFFF), or empty.
+    /// </summary>
+    public IReadOnlyList<IReadOnlyList<ushort>> SubjectNames { get; init; } = [];
+
     /// <summary>The result tables of the game patch <see cref="GamePatches.BonusGames"/> for the data area, or null.</summary>
     public byte[]? ResultTables { get; init; }
 
@@ -157,6 +163,9 @@ public sealed record GameModuleOptions(bool DebugOutput, bool StartupInfo = fals
 
     /// <summary>The photo missions ("Shutter Bug"), or null for the game's (<see cref="DataExtension.GamePhotoMissions"/>).</summary>
     public IReadOnlyList<SaveGame.TestId>? PhotoMissions { get; init; }
+
+    /// <summary>The missions with photo subjects of their own (<see cref="Missions.PhotoSubjects"/>), for the photo table.</summary>
+    public IReadOnlyList<(SaveGame.TestId Id, IReadOnlyList<Missions.PhotoSubject> Subjects)> PhotoSubjects { get; init; } = [];
 
     /// <summary>The raised object limits (<see cref="Missions.ObjectLimits.Raised"/>), or null for the game's lists.</summary>
     public IReadOnlyDictionary<Missions.MissionObjectKind, int>? ObjectLimits { get; init; }
@@ -248,6 +257,10 @@ public static class GameModule
     private const int CountdownLength = 12;
     private const int BusyTextOffset = 0x180;
     private const int BusyTextLength = 24;
+    private const int HighSizeOffset = 0x1B0;
+    private const int SubjectNamesOffset = 0x1B4;
+    private const int SubjectNames = 4;
+    private const int SubjectNameLength = 16;
 
     /// <summary>Header flag: stop with a message without the Expansion Pak.</summary>
     private const uint FlagRequirePak = 32;
@@ -403,7 +416,8 @@ public static class GameModule
             throw new InvalidDataException("The game module has no valid header.");
         }
 
-        if (image.Length > RomReserve || GameModuleImage.EndAddress > MissionCapacity.UserFilesAddress)
+        if (AlignedSize(image.Length) + GameModuleImage.HighImage.Length > RomReserve || GameModuleImage.EndAddress > MissionCapacity.UserFilesAddress
+            || GameModuleImage.HighAddress < HighDataArea.ModuleCode || GameModuleImage.HighEndAddress > HighDataArea.End)
         {
             throw new InvalidDataException("The game module is too large for its room.");
         }
@@ -436,6 +450,20 @@ public static class GameModule
 
         BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(RomOffsetOffset), (uint)romOffset);
         BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(ImageSizeOffset), (uint)AlignedSize(image.Length));
+        BinaryPrimitives.WriteUInt32BigEndian(image.AsSpan(HighSizeOffset), (uint)GameModuleImage.HighImage.Length);
+        if (options.SubjectNames.Count is not (0 or SubjectNames)
+            || options.SubjectNames.Any(t => t.Count > SubjectNameLength || t.Count == 0 || t[^1] != 0xFFFF))
+        {
+            throw new InvalidDataException($"The game module needs {SubjectNames} captions of up to {SubjectNameLength - 1} characters.");
+        }
+
+        for (int i = 0; i < options.SubjectNames.Count; i++)
+        {
+            for (int k = 0; k < options.SubjectNames[i].Count; k++)
+            {
+                BinaryPrimitives.WriteUInt16BigEndian(image.AsSpan(SubjectNamesOffset + (((i * SubjectNameLength) + k) * 2)), options.SubjectNames[i][k]);
+            }
+        }
 
         var ascii = new StringBuilder();
         foreach (char c in info)
@@ -551,7 +579,12 @@ public static class GameModule
             && DataExtension.IsImage(rom.Slice(offset, size))
                 ? rom.Slice(offset, size).ToArray()
                 : null;
-        return new DataImages(main, extension);
+        int photoSize = main.Length >= DataArea.HeaderSize ? (int)BinaryPrimitives.ReadUInt32BigEndian(main.AsSpan(DataArea.PhotoTableSizeOffset)) : 0;
+        int photoOffset = header.DataRomOffset + Missions.PhotoSubjects.RomOffset;
+        byte[]? photos = photoSize > 0 && photoSize <= Missions.PhotoSubjects.Room && (long)photoOffset + photoSize <= rom.Length
+            ? rom.Slice(photoOffset, photoSize).ToArray()
+            : null;
+        return new DataImages(main, extension, photos);
     }
 
     /// <summary>
@@ -876,8 +909,9 @@ public static class GameModule
     {
         int dataRomOffset = romOffset - DataArea.RomReserve;
         DataImages images = DataArea.CreateImages(options);
-        byte[] data = images.Main, extension = images.Extension!;
-        if (data.Length > DataExtension.RomOffset || DataExtension.RomOffset + extension.Length > DataArea.RomReserve)
+        byte[] data = images.Main, extension = images.Extension!, photos = images.Photos ?? [];
+        if (data.Length > DataExtension.RomOffset || DataExtension.RomOffset + extension.Length > Missions.PhotoSubjects.RomOffset
+            || Missions.PhotoSubjects.RomOffset + photos.Length > DataArea.RomReserve)
         {
             throw new InvalidDataException("The data area does not fit into its room in the ROM.");
         }
@@ -898,10 +932,12 @@ public static class GameModule
         data.CopyTo(rom, dataRomOffset);
         rom.AsSpan(dataRomOffset + data.Length, AlignedSize(data.Length) - data.Length).Clear();
         extension.CopyTo(rom, dataRomOffset + DataExtension.RomOffset);
+        photos.CopyTo(rom, dataRomOffset + Missions.PhotoSubjects.RomOffset);
 
         rom.AsSpan(romOffset, RomReserve).Fill(0xFF);
         image.CopyTo(rom, romOffset);
         rom.AsSpan(romOffset + image.Length, AlignedSize(image.Length) - image.Length).Clear();
+        GameModuleImage.HighImage.CopyTo(rom, romOffset + AlignedSize(image.Length)); // the second part, behind it
         foreach (WordPatch patch in patches)
         {
             patch.Write(rom);

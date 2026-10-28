@@ -103,6 +103,12 @@ public sealed class MissionSettings
     /// </summary>
     public bool? PhotoMission { get; set; }
 
+    /// <summary>
+    /// The mission's own photo subjects (up to 10, see <see cref="Missions.PhotoSubjects"/>; the game module scores its
+    /// photos), or null: the game scores the subjects of its mission file (PHTS entries and photo curves).
+    /// </summary>
+    public List<PhotoSubject>? PhotoSubjects { get; set; }
+
     /// <summary>The mission these settings belong to.</summary>
     [JsonIgnore]
     public TestId Id => new(Class, (Vehicle)Vehicle, Test);
@@ -112,7 +118,7 @@ public sealed class MissionSettings
     public bool IsEmpty => ResultRows is null && !GenerateTexts && Footnote.Count == 0 && TextPoints.Count == 0
         && AutoFootnote is null && Conditions is null && !HideDemo && StartFuel is null && !UnlimitedFuel && !HardEndZero && HardEndJingle is null
         && TouchdownCurve is null && Landing.Count == 0 && RunwayWidths is null && !BirdmanPoints && (Weather is null || Weather.IsEmpty)
-        && PhotoMission is null;
+        && PhotoMission is null && PhotoSubjects is null;
 
     /// <summary>Empty settings for a mission.</summary>
     public static MissionSettings For(TestId id) => new() { Vehicle = (int)id.Vehicle, Class = id.Class, Test = id.Test };
@@ -140,6 +146,7 @@ public sealed class MissionSettings
         BirdmanPoints = BirdmanPoints,
         Weather = Weather?.Clone(),
         PhotoMission = PhotoMission,
+        PhotoSubjects = PhotoSubjects?.Select(p => p.Clone()).ToList(),
     };
 
     /// <summary>A copy for another mission (the same settings at another place).</summary>

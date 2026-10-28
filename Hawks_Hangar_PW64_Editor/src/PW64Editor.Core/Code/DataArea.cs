@@ -38,7 +38,8 @@ namespace PW64Editor.Core.Code;
 /// (medal limits per vehicle and class, <see cref="Classes.ClassLimits"/>; 0 = none), +0x1C RAM address of the unlock
 /// table (conditions of the menu fields, <see cref="Classes.MenuUnlocks"/>; 0 = the game's rules). At +0x50 the Birdman's two landing
 /// limits, which its patched code reads. At +0x60 the view distance for cameraInit (weather). At +0x28 the RAM address of a raised ring list and its limit, at +0x30 that of a raised balloon list (0 = the game's
-/// lists; <see cref="HighDataArea.ObjectLists"/>), which the module's conditions count. At +0x20 the RAM address of the island table of the environments (header +0x80, <see cref="Missions.WeatherEnvironments"/>; 0 = none). At +0x40 the values the game code reads while flying (written by the module in every flight frame,
+/// lists; <see cref="HighDataArea.ObjectLists"/>), which the module's conditions count. At +0x34 the size of the photo table
+/// (<see cref="Missions.PhotoSubjects"/>, 0xD000 bytes behind the image in the ROM; the module copies it to 0x807F1000). At +0x20 the RAM address of the island table of the environments (header +0x80, <see cref="Missions.WeatherEnvironments"/>; 0 = none). At +0x40 the values the game code reads while flying (written by the module in every flight frame,
 /// see <see cref="LiveLandingAddress"/>).</para>
 /// <para>Behind the room for <see cref="MissionCapacity"/> entries (at <see cref="Missions.ResultTables.Address"/>)
 /// the result tables of the game patch <see cref="GamePatches.BonusGames"/>, when it is applied; the image then
@@ -127,6 +128,10 @@ public static class DataArea
     /// <summary>Header: RAM address of the raised balloon list (0 = the game's gBalls).</summary>
     public const int BalloonListOffset = 0x30;
 
+    /// <summary>Header: size of the photo table (<see cref="Missions.PhotoSubjects"/>, 0 = none), which lies
+    /// <see cref="Missions.PhotoSubjects.RomOffset"/> bytes behind the image in the ROM.</summary>
+    public const int PhotoTableSizeOffset = 0x34;
+
     /// <summary>Layout version 1 (until Step 40): the result tables [7][4][5] at this address of the data area.</summary>
     public const uint Version1ResultTablesAddress = MissionTableAddress + (MissionCapacity * MissionEntrySize);
 
@@ -161,7 +166,9 @@ public static class DataArea
             BinaryPrimitives.WriteUInt32BigEndian(main.AsSpan(BalloonListOffset), balloons);
         }
 
-        return new DataImages(main, extension);
+        byte[] photos = Missions.PhotoSubjects.CreateTable(options.PhotoSubjects);
+        BinaryPrimitives.WriteUInt32BigEndian(main.AsSpan(PhotoTableSizeOffset), (uint)photos.Length);
+        return new DataImages(main, extension, photos);
     }
 
     /// <summary>
@@ -519,4 +526,4 @@ public static class DataArea
 /// <summary>The image of the data area and the image of its lower part (<see cref="DataExtension"/>) of a build.</summary>
 /// <param name="Main">The data area (header, mission entries, unlock table).</param>
 /// <param name="Extension">The lower data area, or null (builds before layout version 2).</param>
-public sealed record DataImages(byte[] Main, byte[]? Extension);
+public sealed record DataImages(byte[] Main, byte[]? Extension, byte[]? Photos = null);

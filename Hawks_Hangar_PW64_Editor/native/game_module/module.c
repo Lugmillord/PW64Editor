@@ -211,12 +211,19 @@ struct Header {
     u32 dataSize;       /* +0xEC its size (a multiple of 8, 0 = none), written by the editor */
     u16 countdown[6][12]; /* +0xF0 "5" ... "1", "Time up!" in the game's text codes (end 0xFFFF), or 0 */
     u16 busyText[24];   /* +0x180 "Please wait..." while photos are drawn, in the game's text codes (end 0xFFFF), or 0 */
+    u32 highSize;       /* +0x1B0 bytes of the second part (photos.c, subjects.c), behind the first in the ROM, written by the editor */
+    u16 subjectNames[4][16]; /* +0x1B4 captions of the sample photos of whale pod, plane, model glider, boat (game's text codes) */
 };
 
 __attribute__((section(".header"), used)) struct Header gHeader = {
     0x4848474D, (void *)module_game_printf, (void *)module_init, 0, 0, 0,
-    sLog, LOG_SIZE, 0, 6, (void *)(DATA_AREA + 0x100), 0, "", 0, { 0 }, { 0 }, 0, 0, { { 0 } }, { 0 },
+    sLog, LOG_SIZE, 0, 6, (void *)(DATA_AREA + 0x100), 0, "", 0, { 0 }, { 0 }, 0, 0, { { 0 } }, { 0 }, 0, { { 0 } },
 };
+
+/* For subjects.c: the caption of a sample photo of the types 7-10 (whale pod, plane, model glider, boat), or 0. */
+const u16 *module_subject_name(s32 kind) {
+    return kind >= 7 && kind <= 10 && gHeader.subjectNames[kind - 7][0] != 0 ? (const u16 *)gHeader.subjectNames[kind - 7] : 0;
+}
 
 /* The text photos.c shows while photos are drawn, or 0. */
 const u16 *module_busy_text(void) {
@@ -2639,6 +2646,21 @@ void module_hud_birdman(u8 *hud) {
    no top score). The patch replaces "lhu d, 2(b); li at, 6" by "jal module_bm_d_b; lhu d, 2(b)": b is the player's
    flight data (class +4, test +6), d the vehicle just loaded. For a Birdman mission with points d becomes 0x7F, so the
    check that follows (against at = 6) treats it like any other vehicle. Only v0 and v1 are used (saved). */
+/* The Birdman missions with points are a byte per stage in the lower data area (EXT_BIRDMAN, 0x801F1008 + class, bit
+   = test; Stage 7 moved them there from the data area header +0x14, which the editor no longer writes). BM_MASK loads it
+   into r (class in c, 0 ... 7) or branches to "no" when the lower data area is missing; it uses at and r. */
+#define BM_MASK(r, c, no) \
+    "    sltiu $at, " c ", 8\n" \
+    "    beqz $at, " no "\n" \
+    "    lui $at, 0x801F\n" \
+    "    lw " r ", 0x1000($at)\n" \
+    "    xori " r ", " r ", 0x4D58\n" \
+    "    lui $at, 0x4848\n" \
+    "    bne " r ", $at, " no "\n" \
+    "    lui $at, 0x801F\n" \
+    "    addu $at, $at, " c "\n" \
+    "    lbu " r ", 0x1008($at)\n"
+
 #define BM_CHECK(name, d, b) \
     ".globl " name "\n" name ":\n" \
     "    addiu $sp, $sp, -16\n" \
@@ -2647,14 +2669,10 @@ void module_hud_birdman(u8 *hud) {
     "    addiu $at, $zero, 6\n" \
     "    bne " d ", $at, 9f\n" \
     "    lhu $v0, 4(" b ")\n" \
-    "    lhu $v1, 6(" b ")\n" \
-    "    or $at, $v0, $v1\n" \
-    "    sltiu $at, $at, 4\n" \
+    BM_MASK("$v1", "$v0", "8f") \
+    "    lhu $v0, 6(" b ")\n" \
+    "    sltiu $at, $v0, 5\n" \
     "    beqz $at, 8f\n" \
-    "    sll $v0, $v0, 2\n" \
-    "    addu $v0, $v0, $v1\n" \
-    "    lui $v1, 0x801F\n" \
-    "    lhu $v1, 0x5014($v1)\n" \
     "    srlv $v1, $v1, $v0\n" \
     "    andi $v1, $v1, 1\n" \
     "    beqz $v1, 8f\n" \
@@ -2675,13 +2693,8 @@ void module_hud_birdman(u8 *hud) {
     "    addiu $at, $zero, 6\n" \
     "    bne " d ", $at, 9f\n" \
     "    lhu $v0, 4(" b ")\n" \
-    "    sltiu $at, $v0, 4\n" \
-    "    beqz $at, 8f\n" \
-    "    sll $v0, $v0, 2\n" \
-    "    lui $v1, 0x801F\n" \
-    "    lhu $v1, 0x5014($v1)\n" \
-    "    srlv $v1, $v1, $v0\n" \
-    "    andi $v1, $v1, 0xF\n" \
+    BM_MASK("$v1", "$v0", "8f") \
+    "    andi $v1, $v1, 0x1F\n" \
     "    beqz $v1, 8f\n" \
     "    nop\n" \
     "    addiu " d ", $zero, 0x7F\n" \
@@ -2712,11 +2725,9 @@ __asm__(".section .text\n"
         "    lhu $t0, 4($s0)\n"
         "    sltiu $at, $t0, 4\n"
         "    beqz $at, 9f\n"
-        "    lui $t1, 0x801F\n"
-        "    lhu $t1, 0x5014($t1)\n"
-        "    sll $at, $t0, 2\n"
-        "    srlv $t1, $t1, $at\n"
-        "    andi $t1, $t1, 0xF\n"
+        "    nop\n"
+        BM_MASK("$t1", "$t0", "9f")
+        "    andi $t1, $t1, 0x1F\n"
         "    beqz $t1, 9f\n"
         "    nop\n"
         "    addiu $v1, $t0, 4\n"
@@ -2736,14 +2747,11 @@ __asm__(".section .text\n"
         "    addiu $at, $zero, 6\n"
         "    bne $v0, $at, 1f\n"
         "    lhu $t5, 4($v1)\n"
-        "    lhu $t7, 6($v1)\n"
-        "    or $at, $t5, $t7\n"
-        "    sltiu $at, $at, 4\n"
+        BM_MASK("$t7", "$t5", "2f")
+        "    lhu $t5, 6($v1)\n"
+        "    sltiu $at, $t5, 5\n"
         "    beqz $at, 2f\n"
-        "    sll $t5, $t5, 2\n"
-        "    addu $t5, $t5, $t7\n"
-        "    lui $t7, 0x801F\n"
-        "    lhu $t7, 0x5014($t7)\n"
+        "    nop\n"
         "    srlv $t7, $t7, $t5\n"
         "    andi $t7, $t7, 1\n"
         "    bnez $t7, 1f\n"
@@ -2938,6 +2946,8 @@ void module_ext_load(u32 dataRom);
 #define GAME_VI_BLACK         ((void (*)(u8))0x8023A830)               /* osViBlack */
 #define GAME_VI_SWAP_BUFFER   ((void (*)(void *))0x8023AE20)           /* osViSwapBuffer */
 #define GAME_WRITEBACK_DCACHE ((void (*)(void))0x8023AE70)             /* osWritebackDCacheAll */
+#define GAME_INVAL_ICACHE     ((void (*)(void *, s32))0x802435D0)      /* osInvalICache */
+#define HIGH_PART             0x807F4000u                              /* HighDataArea.ModuleCode */
 
 /* Frame buffer of the message: heap memory the game has not used yet at this point. */
 #define PAK_FRAME ((u16 *)0x80080000)
@@ -3006,6 +3016,13 @@ void module_init(s32 arg) {
 
     if ((gHeader.flags & FLAG_REQUIRE_PAK) && GAME_MEM_SIZE < 0x800000) {
         pak_screen();
+    }
+
+    /* The second part (photos.c, subjects.c) into the high data area, from behind the first part in the ROM. */
+    if (gHeader.highSize != 0 && GAME_MEM_SIZE >= 0x800000) {
+        GAME_WRITEBACK_DCACHE();
+        GAME_MEDIA_COPY((void *)HIGH_PART, gHeader.romOffset + gHeader.imageSize, gHeader.highSize);
+        GAME_INVAL_ICACHE((void *)HIGH_PART, gHeader.highSize);
     }
 
     /* The mission settings into the data area (an empty header if there are none). */

@@ -102,7 +102,7 @@ public sealed class MissionDraft
     /// <summary>The rows with their values for the edited data.</summary>
     /// <param name="otherComm">The current COMM block of another mission (Cannonball targets), or null.</param>
     public IReadOnlyList<MissionPointRow> EvaluateRows(Func<TestId, MissionComm?> otherComm) =>
-        Rows.Select(r => MissionCatalog.Evaluate(r, Mission.Id, Mission.File, Comm, otherComm, TouchdownCurve)).ToList();
+        Rows.Select(r => MissionCatalog.Evaluate(r, Mission.Id, Mission.File, Comm, otherComm, TouchdownCurve, Settings.PhotoSubjects)).ToList();
 
     /// <summary>
     /// The number a row shows in the point texts: the curve value, or for points from objects and
@@ -111,7 +111,7 @@ public sealed class MissionDraft
     /// </summary>
     public int TextPoints(MissionPointRow row)
     {
-        if (row.Kind is PointValueKind.Curve or PointValueKind.OtherMission && row.Value is { } exact)
+        if (row.Kind is PointValueKind.Curve or PointValueKind.OtherMission or PointValueKind.PhotoSubjects && row.Value is { } exact)
         {
             return exact;
         }
@@ -309,6 +309,11 @@ public sealed class MissionDraft
         {
             Comm.SetCurve(kind, MissionCurves.WithShownPoints(kind, Vehicle, Comm.GetCurve(kind), points));
         }
+        else if (source == PointSource.Photo)
+        {
+            // The photo subjects keep their share of the points.
+            Settings.PhotoSubjects = PhotoSubjects.WithPoints(Photos, Math.Clamp(points, 0, 126));
+        }
         else if (source >= PointSource.CannonballTarget1 && source <= PointSource.CannonballTarget4
                  && source - PointSource.CannonballTarget1 == Mission.Id.Test)
         {
@@ -330,7 +335,51 @@ public sealed class MissionDraft
         PointSource source = Rows[index];
         return source >= PointSource.CannonballTarget1 && source <= PointSource.CannonballTarget4
             ? source - PointSource.CannonballTarget1 == Mission.Id.Test
-            : source != PointSource.None;
+            : source == PointSource.Photo ? Photos.Count > 0 && CanEditPhotos : source != PointSource.None;
+    }
+
+    /// <summary>The mission's photo subjects: its own, or the game's from the mission file.</summary>
+    public IReadOnlyList<PhotoSubject> Photos => PhotoSubjects.Effective(Settings, Mission.File);
+
+    /// <summary>True if the mission has photo subjects of its own (the game module scores them).</summary>
+    public bool HasOwnPhotos => Settings.PhotoSubjects is not null;
+
+    /// <summary>True if the photo subjects can be edited: the Hang Glider, and the Birdman in its missions with points.</summary>
+    public bool CanEditPhotos => Vehicle == Vehicle.HangGlider || (Vehicle == Vehicle.Birdman && Settings.BirdmanPoints);
+
+    /// <summary>Replaces the photo subjects (the game module scores them from now on).</summary>
+    /// <returns>Null, or why they cannot be used.</returns>
+    public string? SetPhotos(IReadOnlyList<PhotoSubject> subjects)
+    {
+        if (!CanEditPhotos)
+        {
+            return CoreText.T("The photo subjects of this mission cannot be changed.");
+        }
+
+        if (PhotoSubjects.Problem(subjects, Comm.Island) is { } problem)
+        {
+            return problem;
+        }
+
+        Settings.PhotoSubjects = subjects.Select(p => p.Clone()).ToList();
+        Touch();
+        return null;
+    }
+
+    /// <summary>Back to the game's photo subjects (the PHTS entries of the mission file).</summary>
+    public void ResetPhotos()
+    {
+        Settings.PhotoSubjects = null;
+        Touch();
+    }
+
+    /// <summary>Sets whether the mission is a photo mission (null in the settings when it is the game's rule).</summary>
+    /// <param name="photo">Photo mission or not.</param>
+    /// <param name="gameRule">What the game's rule says for this mission.</param>
+    public void SetPhotoMission(bool photo, bool gameRule)
+    {
+        Settings.PhotoMission = photo == gameRule ? null : photo;
+        Touch();
     }
 
     /// <summary>Changes the points of a ring type (0-3; 3 is the goal ring).</summary>
@@ -830,6 +879,10 @@ public sealed class MissionDraft
             && (a.TouchdownCurve ?? []).SequenceEqual(other.TouchdownCurve ?? []) && (a.TouchdownCurve is null) == (other.TouchdownCurve is null)
             && a.Landing.Count == other.Landing.Count && a.Landing.All(p => other.Landing.TryGetValue(p.Key, out float v) && v == p.Value)
             && a.BirdmanPoints == other.BirdmanPoints
+            && a.PhotoMission == other.PhotoMission
+            && (a.PhotoSubjects is null ? other.PhotoSubjects is null
+                : other.PhotoSubjects is not null && a.PhotoSubjects.Count == other.PhotoSubjects.Count
+                  && a.PhotoSubjects.Zip(other.PhotoSubjects).All(p => p.First.SameAs(p.Second)))
             && (a.Weather is null || a.Weather.IsEmpty ? other.Weather is null || other.Weather.IsEmpty : a.Weather.SameAs(other.Weather))
             && (a.RunwayWidths ?? []).SequenceEqual(other.RunwayWidths ?? []) && (a.RunwayWidths is null) == (other.RunwayWidths is null)
             && (a.Conditions is null ? other.Conditions is null : a.Conditions.SameAs(other.Conditions))

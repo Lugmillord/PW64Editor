@@ -83,6 +83,15 @@ public static class ProjectBuilder
             throw new ProjectException(objectProblem);
         }
 
+        foreach (ProjectMission mission in missionList)
+        {
+            if (project.Settings.Missions.LastOrDefault(s => s.Id == mission.Id)?.PhotoSubjects is { } photos
+                && Missions.PhotoSubjects.Problem(photos, mission.Comm.Island) is { } photoProblem)
+            {
+                throw new ProjectException(CoreText.F("{0}: {1}", Missions.MissionCatalog.Label(mission.Id), photoProblem));
+            }
+        }
+
         AddLevelTexts(project, fileSystem, files, missionIds);
         CheckTextFile(project, fileSystem, files);
         ApplyMissionSettings(project, files);
@@ -108,6 +117,7 @@ public static class ProjectBuilder
                         MissionFiles = [.. missionList.Select(m => m.File.GroupIndex)],
                         PhotoMissions = ProjectMissions.PhotoMissions(missionList, fileSystem, project.Settings.Missions),
                         ObjectLimits = Missions.ObjectLimits.Raised(project.Settings.ObjectLimits),
+                        PhotoSubjects = OwnPhotoSubjects(project, missionIds),
                         UnlockTable = Classes.MenuUnlocks.Table(project.Settings.Unlocks, project.Settings.Features.AllFieldsOpen),
                         EnvironmentTable = addedEnvironments ? Missions.WeatherEnvironments.Table() : null,
                     },
@@ -394,6 +404,16 @@ public static class ProjectBuilder
             }
         }
 
+        IReadOnlyList<IReadOnlyList<ushort>> subjectNames = [];
+        {
+            var codec = new Text.TextCodec(Text.TextFont.Load(cleanFileSystem));
+            var names = SubjectNames.Select(t => codec.Encode(t)).ToList();
+            if (names.All(t => t.Success))
+            {
+                subjectNames = names.Select(t => (IReadOnlyList<ushort>)ToRamCodes(t.Codes).Where(c => c != 0x0FFE).ToList()).ToList();
+            }
+        }
+
         return project.Settings.Features.ModuleOptions with
         {
             RequireExpansionPak = true,
@@ -403,6 +423,7 @@ public static class ProjectBuilder
             PenaltyDigits = digits.Count == 10 ? digits : [],
             CountdownTexts = countdown,
             BusyText = busy,
+            SubjectNames = subjectNames,
             DistanceRow = project.Settings.Missions.Any(m => m.ResultRows?.Contains((int)Missions.PointSource.Distance) == true),
         };
     }
@@ -439,6 +460,17 @@ public static class ProjectBuilder
         Text.TextCodec.CodeEnd => (ushort)0xFFFF,
         _ => c,
     }).ToList();
+
+    /// <summary>The missions of the build with photo subjects of their own.</summary>
+    private static IReadOnlyList<(SaveGame.TestId, IReadOnlyList<Missions.PhotoSubject>)> OwnPhotoSubjects(HackProject project,
+        IReadOnlyList<SaveGame.TestId> missions) =>
+        [.. project.Settings.Missions
+            .Where(s => s.PhotoSubjects is not null && missions.Contains(s.Id))
+            .GroupBy(s => s.Id)
+            .Select(g => (g.Key, (IReadOnlyList<Missions.PhotoSubject>)g.Last().PhotoSubjects!))];
+
+    /// <summary>The captions of the sample photos of whale pod, plane, model glider and boat (the game's language, English).</summary>
+    public static readonly IReadOnlyList<string> SubjectNames = ["Whale Pod", "Airplane", "Model Glider", "Boat"];
 
     /// <summary>The text while photos are drawn (in the game's language, English).</summary>
     public const string BusyText = "Please wait...";

@@ -17,8 +17,11 @@ public enum PointValueKind
     /// <summary>The score of another mission (Cannonball: the best shot at each target).</summary>
     OtherMission,
 
-    /// <summary>Computed by the game while playing (photos, formations); not stored in the mission.</summary>
+    /// <summary>Computed by the game while playing (Meca Hawks, formations); not stored in the mission.</summary>
     ComputedByGame,
+
+    /// <summary>The photo subjects: the best photo of each gives at most its points (<see cref="PhotoSubjects"/>).</summary>
+    PhotoSubjects,
 
     /// <summary>The row is empty or unknown.</summary>
     None,

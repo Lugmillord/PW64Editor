@@ -7,6 +7,7 @@
  *   - Photo missions ("Shutter Bug"): the game knows them by class and test (Hang Glider Class A test 1, Class B test 2,
  *     Pilot test 3). testMenuShutterBug, snapPhoto's "Photo" message and the album's points ask the module, which looks the
  *     mission up in the table of the lower data area, so they stay with their mission when tests move.
+ *   - The photo subjects of the missions (subjects.c) are copied from the ROM into the high data area at the start too.
  *   - Photos in the saved game: a photo stores its test and class in 2 bits each (snap.c), too few for a fifth test (and
  *     for classes 5-8). The game's 1032 bits of the album are followed by 12 more: per photo the third bit of its test and
  *     of its class (module_photo_pack / module_photo_unpack around func_8033E860 and func_8033F050).
@@ -48,9 +49,15 @@ static u8 *player(void) {
 /* ------------------------------------------------------------------ the lower data area */
 
 /* After the data area: its lower part, from the ROM 0x9000 bytes behind the data area's image. */
+#define PHOTO_TABLE      0x807F1000u /* HighDataArea.PhotoSubjectTable */
+#define PHOTO_TABLE_ROOM 0x3000u
+#define PHOTO_ROM_OFFSET 0xD000u     /* PhotoSubjects.RomOffset */
+#define DATA_PHOTO_SIZE  (*(volatile u32 *)(DATA_AREA + 0x34))
+
 void module_ext_load(u32 dataRom) {
     u32 size;
     *(volatile u32 *)EXT_AREA = 0;
+    *(volatile u32 *)PHOTO_TABLE = 0;
     if (*(volatile u32 *)DATA_AREA != DATA_MAGIC || *(volatile u32 *)(DATA_AREA + 4) < 2) {
         return;
     }
@@ -60,6 +67,14 @@ void module_ext_load(u32 dataRom) {
     }
     GAME_WRITEBACK();
     GAME_MEDIA_COPY((void *)EXT_AREA, dataRom + EXT_ROM_OFFSET, size);
+
+    /* The photo subjects of the missions (subjects.c), from the ROM 0xD000 bytes behind the data area's image into the
+       high data area. */
+    size = DATA_PHOTO_SIZE;
+    if (size != 0 && size <= PHOTO_TABLE_ROOM && (size & 7) == 0) {
+        GAME_WRITEBACK();
+        GAME_MEDIA_COPY((void *)PHOTO_TABLE, dataRom + PHOTO_ROM_OFFSET, size);
+    }
 }
 
 /* ------------------------------------------------------------------ photo missions */
@@ -68,12 +83,35 @@ static int photo_mission(u32 veh, u32 cls, u32 test) {
     return EXT_OK && veh < 7 && cls < 8 && test < 5 && ((EXT_PHOTO(veh, cls) >> test) & 1);
 }
 
+s32 module_has_photo_subjects(u32 veh, u32 cls, u32 test); /* subjects.c */
+
+/* For subjects.c. */
+s32 module_is_photo_mission(u32 veh, u32 cls, u32 test) {
+    return photo_mission(veh, cls, test);
+}
+
+
+
 /* testMenuShutterBug (its entry jumps here): the Hang Glider's test shown on the test screen (sCurTestIdx) is a photo
    mission. */
 #define TEST_MENU_TEST (*(volatile s32 *)0x803509B4) /* sCurTestIdx */
+s32 module_own_samples(void); /* subjects.c */
+
+/* A test with sample photos: a Hang Glider photo mission (the island's or its own sample photos), or a Birdman photo
+   mission with photo subjects of its own. */
+static s32 has_samples(u32 veh, u32 cls, u32 test) {
+    return photo_mission(veh, cls, test) && (veh == 0 || (veh == 6 && module_has_photo_subjects(veh, cls, test)));
+}
+
 s32 module_shutter_bug(void) {
     u8 *p = player();
-    return p != 0 && *(u16 *)(p + 2) == 0 && photo_mission(0, *(u16 *)(p + 4), (u32)TEST_MENU_TEST);
+    return p != 0 && has_samples(*(u16 *)(p + 2), *(u16 *)(p + 4), (u32)TEST_MENU_TEST);
+}
+
+/* The pause menu of a flight (func_8032CF28): the menu with the sample photos for the flight's test (the game: only the
+   Hang Glider's Class A test 1, Class B test 2 and Pilot test 3). */
+s32 module_pause_photo(u8 *flight) {
+    return has_samples(*(u16 *)(flight + 2), *(u16 *)(flight + 4), *(u16 *)(flight + 6));
 }
 
 /* A photo (Unk80373060: class +0x30, test +0x32, vehicle +0x34, u16 each): snapPhoto shows "Photo" for a subject in a
@@ -82,9 +120,12 @@ s32 module_photo_record(u8 *photo) {
     return photo_mission(*(u16 *)(photo + 0x34), *(u16 *)(photo + 0x30), *(u16 *)(photo + 0x32));
 }
 
-/* The album (func_8033ADD4) shows the points of a photo taken in a photo mission, but not for the Birdman. */
+/* The album (func_8033ADD4) shows the points of a photo taken in a photo mission; the game never for the Birdman, the
+   module for a Birdman photo mission with photo subjects of its own (the game's Birdman photo missions give no points). */
 s32 module_photo_album(u8 *photo) {
-    return *(u16 *)(photo + 0x34) != 6 && module_photo_record(photo);
+    u32 veh = *(u16 *)(photo + 0x34);
+    return (veh != 6 || module_has_photo_subjects(veh, *(u16 *)(photo + 0x30), *(u16 *)(photo + 0x32)))
+        && module_photo_record(photo);
 }
 
 /* ------------------------------------------------------------------ photos in the saved game */
