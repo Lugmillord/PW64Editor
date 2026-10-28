@@ -177,7 +177,10 @@ typedef struct {
     s32 fogOffset;   /* +0x90 its offset (500 - min) * 256 / (max - min) */
     u32 fallSpeed;   /* +0x94 f32 bits, units per second */
     u16 density;     /* +0x98 snow flakes or rain drops */
-    u8 reserved[DATA_ENTRY_SIZE - 0x9A];
+    u8 pad9A[2];
+    u8 music[4];     /* +0x9C the mission's songs (MusicPlaces.cs): flight, crash, good landing, missed landing; song + 1,
+                        0 = the song of the place */
+    u8 reserved[DATA_ENTRY_SIZE - 0xA0];
 } Condition;
 
 #define WEATHER_FOG_COLOR 1u  /* the environment's fog colour */
@@ -1065,6 +1068,7 @@ s32 module_conditions(u8 *result) {
    the jingle of the vehicle being flown. The game played the Rocket Belt's for every vehicle (and
    changed the vehicle to the Rocket Belt, which the patch removes). */
 #define GAME_SND_SET_MUSIC ((void (*)(s32))0x8033F748) /* sndSetMusic */
+#define MUSIC_BIRDMAN_MISSED 0x1F /* the module's place: the Birdman's landing beside the target (MusicPlaces.cs) */
 static const u8 sGoalJingle[7] = {
     0x05, /* Hang Glider: landing OK */
     0x09, /* Rocket Belt: landing OK */
@@ -1797,6 +1801,48 @@ __asm__(".section .text\n"
 #define GAME_SND_SET_MUSIC_STATE ((void (*)(s32))0x8033F964) /* sndSetMusicState (0 = play) */
 #define GAME_SND_VEHICLE         ((void (*)(s32))0x8033FCD0) /* func_8033FCD0(vehicle) */
 
+/* ------------------------------------------------------------------ music places (MusicPlaces.cs) */
+
+/* The game keeps the music number of a place (gCurrentMusicId) and compares it, so the song is chosen only where it is
+   started: both calls of uvaSeqNew in sndSetMusicState (0x8033F9D4, 0x8033FA48) come here with that number. The
+   mission's own songs (its entry +0x9C, by kind) for the numbers of its vehicle, otherwise the table of the lower
+   data area (+0x48, a byte per place: song + 1, 0 = its own song). 0x1F is the module's place for the Birdman's
+   landing beside the target: the game plays its crash jingle there. */
+#define GAME_SEQ_NEW         ((void (*)(s32))0x802046E0) /* uvaSeqNew */
+#define MUSIC_PLACES         31
+#define EXT_MUSIC(place)     (((volatile u8 *)(EXT_AREA + 0x48))[place])
+static const u8 sMissionMusic[7][4] = {
+    /* flight, crash, good landing, missed landing (0xFF: none) */
+    { 0x04, 0x07, 0x05, 0x06 }, /* Hang Glider */
+    { 0x08, 0x0B, 0x09, 0x0A }, /* Rocket Belt */
+    { 0x0C, 0x0F, 0x0D, 0x0E }, /* Gyrocopter */
+    { 0x10, 0xFF, 0x11, 0x12 }, /* Cannonball: hit, miss */
+    { 0x13, 0x16, 0x14, 0x15 }, /* Sky Diving */
+    { 0x17, 0xFF, 0x18, 0x0A }, /* Jumble Hopper: goal; its hard end jingle is the Rocket Belt's "landing missed" */
+    { 0x19, 0x1B, 0x1A, MUSIC_BIRDMAN_MISSED }, /* Birdman */
+};
+
+void module_seq_new(s32 music) {
+    const Condition *c = current_condition();
+    s32 place = music == MUSIC_BIRDMAN_MISSED ? 0x1B : music;
+    s32 k;
+    if (c != 0 && c->vehicle < 7) {
+        for (k = 0; k < 4; k++) {
+            if (sMissionMusic[c->vehicle][k] == music && c->music[k] != 0 && c->music[k] <= MUSIC_PLACES) {
+                message("Music %d: the mission's song %d.\n", music, c->music[k] - 1);
+                GAME_SEQ_NEW(c->music[k] - 1);
+                return;
+            }
+        }
+    }
+    if (EXT_OK && place >= 0 && place < MUSIC_PLACES && EXT_MUSIC(place) != 0 && EXT_MUSIC(place) <= MUSIC_PLACES) {
+        message("Music %d: song %d.\n", place, EXT_MUSIC(place) - 1);
+        GAME_SEQ_NEW(EXT_MUSIC(place) - 1);
+        return;
+    }
+    GAME_SEQ_NEW(place);
+}
+
 static const Condition *hard_end_setting(void) {
     const Condition *c = current_condition();
     return c != 0 && (c->flags & (COND_END_SCORED | COND_END_ZERO)) ? c : 0;
@@ -1810,7 +1856,9 @@ void module_hard_end(u8 *state) {
         return; /* after an impact the mission ends as a crash: no jingle */
     }
     if (c->hardEndMusic != 0) {
-        GAME_SND_SET_MUSIC(c->hardEndMusic);
+        /* The Birdman's "landing missed" is its crash jingle (0x1B): as the module's own place, so a mission can give it
+           a song of its own (module_seq_new). */
+        GAME_SND_SET_MUSIC(c->vehicle == 6 && c->hardEndMusic == 0x1B ? MUSIC_BIRDMAN_MISSED : c->hardEndMusic);
         GAME_SND_SET_MUSIC_STATE(0);
         GAME_SND_VEHICLE(*(u16 *)(state + 0x0E));
     }
@@ -2390,7 +2438,7 @@ static void birdman_frame(u8 *bm, const Condition *c, u32 *impact, u32 *flags, u
         sBmTime = time;
         sBmFlags = onPad ? 0xFFFFu : SCORE_NO_LANDING;
         GAME_HUD_TEXT(onPad ? TEXT_LAND_OK : TEXT_LAND_OUT, FLOAT_1_5, FLOAT_8);
-        GAME_SND_SET_MUSIC(onPad ? 0x1A : 0x1B);
+        GAME_SND_SET_MUSIC(onPad ? 0x1A : MUSIC_BIRDMAN_MISSED);
         GAME_SND_SET_MUSIC_STATE(0);
         GAME_SND_VEHICLE(6);
         message("Birdman: landed %s at %d km/h (impact).\n", onPad ? "on a landing pad" : "beside the target",

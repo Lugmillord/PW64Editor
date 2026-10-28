@@ -109,6 +109,12 @@ public sealed class MissionSettings
     /// </summary>
     public List<PhotoSubject>? PhotoSubjects { get; set; }
 
+    /// <summary>
+    /// The mission's own songs for its flight and jingles (<see cref="Audio.MusicPlaces"/>: kind → song number), or null; kinds
+    /// not listed play the song of their place (Music tab).
+    /// </summary>
+    public Dictionary<Audio.MissionMusicKind, int>? Music { get; set; }
+
     /// <summary>The mission these settings belong to.</summary>
     [JsonIgnore]
     public TestId Id => new(Class, (Vehicle)Vehicle, Test);
@@ -118,7 +124,7 @@ public sealed class MissionSettings
     public bool IsEmpty => ResultRows is null && !GenerateTexts && Footnote.Count == 0 && TextPoints.Count == 0
         && AutoFootnote is null && Conditions is null && !HideDemo && StartFuel is null && !UnlimitedFuel && !HardEndZero && HardEndJingle is null
         && TouchdownCurve is null && Landing.Count == 0 && RunwayWidths is null && !BirdmanPoints && (Weather is null || Weather.IsEmpty)
-        && PhotoMission is null && PhotoSubjects is null;
+        && PhotoMission is null && PhotoSubjects is null && (Music is null || Music.Count == 0);
 
     /// <summary>Empty settings for a mission.</summary>
     public static MissionSettings For(TestId id) => new() { Vehicle = (int)id.Vehicle, Class = id.Class, Test = id.Test };
@@ -147,6 +153,7 @@ public sealed class MissionSettings
         Weather = Weather?.Clone(),
         PhotoMission = PhotoMission,
         PhotoSubjects = PhotoSubjects?.Select(p => p.Clone()).ToList(),
+        Music = Music is null ? null : new Dictionary<Audio.MissionMusicKind, int>(Music),
     };
 
     /// <summary>A copy for another mission (the same settings at another place).</summary>

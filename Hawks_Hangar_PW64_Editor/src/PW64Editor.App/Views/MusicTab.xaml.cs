@@ -22,6 +22,8 @@ public partial class MusicTab : UserControl
     private IReadOnlyList<SongInfo> _songs = [];
     private InstrumentBank? _bank;
     private SoundPlayer? _player;
+    private IReadOnlyList<bool> _loops = [];
+    private IReadOnlyList<bool> _originalLoops = [];
     private int _loadGeneration;
     private bool _building;
 
@@ -61,7 +63,8 @@ public partial class MusicTab : UserControl
 
         try
         {
-            (_bank, _songs) = await Task.Run(() => (session.InstrumentBank, session.LoadSongs()));
+            (_bank, _songs, _loops, _originalLoops) = await Task.Run(() =>
+                (session.InstrumentBank, session.LoadSongs(), session.SongLoops(), session.OriginalSongLoops()));
         }
         catch (Exception ex) when (Ui.IsExpectedError(ex))
         {
@@ -79,6 +82,99 @@ public partial class MusicTab : UserControl
         }
 
         FillSongList(selected < 0 ? 0 : selected);
+        FillPlaces(PlaceList.SelectedIndex < 0 ? 0 : PlaceList.SelectedIndex);
+    }
+
+    // ----------------------------------------------------------------- which song plays where
+
+    /// <summary>An entry of the place or song list.</summary>
+    /// <param name="Number">The place's or song's number.</param>
+    /// <param name="Text">What the list shows.</param>
+    public sealed record NumberItem(int Number, string Text);
+
+    private void FillPlaces(int selectIndex)
+    {
+        if (_session is null)
+        {
+            return;
+        }
+
+        IReadOnlyDictionary<int, int> places = _session.Project.Settings.MusicPlaces;
+        _building = true;
+        PlaceList.ItemsSource = Enumerable.Range(0, MusicPlaces.Count).Select(p => new NumberItem(p,
+            L.F("{0:D2} – {1}", p, L.T(MusicPlaces.PlaceName(p))) + (places.ContainsKey(p) ? " " + L.T("(changed)") : string.Empty))).ToList();
+        PlaceSongList.ItemsSource = _songs.Select(s => new NumberItem(s.Number, L.F("{0:D2} – {1}", s.Number, L.T(s.Name))
+            + (s.IsChanged ? " " + L.T("(changed)") : string.Empty))).ToList();
+        PlaceList.SelectedIndex = Math.Clamp(selectIndex, 0, MusicPlaces.Count - 1);
+        _building = false;
+        ShowPlace();
+        PlaceSummary.Text = places.Count == 0
+            ? L.T("Every place plays its own song.")
+            : L.T("Other songs:") + " " + string.Join("; ", places.OrderBy(p => p.Key).Select(p =>
+                L.F("{0} → {1:D2} {2}", L.T(MusicPlaces.PlaceName(p.Key)), p.Value, L.T(MusicPlaces.PlaceName(p.Value)))));
+    }
+
+    private void ShowPlace()
+    {
+        if (_session is null || PlaceList.SelectedItem is not NumberItem place)
+        {
+            return;
+        }
+
+        int song = MusicPlaces.SongAt(_session.Project.Settings.MusicPlaces, place.Number);
+        _building = true;
+        PlaceSongList.SelectedIndex = song;
+        _building = false;
+        PlaceOriginalButton.IsEnabled = song != place.Number;
+        string? problem = MusicPlaces.Problem(place.Number, song, _loops, _originalLoops);
+        PlaceWarning.Text = problem ?? string.Empty;
+        PlaceWarning.Visibility = problem is null ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void OnPlaceChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_building)
+        {
+            ShowPlace();
+        }
+    }
+
+    private void OnPlaceSongChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_building && PlaceList.SelectedItem is NumberItem place && PlaceSongList.SelectedItem is NumberItem song)
+        {
+            SetPlace(place.Number, song.Number);
+        }
+    }
+
+    private void OnPlaceOriginal(object sender, RoutedEventArgs e)
+    {
+        if (PlaceList.SelectedItem is NumberItem place)
+        {
+            SetPlace(place.Number, null);
+        }
+    }
+
+    private void SetPlace(int place, int? song)
+    {
+        if (_session is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _session.SetMusicPlace(place, song);
+        }
+        catch (Exception ex) when (Ui.IsExpectedError(ex))
+        {
+            Ui.ShowError(Owner, ex.Message);
+        }
+
+        FillPlaces(place);
+        ActionText.Text = song is null || song == place
+            ? L.F("\"{0}\" plays its own song again.", L.T(MusicPlaces.PlaceName(place)))
+            : L.F("\"{0}\" now plays song {1:D2}. Build the hack ROM to hear it.", L.T(MusicPlaces.PlaceName(place)), song);
     }
 
     private void FillSongList(int selectIndex)
@@ -427,7 +523,9 @@ public partial class MusicTab : UserControl
 
         int selected = SongList.SelectedIndex;
         _songs = _session.LoadSongs();
+        _loops = _session.SongLoops();
         FillSongList(selected);
+        FillPlaces(PlaceList.SelectedIndex < 0 ? 0 : PlaceList.SelectedIndex);
     }
 
     private void Play(int program, SequenceChannel channel)

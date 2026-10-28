@@ -50,6 +50,12 @@ public sealed record GameModuleCondition(byte Class, byte Vehicle, byte Test, bo
     /// <summary>Weather and view of the mission (fog colour, sky, view distance, fog range, snow/rain), or null for none.</summary>
     public GameModuleWeather? Weather { get; init; }
 
+    /// <summary>The mission's own songs (<see cref="Audio.MusicPlaces"/>: kind → song), or null for none.</summary>
+    public IReadOnlyDictionary<Audio.MissionMusicKind, int>? Music { get; init; }
+
+    /// <summary>True if the entry has songs of its own.</summary>
+    public bool HasMusic => Music is { Count: > 0 };
+
     /// <summary>True if the entry has conditions for the points (otherwise the game's own condition counts).</summary>
     public bool HasConditions => CrashGivesZero || CrashTimePoints || MinimumAltitude is not null || MinimumDistance is not null || Required.Any(r => r != 0);
 
@@ -170,6 +176,9 @@ public sealed record GameModuleOptions(bool DebugOutput, bool StartupInfo = fals
     /// <summary>The raised object limits (<see cref="Missions.ObjectLimits.Raised"/>), or null for the game's lists.</summary>
     public IReadOnlyDictionary<Missions.MissionObjectKind, int>? ObjectLimits { get; init; }
 
+    /// <summary>The places that play another song (<see cref="Audio.MusicPlaces"/>: place → song), for the lower data area.</summary>
+    public IReadOnlyDictionary<int, int> MusicPlaces { get; init; } = new Dictionary<int, int>();
+
     /// <summary>The class table (medal limits per vehicle and class, <see cref="Classes.ClassLimits"/>), or null for the game's limits.</summary>
     public byte[]? ClassTable { get; init; }
 
@@ -286,6 +295,12 @@ public static class GameModule
 
     /// <summary>The calls of hudDrawFuel (in hudDrawRocketPack and hudDrawGyrocopter), as RAM addresses.</summary>
     private static readonly uint[] HudFuelCalls = [0x80318860, 0x8031A1B4];
+
+    /// <summary>The two calls of uvaSeqNew (0x802046E0) in sndSetMusicState: playing a song, resuming after the pause menu.</summary>
+    public static readonly int[] MusicStartCallRomOffsets = [0xC6F04, 0xC6F78];
+
+    /// <summary>"jal uvaSeqNew".</summary>
+    public const uint UvaSeqNewCall = 0x0C0811B8;
 
     /// <summary>"addiu t9, zero, 1; sb t9, 0xA1(t2)" (hard end reached) in the flight update of game.c (0x802EDAD4).</summary>
     public const int HardEndRomOffset = 0x75004;
@@ -650,6 +665,14 @@ public static class GameModule
         patches.AddRange(HighDataArea.Patches());
         patches.AddRange(FlightPhotos.Patches());
         patches.AddRange(HighDataArea.ObjectListPatches(options.ObjectLimits ?? new Dictionary<Missions.MissionObjectKind, int>()));
+
+        // Music places (Audio.MusicPlaces): the songs sndSetMusicState starts (uvaSeqNew) go through the module, which plays
+        // the mission's or the Music tab's song for the place (in every hack).
+        foreach (int call in MusicStartCallRomOffsets)
+        {
+            patches.Add(new WordPatch($"music places, uvaSeqNew call of sndSetMusicState at 0x{call:X}", call,
+                [UvaSeqNewCall], [CodeArea.Jal(GameModuleImage.SeqNewAddress)]));
+        }
 
         // The developers' messages: _uvDebugPrintf jumps to the gate (which returns while the module is not loaded).
         if (options.DebugOutput && options.GameMessages)

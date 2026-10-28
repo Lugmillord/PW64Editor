@@ -440,6 +440,35 @@ public sealed partial class EditorSession
         return songs;
     }
 
+    /// <summary>Per song: true if it loops, as it is in the project (imported or original; instrument changes keep the loop).</summary>
+    public IReadOnlyList<bool> SongLoops() =>
+        [.. Enumerable.Range(0, OriginalSequences.Sequences.Count).Select(i => CompactSequence.Parse(SongBase(i)).LoopEnds.Count > 0)];
+
+    /// <summary>Per song: true if the original song loops (what its place expects).</summary>
+    public IReadOnlyList<bool> OriginalSongLoops() =>
+        [.. OriginalSequences.Sequences.Select(s => CompactSequence.Parse(s).LoopEnds.Count > 0)];
+
+    /// <summary>Sets the song a place of the game plays (null or its own song: the original).</summary>
+    /// <exception cref="ProjectException">The place or the song does not exist.</exception>
+    public void SetMusicPlace(int place, int? song)
+    {
+        if (place is < 0 or >= MusicPlaces.Count || song is < 0 or >= MusicPlaces.Count)
+        {
+            throw new ProjectException(CoreText.F("Song {0} at place {1} does not exist.", song ?? place, place));
+        }
+
+        if (song is null || song == place)
+        {
+            Project.Settings.MusicPlaces.Remove(place);
+        }
+        else
+        {
+            Project.Settings.MusicPlaces[place] = song.Value;
+        }
+
+        Project.Save();
+    }
+
     /// <summary>
     /// Largest size of a song: the longest original song. The game reserves a buffer of exactly
     /// this size in its audio memory when it starts; larger songs would need more of that memory.

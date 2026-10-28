@@ -569,6 +569,7 @@ public partial class MissionsTab : UserControl
             StartFuelBox.IsEnabled = !draft.Settings.UnlimitedFuel;
             UnlimitedFuelBox.IsChecked = draft.Settings.UnlimitedFuel;
             HideDemoBox.IsChecked = draft.Settings.HideDemo;
+            ShowMusic(draft);
             ShowWeather(draft);
             ShowResults(draft);
         }

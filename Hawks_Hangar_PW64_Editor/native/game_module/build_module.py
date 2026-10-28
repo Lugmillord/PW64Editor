@@ -313,6 +313,7 @@ def main():
         f'    public const uint RadarFlameAddress = 0x{symbols["module_radar_flame"]:08X};',
         f'    public const uint ExamplesPrepareAddress = 0x{symbols["module_examples_prepare"]:08X};',
         f'    public const uint SnapInitAddress = 0x{symbols["module_snap_init"]:08X};',
+        f'    public const uint SeqNewAddress = 0x{symbols["module_seq_new"]:08X};',
         f'    public const uint MapPhotosAddress = 0x{symbols["module_map_photos"]:08X};',
         f'    public const uint MapTestAddress = 0x{symbols["module_map_test"]:08X};',
         f'    public const uint MapPauseAddress = 0x{symbols["module_map_pause"]:08X};',

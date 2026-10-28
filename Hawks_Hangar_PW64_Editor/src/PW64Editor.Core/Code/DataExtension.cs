@@ -15,6 +15,7 @@ namespace PW64Editor.Core.Code;
 /// +0x0004 u32 number of missions in the mission list (+0x80)
 /// +0x0008 u8[8] Birdman missions with points: per stage a bit per test (bit t = test t)
 /// +0x0010 u8[7][8] photo missions ("Shutter Bug"): per vehicle and class a bit per test
+/// +0x0048 u8[32] the song of each place of the game (<see cref="Audio.MusicPlaces"/>: song + 1, 0 = its own)
 /// +0x0080 u8[128] the mission list: the user file number of each mission, in the order taskInit loads them
 ///         (sTaskUserFileIdxLookup of task.c)
 /// +0x0100 the result tables ([7 vehicles][8 classes][5 tests], <see cref="Missions.ResultTables"/>), when the game patch
@@ -60,6 +61,9 @@ public static class DataExtension
     /// <summary>Offset of the photo missions.</summary>
     public const int PhotoOffset = 0x10;
 
+    /// <summary>Offset of the song table of the places (<see cref="Audio.MusicPlaces"/>).</summary>
+    public const int MusicOffset = 0x48;
+
     /// <summary>Offset of the mission list.</summary>
     public const int MissionListOffset = 0x80;
 
@@ -102,9 +106,10 @@ public static class DataExtension
     /// <param name="photoMissions">The photo missions.</param>
     /// <param name="resultTables">The result tables, or null.</param>
     /// <param name="classTable">The class table, or null.</param>
+    /// <param name="musicPlaces">The places that play another song (place → song), or null.</param>
     /// <exception cref="InvalidDataException">Too many missions, or a table does not fit.</exception>
     public static byte[] Create(IReadOnlyList<int> missionFiles, IEnumerable<TestId> birdmanPoints, IEnumerable<TestId> photoMissions,
-        byte[]? resultTables = null, byte[]? classTable = null)
+        byte[]? resultTables = null, byte[]? classTable = null, IReadOnlyDictionary<int, int>? musicPlaces = null)
     {
         if (missionFiles.Count > MaxMissions)
         {
@@ -151,6 +156,11 @@ public static class DataExtension
         for (int i = 0; i < missionFiles.Count; i++)
         {
             image[MissionListOffset + i] = (byte)missionFiles[i];
+        }
+
+        if (musicPlaces is not null)
+        {
+            Audio.MusicPlaces.CreateTable(musicPlaces).CopyTo(image, MusicOffset);
         }
 
         resultTables?.CopyTo(image, (int)(ResultTablesAddress - Start));
@@ -222,6 +232,10 @@ public static class DataExtension
 
         return result;
     }
+
+    /// <summary>The places of an image that play another song.</summary>
+    public static Dictionary<int, int> ReadMusicPlaces(ReadOnlySpan<byte> image) =>
+        IsImage(image) ? Audio.MusicPlaces.ReadTable(image.Slice(MusicOffset, Audio.MusicPlaces.TableSize)) : [];
 
     /// <summary>A table of the image at its address, or null if the image does not reach it.</summary>
     public static byte[]? ReadTable(ReadOnlySpan<byte> image, uint address, int size)

@@ -324,6 +324,16 @@
                         </StackPanel>
                         </Expander>
 
+                        <!-- The mission's own songs for its flight and jingles (MissionsTab.Music.cs). -->
+                        <Expander x:Name="MusicPanel" Style="{StaticResource Section}">
+                            <Expander.Header><TextBlock Text="Music" Style="{StaticResource SectionHeader}" /></Expander.Header>
+                            <StackPanel Margin="18,0,0,0">
+                                <TextBlock Style="{StaticResource Note}"
+                                           Text="Songs of this mission's own. &quot;Default&quot; plays the song of the place in the game, as set in the Music tab." />
+                                <StackPanel x:Name="MusicSongsPanel" Margin="0,4,0,0" />
+                            </StackPanel>
+                        </Expander>
+
                         <!-- Time of day, weather, snow and rain, fog, view distance and wind; filled in code. -->
                         <Expander x:Name="WeatherPanel" Style="{StaticResource Section}">
                             <Expander.Header><TextBlock Text="Weather and view" Style="{StaticResource SectionHeader}" /></Expander.Header>

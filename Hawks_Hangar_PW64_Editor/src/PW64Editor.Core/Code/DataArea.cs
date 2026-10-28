@@ -31,7 +31,9 @@ namespace PW64Editor.Core.Code;
 /// +0x84 u8[3] fog colour r, g, b          +0x88 f32 view distance (game units)
 /// +0x8C s32 fog multiplier, +0x90 s32 fog offset (gSPFogPosition: 128000 / (max − min), (500 − min) × 256 / (max − min))
 /// +0x94 f32 fall speed (units per second) +0x98 u16 number of flakes/drops
-/// +0x9A ... reserved (0)
+/// +0x9C u8[4] the mission's songs (<see cref="Audio.MusicPlaces"/>, by MissionMusicKind: flight, crash, good landing,
+///           missed landing; song + 1, 0 = the song of the place)
+/// +0xA0 ... reserved (0)
 /// </code>
 /// <para>Header: +0x00 'HHMD', +0x04 version, +0x08 missions, +0x0C entry size, +0x10 size of the result tables
 /// (0 = none), +0x14 u16 the Birdman missions with points (bit class × 4 + test), +0x18 RAM address of the class table
@@ -148,7 +150,7 @@ public static class DataArea
     {
         IReadOnlyList<int> files = options.MissionFiles ?? DataExtension.GameMissionFiles;
         byte[] extension = DataExtension.Create(files, options.BirdmanPointMissions, options.PhotoMissions ?? DataExtension.GamePhotoMissions,
-            options.ResultTables, options.ClassTable);
+            options.ResultTables, options.ClassTable, options.MusicPlaces);
         byte[] main = CreateImage(options.Conditions, options.UnlockTable, options.EnvironmentTable,
             options.ResultTables?.Length ?? 0, options.ClassTable is not null, extension.Length);
 
@@ -305,6 +307,7 @@ public static class DataArea
         BinaryPrimitives.WriteSingleBigEndian(entry[0x0C..], c.MinimumAltitude ?? 0);
         BinaryPrimitives.WriteSingleBigEndian(entry[0x10..], c.MinimumDistance ?? 0);
         entry[0x14] = c.HardEndMusic;
+        Audio.MusicPlaces.MissionBytes(c.Music).CopyTo(entry[0x9C..]);
     }
 
     private static bool IsImage(ReadOnlySpan<byte> image) => image.Length >= HeaderSize && BinaryPrimitives.ReadUInt32BigEndian(image) == Magic;
@@ -471,6 +474,7 @@ public static class DataArea
             PadRadius = (landing & 1) != 0 ? BinaryPrimitives.ReadSingleBigEndian(entry[0x6C..]) : null,
             VehicleLimits = limits,
             Weather = full ? ReadWeather(entry) : null,
+            Music = entry.Length >= 0xA0 ? Audio.MusicPlaces.ReadMissionBytes(entry.Slice(0x9C, 4)) : null,
         };
     }
 

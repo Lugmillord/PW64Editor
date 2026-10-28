@@ -890,6 +890,13 @@ public static class ProjectImporter
             .ToList();
         List<MissionComm> comms = [.. missions.Select(m => m.Comm)];
 
+        // The songs of the game's places (lower data area, Music tab).
+        if (images?.Extension is { } musicImage && DataExtension.ReadMusicPlaces(musicImage) is { Count: > 0 } places)
+        {
+            settings.MusicPlaces = places;
+            notes.Add(Info(CoreText.F("{0} places of the game play another song (Music tab).", places.Count)));
+        }
+
         IReadOnlyList<GameModuleCondition> entries = [];
         if (module is not null)
         {
@@ -952,6 +959,7 @@ public static class ProjectImporter
                     }
                 }
                 mission.Weather = ToWeather(entry.Weather, comm);
+                mission.Music = entry.Music is { Count: > 0 } music ? new Dictionary<Audio.MissionMusicKind, int>(music) : null;
             }
 
             if (cleanTables is not null && hackTables is not null)

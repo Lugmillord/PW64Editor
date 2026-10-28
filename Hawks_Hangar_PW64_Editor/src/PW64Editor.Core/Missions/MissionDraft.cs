@@ -382,6 +382,29 @@ public sealed class MissionDraft
         Touch();
     }
 
+    /// <summary>The mission's own song for a kind of its music, or null for the song of its place (Music tab).</summary>
+    public int? MusicOf(Audio.MissionMusicKind kind) => Settings.Music is { } music && music.TryGetValue(kind, out int song) ? song : null;
+
+    /// <summary>Sets the mission's own song for a kind of its music (null: the song of its place).</summary>
+    public void SetMusic(Audio.MissionMusicKind kind, int? song)
+    {
+        if (song is { } s && s is >= 0 and < Audio.MusicPlaces.Count && Audio.MusicPlaces.Place(Vehicle, kind) is not null)
+        {
+            (Settings.Music ??= [])[kind] = s;
+        }
+        else
+        {
+            Settings.Music?.Remove(kind);
+        }
+
+        if (Settings.Music is { Count: 0 })
+        {
+            Settings.Music = null;
+        }
+
+        Touch();
+    }
+
     /// <summary>Changes the points of a ring type (0-3; 3 is the goal ring).</summary>
     public void SetRingPoints(int type, int points)
     {
@@ -880,6 +903,8 @@ public sealed class MissionDraft
             && a.Landing.Count == other.Landing.Count && a.Landing.All(p => other.Landing.TryGetValue(p.Key, out float v) && v == p.Value)
             && a.BirdmanPoints == other.BirdmanPoints
             && a.PhotoMission == other.PhotoMission
+            && (a.Music ?? []).Count == (other.Music ?? []).Count
+            && (a.Music ?? []).All(p => other.Music is not null && other.Music.TryGetValue(p.Key, out int song) && song == p.Value)
             && (a.PhotoSubjects is null ? other.PhotoSubjects is null
                 : other.PhotoSubjects is not null && a.PhotoSubjects.Count == other.PhotoSubjects.Count
                   && a.PhotoSubjects.Zip(other.PhotoSubjects).All(p => p.First.SameAs(p.Second)))

@@ -120,6 +120,7 @@ public static class ProjectBuilder
                         PhotoSubjects = OwnPhotoSubjects(project, missionIds),
                         UnlockTable = Classes.MenuUnlocks.Table(project.Settings.Unlocks, project.Settings.Features.AllFieldsOpen),
                         EnvironmentTable = addedEnvironments ? Missions.WeatherEnvironments.Table() : null,
+                        MusicPlaces = project.Settings.MusicPlaces,
                     },
                     GameModuleInfo = ModuleInfo(project),
                 });
@@ -535,8 +536,10 @@ public static class ProjectBuilder
                 PadRadius = padRadius,
                 VehicleLimits = limits,
                 Weather = Missions.WeatherCatalog.ToModule(settings?.Weather, comm),
+                Music = settings?.Music is { Count: > 0 } songs ? songs : null,
             };
-            if (entry.HasConditions || fuel || hardEnd != HardEndScoring.Retail || entry.HasLandingValues || entry.Weather is not null)
+            if (entry.HasConditions || fuel || hardEnd != HardEndScoring.Retail || entry.HasLandingValues || entry.Weather is not null
+                || entry.HasMusic)
             {
                 result.Add(entry);
             }

@@ -56,6 +56,12 @@ public sealed class ProjectSettings
     /// <summary>Changed instruments and silenced channels of songs (only songs with changes).</summary>
     public List<Audio.SongSettings> Music { get; set; } = [];
 
+    /// <summary>
+    /// Places of the game that play another song (<see cref="Audio.MusicPlaces"/>): place (music number) → song number;
+    /// places not listed play their own song.
+    /// </summary>
+    public Dictionary<int, int> MusicPlaces { get; set; } = [];
+
     /// <summary>Changed result sheets and generated point texts of missions (only missions with changes).</summary>
     public List<Missions.MissionSettings> Missions { get; set; } = [];
 
