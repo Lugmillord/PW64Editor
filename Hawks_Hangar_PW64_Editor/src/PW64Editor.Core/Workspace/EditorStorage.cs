@@ -12,6 +12,9 @@ public sealed class EditorSettings
 
     /// <summary>Language of the editor's controls ("en", "de", "fr", "ja"); English until the user chooses another.</summary>
     public string Language { get; set; } = "en";
+
+    /// <summary>The mouse and speed settings of the Map tab.</summary>
+    public Map.Rendering.MapMouseSettings MapMouse { get; set; } = new();
 }
 
 /// <summary>

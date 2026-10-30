@@ -1,0 +1,260 @@
+<UserControl x:Class="PW64Editor.App.Views.MapTab"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Focusable="True">
+    <UserControl.Resources>
+        <Style x:Key="BarTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,0,0,4" />
+        </Style>
+        <Style x:Key="SubTitle" TargetType="TextBlock">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,0,0,2" />
+        </Style>
+        <Style x:Key="SmallLabel" TargetType="TextBlock">
+            <Setter Property="VerticalAlignment" Value="Center" />
+            <Setter Property="Margin" Value="0,0,6,0" />
+        </Style>
+        <Style x:Key="Note" TargetType="TextBlock">
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+        </Style>
+        <!-- A section of the bottom bar: folds away to the side; its title stands upright at its left edge. -->
+        <Style x:Key="BarSection" TargetType="Expander">
+            <Setter Property="ExpandDirection" Value="Right" />
+            <Setter Property="IsExpanded" Value="True" />
+            <Setter Property="VerticalAlignment" Value="Stretch" />
+            <Setter Property="BorderBrush" Value="#C8CDD3" />
+            <Setter Property="BorderThickness" Value="0,0,1,0" />
+            <Setter Property="Padding" Value="6,6,10,6" />
+        </Style>
+        <Style x:Key="SectionHeader" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,6,0,0" />
+            <Setter Property="LayoutTransform">
+                <Setter.Value>
+                    <RotateTransform Angle="-90" />
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" MinHeight="200" />
+            <RowDefinition Height="5" />
+            <RowDefinition Height="250" MinHeight="40" />
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="300" MinWidth="200" />
+                <ColumnDefinition Width="5" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Left: the object list and the details of the chosen object. -->
+            <Grid Grid.Column="0" Margin="6,6,0,0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="1*" MinHeight="80" />
+                    <RowDefinition Height="5" />
+                    <RowDefinition Height="2*" MinHeight="80" />
+                </Grid.RowDefinitions>
+                <StackPanel Grid.Row="0" Margin="0,0,0,4">
+                    <DockPanel Margin="0,0,0,4">
+                        <TextBlock DockPanel.Dock="Left" Text="Objects" Style="{StaticResource BarTitle}" VerticalAlignment="Center" />
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                            <Button x:Name="AddObjectButton" Content="Add" MinWidth="64" Margin="0,0,4,0" IsEnabled="False" />
+                            <Button x:Name="RemoveObjectButton" Content="Remove" MinWidth="64" IsEnabled="False" />
+                        </StackPanel>
+                    </DockPanel>
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Left" Text="Search" Style="{StaticResource SmallLabel}" />
+                        <TextBox x:Name="ObjectSearchBox" TextChanged="OnObjectSearchChanged"
+                                 ToolTip="Shows only the objects whose name or group contains the text" />
+                    </DockPanel>
+                </StackPanel>
+                <ListBox x:Name="ObjectList" Grid.Row="1" SelectionChanged="OnObjectListChanged">
+                    <ListBox.GroupStyle>
+                        <GroupStyle>
+                            <GroupStyle.HeaderTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Margin="0,6,0,2" />
+                                </DataTemplate>
+                            </GroupStyle.HeaderTemplate>
+                        </GroupStyle>
+                    </ListBox.GroupStyle>
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding Name}" Margin="8,0,0,0" />
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+                <GridSplitter Grid.Row="2" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="#E0E3E7" />
+                <DockPanel Grid.Row="3">
+                    <StackPanel DockPanel.Dock="Top" Margin="0,4,0,4">
+                        <TextBlock Text="Object details" Style="{StaticResource BarTitle}" />
+                        <ComboBox x:Name="DetailTypeBox" Margin="0,0,0,4" SelectionChanged="OnDetailTypeChanged" />
+                        <ComboBox x:Name="DetailObjectBox" SelectionChanged="OnDetailObjectChanged" />
+                    </StackPanel>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel>
+                            <TextBlock x:Name="DetailNote" Style="{StaticResource Note}" Margin="0,0,0,6" />
+                            <Grid x:Name="DetailGrid" />
+                        </StackPanel>
+                    </ScrollViewer>
+                </DockPanel>
+            </Grid>
+
+            <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="#E0E3E7" />
+
+            <!-- Right: view and load settings above the map. -->
+            <DockPanel Grid.Column="2" Margin="0,6,6,0">
+                <WrapPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,16,4">
+                        <TextBlock Text="View" Style="{StaticResource SubTitle}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                        <ComboBox x:Name="ViewModeBox" Width="150" SelectionChanged="OnViewChanged" />
+                        <CheckBox x:Name="TilesBox" Content="Show tiles" Margin="12,0,0,0" VerticalAlignment="Center" Click="OnViewChanged" />
+                        <CheckBox x:Name="InvisibleBox" Content="Invisible objects" IsChecked="True" Margin="12,0,0,0" VerticalAlignment="Center" Click="OnViewChanged"
+                                  ToolTip="Trigger zones, warp points, sound zones and the island's animated decoration" />
+                        <CheckBox x:Name="BilinearBox" Content="Bilinear filtering" IsChecked="True" Margin="12,0,0,0" VerticalAlignment="Center" Click="OnViewChanged" />
+                        <CheckBox x:Name="VertexColorBox" Content="Vertex colours" IsChecked="True" Margin="12,0,0,0" VerticalAlignment="Center" Click="OnViewChanged"
+                                  ToolTip="The colours and the shading the game stores per vertex (Gouraud shading)" />
+                        <CheckBox x:Name="LightingBox" Content="Lighting" IsChecked="True" Margin="12,0,0,0" VerticalAlignment="Center" Click="OnViewChanged"
+                                  ToolTip="The light on lit models (vehicles, pilots and some objects)" />
+                        <CheckBox x:Name="AntiAliasBox" Content="Anti-aliasing" Margin="12,0,0,0" VerticalAlignment="Center" Click="OnViewChanged"
+                                  ToolTip="Smooth edges: the map is drawn at twice the size (slower)" />
+                        <Button x:Name="MapInfoButton" Content="Map info…" Margin="12,0,0,0" Padding="8,1,8,1" Click="OnMapInfo" />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,0,4">
+                        <TextBlock Text="Load" Style="{StaticResource SubTitle}" VerticalAlignment="Center" Margin="0,0,8,0" />
+                        <ComboBox x:Name="IslandBox" Width="230" SelectionChanged="OnIslandChanged" />
+                        <ComboBox x:Name="MissionBox" Width="340" Margin="6,0,0,0" SelectionChanged="OnMissionChanged" />
+                    </StackPanel>
+                </WrapPanel>
+                <Border x:Name="MapHost" Background="#20252B" ClipToBounds="True" SizeChanged="OnMapSizeChanged"
+                        MouseDown="OnMapMouseDown" MouseMove="OnMapMouseMove" MouseUp="OnMapMouseUp" MouseWheel="OnMapMouseWheel">
+                    <Grid>
+                        <Image x:Name="MapImage" Stretch="Fill" />
+                        <TextBlock x:Name="MapMessage" HorizontalAlignment="Center" VerticalAlignment="Center" Foreground="White" FontSize="14" />
+                        <Border HorizontalAlignment="Left" VerticalAlignment="Bottom" Background="#A0000000" Padding="6,2,6,2" Margin="4">
+                            <TextBlock x:Name="MapStatus" Foreground="White" />
+                        </Border>
+                    </Grid>
+                </Border>
+            </DockPanel>
+        </Grid>
+
+        <GridSplitter Grid.Row="1" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="#E0E3E7" ResizeDirection="Rows" />
+
+        <!-- The bar at the bottom: mouse, camera, object transform. Each section folds away to the side. -->
+        <Border Grid.Row="2" BorderBrush="#C8CDD3" BorderThickness="0,1,0,0" Background="#F4F5F7">
+            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto">
+                <StackPanel Orientation="Horizontal">
+                    <Expander x:Name="MouseSection" Style="{StaticResource BarSection}">
+                        <Expander.Header>
+                            <TextBlock Text="Mouse" Style="{StaticResource SectionHeader}" />
+                        </Expander.Header>
+                        <StackPanel Width="200">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="Mode" Style="{StaticResource SmallLabel}" />
+                                <ComboBox x:Name="MouseModeBox" Grid.Row="0" Grid.Column="1" Margin="0,1,0,1" SelectionChanged="OnMouseSettingChanged" />
+                                <TextBlock Grid.Row="1" Text="Left click" Style="{StaticResource SmallLabel}" />
+                                <ComboBox x:Name="LeftClickBox" Grid.Row="1" Grid.Column="1" Margin="0,1,0,1" SelectionChanged="OnMouseSettingChanged" />
+                                <TextBlock Grid.Row="2" Text="Middle click" Style="{StaticResource SmallLabel}" />
+                                <ComboBox x:Name="MiddleClickBox" Grid.Row="2" Grid.Column="1" Margin="0,1,0,1" SelectionChanged="OnMouseSettingChanged" />
+                                <TextBlock Grid.Row="3" Text="Right click" Style="{StaticResource SmallLabel}" />
+                                <ComboBox x:Name="RightClickBox" Grid.Row="3" Grid.Column="1" Margin="0,1,0,1" SelectionChanged="OnMouseSettingChanged" />
+                                <TextBlock Grid.Row="4" Text="Wheel" Style="{StaticResource SmallLabel}" />
+                                <ComboBox x:Name="WheelBox" Grid.Row="4" Grid.Column="1" Margin="0,1,0,1" SelectionChanged="OnMouseSettingChanged" />
+                            </Grid>
+                            <TextBlock Style="{StaticResource Note}" Margin="0,6,0,0"
+                                       Text="Keys (after a click into the map): W A S D move the view (orbit: around the object), Q / E switch the handles between moving and rotating." />
+                        </StackPanel>
+                    </Expander>
+
+                    <Expander x:Name="CameraSection" Style="{StaticResource BarSection}">
+                        <Expander.Header>
+                            <TextBlock Text="Camera" Style="{StaticResource SectionHeader}" />
+                        </Expander.Header>
+                        <StackPanel Orientation="Horizontal">
+                            <StackPanel Width="190" Margin="0,0,12,0">
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                    <RadioButton x:Name="PanningButton" Content="Panning" GroupName="CameraMode" IsChecked="True" Margin="0,0,10,0" Click="OnCameraModeChanged" />
+                                    <RadioButton x:Name="OrbitButton" Content="Orbit" GroupName="CameraMode" Click="OnCameraModeChanged"
+                                                 ToolTip="Turning goes around the chosen object; choosing an object jumps to it" />
+                                </StackPanel>
+                                <WrapPanel x:Name="CameraButtonPanel" Margin="0,0,0,2" />
+                                <TextBlock Text="Show" Style="{StaticResource SubTitle}" Margin="0,2,0,2" />
+                                <ComboBox x:Name="LayerBox" SelectionChanged="OnViewChanged" />
+                                <TextBlock x:Name="OpacityLabel" Text="Transparency of the map" Margin="0,4,0,0" />
+                                <Slider x:Name="OpacitySlider" Minimum="0" Maximum="100" Value="50" ValueChanged="OnOpacityChanged" />
+                                <TextBlock Text="Axis views" Style="{StaticResource SubTitle}" Margin="0,4,0,2" />
+                                <WrapPanel x:Name="AxisViewPanel" />
+                                <TextBlock Text="Speed" Style="{StaticResource SubTitle}" Margin="0,4,0,0" />
+                                <Slider x:Name="CameraSpeedSlider" Minimum="0.1" Maximum="5" Value="1" ValueChanged="OnSpeedChanged" />
+                            </StackPanel>
+                            <StackPanel Margin="0,0,12,0">
+                                <TextBlock Text="Panning" Style="{StaticResource SubTitle}" />
+                                <Grid x:Name="CameraPanGrid" />
+                            </StackPanel>
+                            <StackPanel x:Name="CameraPositionPanel" Margin="0,18,12,0" />
+                            <StackPanel Margin="0,0,12,0">
+                                <TextBlock Text="Rotation" Style="{StaticResource SubTitle}" />
+                                <Grid x:Name="CameraRotateGrid" />
+                            </StackPanel>
+                            <StackPanel x:Name="CameraRotationPanel" Margin="0,18,0,0" />
+                        </StackPanel>
+                    </Expander>
+
+                    <Expander x:Name="TransformSection" Style="{StaticResource BarSection}" BorderThickness="0">
+                        <Expander.Header>
+                            <TextBlock Text="Object Transform" Style="{StaticResource SectionHeader}" />
+                        </Expander.Header>
+                        <StackPanel>
+                            <WrapPanel Margin="0,0,0,4">
+                                <RadioButton x:Name="MoveModeButton" Content="Move (Q)" GroupName="GizmoMode" IsChecked="True" Margin="0,0,10,0" Click="OnGizmoModeChanged" />
+                                <RadioButton x:Name="RotateModeButton" Content="Rotate (E)" GroupName="GizmoMode" Margin="0,0,20,0" Click="OnGizmoModeChanged" />
+                                <RadioButton x:Name="WorldAxesButton" Content="World axes" GroupName="GizmoAxes" IsChecked="True" Margin="0,0,10,0" Click="OnGizmoModeChanged"
+                                             ToolTip="The handles point along north, east and up" />
+                                <RadioButton x:Name="ObjectAxesButton" Content="Object axes" GroupName="GizmoAxes" Margin="0,0,20,0" Click="OnGizmoModeChanged"
+                                             ToolTip="The handles turn with the object" />
+                                <Button x:Name="GroundButton" Content="Place on the ground" IsEnabled="False" />
+                            </WrapPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <StackPanel Margin="0,0,12,0">
+                                    <TextBlock Text="Movement" Style="{StaticResource SubTitle}" />
+                                    <Grid x:Name="ObjectMoveGrid" />
+                                </StackPanel>
+                                <StackPanel x:Name="ObjectPositionPanel" Margin="0,18,12,0" />
+                                <StackPanel Margin="0,0,12,0">
+                                    <TextBlock Text="Rotation" Style="{StaticResource SubTitle}" />
+                                    <Grid x:Name="ObjectRotateGrid" />
+                                </StackPanel>
+                                <StackPanel x:Name="ObjectRotationPanel" Margin="0,18,12,0" />
+                                <StackPanel Width="120">
+                                    <TextBlock Text="Speed" Style="{StaticResource SubTitle}" />
+                                    <Slider x:Name="ObjectSpeedSlider" Minimum="0.1" Maximum="5" Value="1" ValueChanged="OnSpeedChanged" />
+                                </StackPanel>
+                            </StackPanel>
+                        </StackPanel>
+                    </Expander>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+    </Grid>
+</UserControl>

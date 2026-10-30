@@ -38,8 +38,8 @@ public partial class PhotoScoringWindow : Window
         ];
         foreach ((string heading, string text) in topics)
         {
-            Content.Children.Add(new TextBlock { Text = heading, FontWeight = FontWeights.SemiBold, FontSize = 14, Margin = new Thickness(0, 10, 0, 4) });
-            Content.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap });
+            SectionsPanel.Children.Add(new TextBlock { Text = heading, FontWeight = FontWeights.SemiBold, FontSize = 14, Margin = new Thickness(0, 10, 0, 4) });
+            SectionsPanel.Children.Add(new TextBlock { Text = text, TextWrapping = TextWrapping.Wrap });
         }
     }
 

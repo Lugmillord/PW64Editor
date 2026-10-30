@@ -48,6 +48,7 @@
             </MenuItem>
             <!-- Filled in code: one entry per language, in its own name. -->
             <MenuItem x:Name="LanguageMenu" Header="_Language" />
+            <MenuItem Header="_Credits" Click="OnCredits" />
         </Menu>
 
         <StatusBar DockPanel.Dock="Bottom" Padding="6,2">
@@ -98,7 +99,7 @@
                 <views:MissionsTab x:Name="MissionEditor" UnsavedChangesChanged="OnUnsavedChangesChanged" MissionListChangeRequested="OnMissionListChange" />
             </TabItem>
             <TabItem Header="Map">
-                <TextBlock Style="{StaticResource PlaceholderText}" Text="Editing maps will be added here in a later version." />
+                <views:MapTab x:Name="MapEditor" />
             </TabItem>
             <TabItem Header="Model">
                 <TextBlock Style="{StaticResource PlaceholderText}" Text="Editing models will be added here in a later version." />

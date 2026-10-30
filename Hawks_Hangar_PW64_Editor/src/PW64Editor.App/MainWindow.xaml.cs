@@ -240,6 +240,24 @@ public partial class MainWindow : Window
     /// <summary>Closing the window ends the program; OnClosing asks about unsaved changes.</summary>
     private void OnExit(object sender, RoutedEventArgs e) => Close();
 
+    /// <summary>Who made the editor, under which license, and whose work it builds on.</summary>
+    private void OnCredits(object sender, RoutedEventArgs e)
+    {
+        string text = string.Join(Environment.NewLine,
+            "Hawk's Hangar",
+            L.T("An editor for Pilotwings 64 (USA)."),
+            L.T("Made by Lugmillord."),
+            string.Empty,
+            L.T("License: GNU General Public License, version 3 (GPL v3). The source code is at https://github.com/Lugmillord/PW64Editor."),
+            string.Empty,
+            L.T("Built on the work of others:"),
+            L.T("• Pilotwings64Decomp (https://github.com/gcsmith/Pilotwings64Decomp), MIT license: the game's file formats, names of models and tables of the game's code."),
+            L.T("• noclip.website (https://github.com/magcius/noclip.website), MIT license: the way the islands, models and textures are drawn."),
+            string.Empty,
+            L.T("The editor contains no data of the game: it reads everything from your own ROM. Only patches are shared, never ROMs."));
+        TextReportWindow.ShowReport(this, L.T("Credits"), text);
+    }
+
     /// <summary>
     /// Asks about unsaved changes when the window is closed (menu, red X, Alt+F4).
     /// </summary>
@@ -777,6 +795,7 @@ public partial class MainWindow : Window
     {
         TextEditor.Load(_session);
         MissionEditor.Load(_session);
+        MapEditor.Load(_session);
         ClassEditor.Load(_session);
         MenuEditor.Load(_session);
         SaveEditor.Load(_session);

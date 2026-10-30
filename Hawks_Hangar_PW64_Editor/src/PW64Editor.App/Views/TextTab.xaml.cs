@@ -95,6 +95,11 @@ public partial class TextTab : UserControl, ITextEditorHost
     /// </summary>
     public void Load(EditorSession session)
     {
+        // Read again for the same project (after saving, or when a class changed its texts): the open groups and the
+        // chosen text stay as they were.
+        bool sameProject = ReferenceEquals(_session, session) && _view is not null;
+        HashSet<string> openGroups = sameProject ? OpenGroups() : [];
+        int? selectedIndex = sameProject ? SelectedRow?.Index : null;
         _session = session;
         GameTextLibrary library;
         GameTextLibrary original;
@@ -143,6 +148,10 @@ public partial class TextTab : UserControl, ITextEditorHost
         _view = view;
         TextGrid.ItemsSource = view;
         ShowDetails(null);
+        if (sameProject)
+        {
+            RestoreGroups(openGroups, selectedIndex);
+        }
 
         int changed = _rows.Count(r => r.DiffersFromOriginal);
         int custom = _rows.Count(r => r.IsCustom);
@@ -205,14 +214,9 @@ public partial class TextTab : UserControl, ITextEditorHost
         session.SaveTexts(_library, changes, added, removed);
         _removedRows.Clear();
 
-        // Reload, so sizes and "saved" states come from the file that was just written.
-        int? selected = (TextGrid.SelectedItem as TextRow)?.Index;
+        // Reload, so sizes and "saved" states come from the file that was just written (open groups and the chosen
+        // text stay).
         Load(session);
-        if (selected is { } index && _rows.FirstOrDefault(r => r.Index == index) is { } row)
-        {
-            TextGrid.SelectedItem = row;
-            TextGrid.ScrollIntoView(row);
-        }
 
         return changes.Count + added.Count + removed.Count;
     }
@@ -229,7 +233,7 @@ public partial class TextTab : UserControl, ITextEditorHost
             row.Markup = row.SavedMarkup;
         }
 
-        _view?.Refresh();
+        RefreshKeepingGroups();
 
         ShowDetails(TextGrid.SelectedItem as TextRow);
         UnsavedChangesChanged?.Invoke(this, EventArgs.Empty);
@@ -282,6 +286,95 @@ public partial class TextTab : UserControl, ITextEditorHost
         {
             new TextCodesWindow(_library.Font) { Owner = Window.GetWindow(this) }.ShowDialog();
         }
+    }
+
+    /// <summary>The open groups: "area" and "area/section".</summary>
+    private HashSet<string> OpenGroups()
+    {
+        var open = new HashSet<string>();
+        foreach (Expander expander in FindChildren<Expander>(TextGrid))
+        {
+            if (expander.IsExpanded && expander.DataContext is CollectionViewGroup group && GroupKey(group) is { } key)
+            {
+                open.Add(key);
+            }
+        }
+
+        return open;
+    }
+
+    /// <summary>"area" for an area group, "area/section" for a section group.</summary>
+    private string? GroupKey(CollectionViewGroup group)
+    {
+        if (_view?.Groups is not { } areas)
+        {
+            return null;
+        }
+
+        foreach (CollectionViewGroup area in areas.OfType<CollectionViewGroup>())
+        {
+            if (ReferenceEquals(area, group))
+            {
+                return area.Name?.ToString();
+            }
+
+            if (area.Items.Contains(group))
+            {
+                return $"{area.Name}/{group.Name}";
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Opens the given groups again once the list has built them (inner groups only exist when their outer group is
+    /// open, so this repeats), then chooses the text again.
+    /// </summary>
+    private void RestoreGroups(HashSet<string> open, int? selectedIndex)
+    {
+        Dispatcher.InvokeAsync(() =>
+        {
+            for (int pass = 0; pass < 3 && open.Count > 0; pass++)
+            {
+                bool changed = false;
+                foreach (Expander expander in FindChildren<Expander>(TextGrid).ToList())
+                {
+                    if (!expander.IsExpanded && expander.DataContext is CollectionViewGroup group && GroupKey(group) is { } key && open.Contains(key))
+                    {
+                        expander.IsExpanded = true;
+                        changed = true;
+                    }
+                }
+
+                if (!changed)
+                {
+                    break;
+                }
+
+                TextGrid.UpdateLayout();
+            }
+
+            if (selectedIndex is { } index && _rows.FirstOrDefault(r => r.Index == index) is { } row)
+            {
+                TextGrid.SelectedItem = row;
+                TextGrid.ScrollIntoView(row);
+            }
+        }, DispatcherPriority.Loaded);
+    }
+
+    /// <summary>Refreshes the list (sorting, filter, groups) and keeps the open groups and the chosen text.</summary>
+    private void RefreshKeepingGroups()
+    {
+        if (_view is null)
+        {
+            return;
+        }
+
+        HashSet<string> open = OpenGroups();
+        int? selected = SelectedRow?.Index;
+        _view.Refresh();
+        RestoreGroups(open, selected);
     }
 
     private void OnExpandAll(object sender, RoutedEventArgs e) => SetAllExpanded(true);
@@ -434,7 +527,7 @@ public partial class TextTab : UserControl, ITextEditorHost
             }
         }
 
-        _view?.Refresh();
+        RefreshKeepingGroups();
         ShowDetails(SelectedRow);
         if (wasUnsaved != HasUnsavedChanges)
         {
@@ -543,7 +636,7 @@ public partial class TextTab : UserControl, ITextEditorHost
         var row = new TextRow(text, string.Empty) { IsNew = true, Markup = markup };
         _rows.Add(row);
         _rowsByName[name] = row;
-        _view?.Refresh();
+        RefreshKeepingGroups();
         UnsavedChangesChanged?.Invoke(this, EventArgs.Empty);
         return row;
     }
@@ -570,7 +663,7 @@ public partial class TextTab : UserControl, ITextEditorHost
             _removedRows.Add(row);
         }
 
-        _view?.Refresh();
+        RefreshKeepingGroups();
         ShowDetails(null);
         UnsavedChangesChanged?.Invoke(this, EventArgs.Empty);
     }

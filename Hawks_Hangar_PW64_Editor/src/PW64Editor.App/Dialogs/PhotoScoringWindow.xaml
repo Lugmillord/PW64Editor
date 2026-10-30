@@ -11,7 +11,7 @@
         </StackPanel>
         <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
             <!-- Filled in code: a heading and a paragraph per topic. -->
-            <StackPanel x:Name="Content" />
+            <StackPanel x:Name="SectionsPanel" />
         </ScrollViewer>
     </DockPanel>
 </Window>
